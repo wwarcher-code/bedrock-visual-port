@@ -88,8 +88,7 @@ lighting off and compare with vanilla.
 What lights each pixel:
 
 - **Sun and moon:** direction from the time of day (and Bedrock's orbital offset); color and brightness
-  from the Bedrock lighting settings for the player's biome. No shadows until step 5, so a face's sky
-  light stands in for whether the sun reaches it.
+  from the Bedrock lighting settings for the player's biome. Shadows come from the shadow map below.
 - **Sky fill:** Bedrock's zenith sky color, scaled by sky light.
 - **Ambient, block light and emissive:** Bedrock's ambient floor, a warm torch color by block light, and
   the material buffer's emissive channel.
@@ -100,6 +99,18 @@ Bedrock's files give brightness curves but not how its renderer exposes them, so
 `TUNE` in `LightingState` are placeholders for the fidelity pass. The log shows `[lighting] first frame lit
 by the deferred lighting pass` once it runs; if the pass fails it logs `[lighting] deferred lighting failed`
 and falls back to vanilla terrain.
+
+## Shadows (step 5)
+
+Before the G-buffer pass, Sodium's solid and cutout terrain is drawn a third time, from the sun (the moon
+at night), into a 2048x2048 depth map covering 96 blocks around the camera. The lighting pass tests each
+pixel against it with 3x3 filtering; beyond the map, and near its edge, it fades back to the sky-light
+approximation. Cut-out blocks such as leaves cast shadows of their actual shape.
+
+Sodium hands every pass the chunks the camera can see, so for now terrain behind the camera or hidden
+from it casts no shadows into view; sky light still darkens caves, whose roofs may be missing from the
+map. The log shows `[shadows] first shadow map drawn` once the pass runs; if it fails it logs
+`[shadows] shadow pass failed` and the lighting carries on without shadows.
 
 ## Flashback
 

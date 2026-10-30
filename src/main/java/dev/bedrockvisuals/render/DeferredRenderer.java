@@ -13,9 +13,9 @@ import net.minecraft.client.renderer.chunk.ChunkSectionsToRender;
 import net.minecraft.network.chat.Component;
 
 /**
- * Runs the deferred passes before Minecraft's main pass: terrain into the G-buffer, the G-buffer lit into
- * the main target, then the G-buffer's depth copied over the main depth so entities and translucent terrain
- * still sort against the terrain. F8 switches the lighting off to compare with vanilla.
+ * Runs the deferred passes before Minecraft's main pass: terrain into the sun's shadow map and the G-buffer,
+ * the G-buffer lit into the main target, then the G-buffer's depth copied over the main depth so entities and
+ * translucent terrain still sort against the terrain. F8 switches the lighting off to compare with vanilla.
  */
 public final class DeferredRenderer {
 	private static final KeyMapping TOGGLE = new KeyMapping("key.bedrockvisuals.toggle_lighting",
@@ -46,13 +46,17 @@ public final class DeferredRenderer {
 	public static void beforeMainPass(ChunkSectionsToRender chunks, RenderTarget main, GpuSampler sampler,
 			GpuTextureView blockAtlas) {
 		replacedTerrain = false;
+		LightingState light = enabled && !lightingFailed ? LightingState.current() : null;
+		if (light != null) {
+			ShadowPass.render(chunks, sampler, blockAtlas, light);
+		}
 		GBufferPass.render(chunks, main, sampler, blockAtlas);
-		if (!enabled || lightingFailed || !GBufferPass.hasTerrain()) {
+		if (light == null || !GBufferPass.hasTerrain()) {
 			return;
 		}
 		GBuffer gbuffer = GBufferPass.gbuffer();
 		try {
-			LightingPass.render(main, gbuffer, GBufferPass.projection(), GBufferPass.modelView());
+			LightingPass.render(main, gbuffer, GBufferPass.projection(), GBufferPass.modelView(), light);
 			RenderSystem.getDevice().createCommandEncoder().copyTextureToTexture(gbuffer.depth(),
 					main.getDepthTexture(), 0, 0, 0, 0, 0, main.width, main.height);
 			replacedTerrain = true;

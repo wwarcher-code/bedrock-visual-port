@@ -25,8 +25,10 @@ import org.lwjgl.system.MemoryStack;
  * terrain for (depth still at the cleared far plane) are discarded, so the sky drawn earlier shows through.
  */
 public final class LightingPass {
-	/** std140 size of the LightingData block in deferred.fsh: one mat4 and seven vec4s. */
-	private static final int DATA_SIZE = 64 + 7 * 16;
+	/** std140 size of the LightingData block in deferred.fsh: two mat4s and eight vec4s. */
+	private static final int DATA_SIZE = 2 * 64 + 8 * 16;
+	/** Shadow lookups move this many shadow texels out along the normal, against self-shadowing acne. */
+	private static final float NORMAL_OFFSET_TEXELS = 1.5f;
 
 	private static final BindGroupLayout LAYOUT = BindGroupLayout.builder()
 			.withUniform("Albedo", UniformType.COMBINED_IMAGE_SAMPLER)
@@ -34,6 +36,7 @@ public final class LightingPass {
 			.withUniform("Material", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("Light", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("Depth", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("ShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.build();
 
@@ -53,13 +56,13 @@ public final class LightingPass {
 	}
 
 	/** @param projection, modelView the matrices Sodium drew the G-buffer terrain with */
-	public static void render(RenderTarget main, GBuffer gbuffer, Matrix4fc projection, Matrix4fc modelView) {
+	public static void render(RenderTarget main, GBuffer gbuffer, Matrix4fc projection, Matrix4fc modelView,
+			LightingState light) {
 		if (data == null) {
 			data = RenderSystem.getDevice().createBuffer(() -> "Bedrock Visuals lighting data",
 					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, DATA_SIZE);
 		}
 		CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
-		LightingState light = LightingState.current();
 		Matrix4f inverseViewProjection = new Matrix4f(projection).mul(modelView).invert();
 		try (MemoryStack stack = MemoryStack.stackPush()) {
 			Std140Builder builder = Std140Builder.onStack(stack, DATA_SIZE)
@@ -71,6 +74,10 @@ public final class LightingPass {
 			putVec4(builder, light.sky(), 0);
 			putVec4(builder, light.ambient(), 0);
 			putVec4(builder, light.blockLight(), 0);
+			float texelBlocks = 2 * ShadowPass.HALF_EXTENT / ShadowPass.RESOLUTION;
+			builder.putMat4f(ShadowPass.viewProjection())
+					.putVec4(ShadowPass.isValid() ? 1 : 0, 1f / ShadowPass.RESOLUTION, NORMAL_OFFSET_TEXELS * texelBlocks,
+							ShadowPass.fromMoon() ? 1 : 0);
 			encoder.writeToBuffer(data.slice(), builder.get());
 		}
 
@@ -83,6 +90,9 @@ public final class LightingPass {
 			pass.setUniform("Material", gbuffer.view(GBuffer.Target.MATERIAL), nearest);
 			pass.setUniform("Light", gbuffer.view(GBuffer.Target.LIGHT), nearest);
 			pass.setUniform("Depth", gbuffer.depthView(), nearest);
+			// Without a map this frame the shader ignores the binding, but every declared sampler must be bound.
+			pass.setUniform("ShadowMap", ShadowPass.depthView() != null ? ShadowPass.depthView() : gbuffer.depthView(),
+					nearest);
 			pass.setUniform("LightingData", data);
 			pass.draw(3, 1, 0, 0);
 		}

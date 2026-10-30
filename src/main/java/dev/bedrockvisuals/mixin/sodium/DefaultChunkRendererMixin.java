@@ -10,6 +10,9 @@ import com.mojang.renderpearl.api.textures.GpuSampler;
 import dev.bedrockvisuals.compat.SodiumAdapter;
 import dev.bedrockvisuals.render.GBufferPass;
 import dev.bedrockvisuals.render.GBufferTerrainPipelines;
+import dev.bedrockvisuals.render.ShadowPass;
+import dev.bedrockvisuals.render.ShadowTerrainPipelines;
+import net.caffeinemc.mods.sodium.client.model.quad.properties.ModelQuadFacing;
 import net.caffeinemc.mods.sodium.client.render.chunk.ChunkRenderMatrices;
 import net.caffeinemc.mods.sodium.client.render.chunk.DefaultChunkRenderer;
 import net.caffeinemc.mods.sodium.client.render.chunk.lists.ChunkRenderListIterable;
@@ -36,10 +39,27 @@ abstract class DefaultChunkRendererMixin {
 		}
 	}
 
-	/** During the G-buffer pass, draw with the G-buffer variant of whichever pipeline Sodium picked. */
+	/** During the G-buffer and shadow passes, draw with that pass's variant of whichever pipeline Sodium picked. */
 	@Redirect(method = "render", at = @At(value = "INVOKE",
 			target = "Lcom/mojang/blaze3d/systems/RenderSystem;getCompiledPipeline(Lcom/mojang/renderpearl/api/pipeline/RenderPipeline;)Lcom/mojang/renderpearl/api/pipeline/CompiledRenderPipeline;"))
-	private CompiledRenderPipeline bedrockvisuals$useGBufferPipeline(RenderPipeline pipeline) {
-		return RenderSystem.getCompiledPipeline(GBufferPass.isActive() ? GBufferTerrainPipelines.variantOf(pipeline) : pipeline);
+	private CompiledRenderPipeline bedrockvisuals$usePassPipeline(RenderPipeline pipeline) {
+		if (ShadowPass.isActive()) {
+			pipeline = ShadowTerrainPipelines.variantOf(pipeline);
+		} else if (GBufferPass.isActive()) {
+			pipeline = GBufferTerrainPipelines.variantOf(pipeline);
+		}
+		return RenderSystem.getCompiledPipeline(pipeline);
+	}
+
+	/**
+	 * Sodium skips the faces of each section that point away from the camera. The sun sees a different set,
+	 * so the shadow pass draws them all.
+	 */
+	@Redirect(method = "fillCommandBuffer", at = @At(value = "INVOKE",
+			target = "Lnet/caffeinemc/mods/sodium/client/render/chunk/DefaultChunkRenderer;getVisibleFaces(IIIIII)I"))
+	private static int bedrockvisuals$allFacesForShadows(int cameraX, int cameraY, int cameraZ, int sectionX,
+			int sectionY, int sectionZ) {
+		return ShadowPass.isActive() ? ModelQuadFacing.ALL
+				: DefaultChunkRenderer.getVisibleFaces(cameraX, cameraY, cameraZ, sectionX, sectionY, sectionZ);
 	}
 }
