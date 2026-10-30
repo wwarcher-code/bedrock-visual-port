@@ -25,8 +25,8 @@ import org.lwjgl.system.MemoryStack;
  * terrain for (depth still at the cleared far plane) are discarded, so the sky drawn earlier shows through.
  */
 public final class LightingPass {
-	/** std140 size of the LightingData block in deferred.fsh: two mat4s and eight vec4s. */
-	private static final int DATA_SIZE = 2 * 64 + 8 * 16;
+	/** std140 size of the LightingData block in deferred.fsh: two mat4s and nine vec4s. */
+	private static final int DATA_SIZE = 2 * 64 + 9 * 16;
 	/** Shadow lookups move this many shadow texels out along the normal, against self-shadowing acne. */
 	private static final float NORMAL_OFFSET_TEXELS = 1.5f;
 
@@ -77,7 +77,8 @@ public final class LightingPass {
 			float texelBlocks = 2 * ShadowPass.HALF_EXTENT / ShadowPass.RESOLUTION;
 			builder.putMat4f(ShadowPass.viewProjection())
 					.putVec4(ShadowPass.isValid() ? 1 : 0, 1f / ShadowPass.RESOLUTION, NORMAL_OFFSET_TEXELS * texelBlocks,
-							ShadowPass.fromMoon() ? 1 : 0);
+							ShadowPass.fromMoon() ? 1 : 0)
+					.putVec4(GBufferDebugView.showsShadows() ? 1 : 0, 0, 0, 0);
 			encoder.writeToBuffer(data.slice(), builder.get());
 		}
 

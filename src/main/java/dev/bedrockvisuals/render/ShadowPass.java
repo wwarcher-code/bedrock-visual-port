@@ -51,6 +51,7 @@ public final class ShadowPass {
 	private static boolean fromMoon;
 	private static boolean disabled;
 	private static boolean reported;
+	private static int terrainDraws;
 	private static final Matrix4f VIEW_PROJECTION = new Matrix4f();
 
 	private ShadowPass() {
@@ -59,6 +60,11 @@ public final class ShadowPass {
 	/** True while terrain is being drawn into the shadow map. */
 	public static boolean isActive() {
 		return active;
+	}
+
+	/** Called by the Sodium hook for each terrain draw in this pass. */
+	public static void countTerrainDraw() {
+		terrainDraws++;
 	}
 
 	/** True when this frame's shadow map holds terrain. */
@@ -101,14 +107,16 @@ public final class ShadowPass {
 		valid = true;
 		if (!reported) {
 			reported = true;
-			BedrockVisualsClient.LOGGER.info("[shadows] first shadow map drawn: {}x{}, {} blocks around the camera",
-					RESOLUTION, RESOLUTION, (int) HALF_EXTENT);
+			BedrockVisualsClient.LOGGER.info("[shadows] first shadow map drawn: {}x{}, {} blocks around the camera, "
+							+ "{} Sodium terrain draws, {} towards {}", RESOLUTION, RESOLUTION, (int) HALF_EXTENT,
+					terrainDraws, moon ? "moon" : "sun", towardsLight);
 		}
 	}
 
 	private static void draw(ChunkSectionsToRender chunks, GpuSampler sampler, GpuTextureView blockAtlas,
 			Vector3f towardsLight) {
 		ensureResources();
+		terrainDraws = 0;
 		Vec3 camera = Minecraft.getInstance().gameRenderer.mainCamera().position();
 		VIEW_PROJECTION.set(ShadowProjection.build(towardsLight, camera.x, camera.y, camera.z, HALF_EXTENT,
 				DEPTH_RANGE, RESOLUTION));

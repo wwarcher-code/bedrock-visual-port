@@ -22,6 +22,7 @@ layout(std140) uniform LightingData {
     vec4 BlockLightColor;
     mat4 ShadowViewProjection;  // camera-relative world space to shadow clip space (ShadowProjection.java)
     vec4 ShadowParams;          // x: map valid, y: texel size in UV, z: normal offset in blocks, w: cast by the moon
+    vec4 DebugParams;           // x: draw the shadow test instead of lit color
 };
 
 layout(location = 0) in vec2 texCoord;
@@ -128,6 +129,10 @@ void main() {
     float edgeFade;
     float mapped = shadowVisibility(position, n, moonCasts ? moonDir : sunDir, edgeFade);
     float casterVisibility = mapped < 0.0 ? skyFallback : mix(skyFallback, mapped * skyGuard, edgeFade);
+    if (DebugParams.x > 0.5) {
+        fragColor = vec4(mapped < 0.0 ? vec3(1.0, 0.0, 0.0) : vec3(mapped), 1.0);
+        return;
+    }
     float sunVisibility = moonCasts ? skyFallback : casterVisibility;
     float moonVisibility = moonCasts ? casterVisibility : skyFallback;
 

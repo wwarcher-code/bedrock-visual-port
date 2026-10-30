@@ -37,6 +37,9 @@ abstract class DefaultChunkRendererMixin {
 		if (GBufferPass.isActive()) {
 			GBufferPass.recordMatrices(matrices.projection(), matrices.modelView());
 		}
+		if (ShadowPass.isActive()) {
+			ShadowPass.countTerrainDraw();
+		}
 	}
 
 	/** During the G-buffer and shadow passes, draw with that pass's variant of whichever pipeline Sodium picked. */
