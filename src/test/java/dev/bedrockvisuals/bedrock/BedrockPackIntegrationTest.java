@@ -24,7 +24,10 @@ class BedrockPackIntegrationTest {
 				? BedrockInstall.vanillaStack(path) : List.of(path);
 		BedrockPack pack = BedrockPack.load(packs);
 		System.out.println(pack.summary());
-		pack.problems().forEach(System.out::println);
+		pack.problems().stream().limit(20).forEach(System.out::println);
+		if (pack.problems().size() > 20) {
+			System.out.println("...and " + (pack.problems().size() - 20) + " more");
+		}
 		assertEquals(List.of(), pack.problems());
 
 		ClientBiome desert = pack.biome("minecraft:desert");
