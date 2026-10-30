@@ -7,40 +7,61 @@ Design doc: https://claude.ai/artifact/Sf95jvy5UQoAoqr1DMriZm
 
 ## Build
 
-```
-./gradlew build
+In PowerShell, from the project folder:
+
+```powershell
+.\gradlew.bat build
 ```
 
-Gradle downloads the Java 25 JVM it needs (pinned in `gradle/gradle-daemon-jvm.properties`). The mod jar
-lands in `build/libs/`. `./gradlew runClient` starts a dev client with Sodium and Distant Horizons.
+Gradle downloads the Java 25 JVM it needs (pinned in `gradle\gradle-daemon-jvm.properties`); starting it
+needs any Java 17 or newer. The mod jar lands in `build\libs`. `.\gradlew.bat runClient` starts a dev client
+with Sodium, Distant Horizons and Flashback.
 
 ## Pinned versions
 
 All versions live in `gradle.properties`: Minecraft 26.3, Fabric Loader 0.20.1, Fabric API 0.165.0,
-Sodium 0.9.2, Distant Horizons 3.3.4, Replay Mod 2.6.28. At startup the mod logs whether each loaded mod
-matches its pin. Mixins target those exact builds; bump one at a time and re-run the spikes.
+Sodium 0.9.2, Distant Horizons 3.3.4, Flashback 0.43.6. At startup the mod logs whether each loaded mod
+matches its pin. Hooks target those exact builds; bump one at a time and re-run the spikes.
+
+The Bedrock reference is 1.26.60, the latest release.
 
 ## Layout
 
-- `compat/` holds one adapter per hooked mod (`SodiumAdapter`, `DistantHorizonsAdapter`, `ReplayModAdapter`).
+- `compat/` holds one adapter per hooked mod (`SodiumAdapter`, `DistantHorizonsAdapter`, `FlawlessFrames`).
   Only adapters and their mixins touch another mod's code.
 - `lod/` holds `DistantTerrainSource`, the interface the renderer reads distant terrain through. Distant
   Horizons implements it today; Voxy becomes a second implementation once it runs on Vulkan.
-- `mixin/<mod>/` holds that mod's mixins. `BedrockVisualsMixinPlugin` skips them when the mod isn't loaded.
+- `bedrock/` reads Bedrock resource packs: texture sets, lighting, atmosphere, color grading, water, fog,
+  client biomes, local lights and the PBR fallback. It has no Minecraft dependencies and is unit tested.
 
 ## Step 1 spikes
 
-Each spike logs a `[spike 1x]` line in `logs/latest.log`. Run with the Vulkan backend selected and DH's rendering engine on Blaze3D (its default on 26.3).
+Each spike logs a `[spike 1x]` line in `run\logs\latest.log`. Run with the Vulkan backend selected and DH's
+rendering engine on Blaze3D (its default on 26.3).
 
 | Spike | Setup | Pass when the log shows |
 | --- | --- | --- |
-| 1a Sodium terrain | `runClient`, load a world | `[spike 1a] Sodium terrain pass ...` once per pass (solid, cutout, translucent) |
-| 1b Distant Horizons | `runClient`, load a world, wait for LODs to appear | `[spike 1b] ... engine=BLAZE_3D`, then `[spike 1b] DH frame captured` with texture sizes |
-| 1c Replay Mod | Add the Replay Mod jar, record, export a short clip | `[spike 1c]` start and finish lines, and a video with correct frames |
+| 1a Sodium terrain | `.\gradlew.bat runClient`, load a world | `[spike 1a] Sodium terrain pass ...` once per pass (solid, cutout, translucent) |
+| 1b Distant Horizons | Load a world, wait for LODs to appear | `[spike 1b] ... engine=BLAZE_3D`, then `[spike 1b] DH frame captured` with texture sizes |
+| 1c Flashback | Record a few seconds with Flashback, then export a short clip | `[spike 1c] listening for exports from flashback`, then `flashback export started` and `finished`, and a video with correct frames |
+
+To pull the spike lines out of the log after closing the game:
+
+```powershell
+Select-String -Path run\logs\latest.log -Pattern "\[spike|\[bedrock\]|matches the pinned|is pinned"
+```
 
 1a only proves the hook is reached; the target redirect comes in step 2. 1b only captures DH's output:
 DH keeps compositing and fogging as normal until the renderer's composite exists (step 2) and calls
 `setRendererOwnsComposite(true)`.
+
+## Flashback
+
+Flashback is reached through FREX's flawless frames API, which it already uses to tell renderers an export
+is running. No mixins, so a Flashback update can't break the hook, and Replay Mod would work the same way.
+Flashback captures frames through Mojang's rendering API rather than OpenGL, so it should work on Vulkan;
+spike 1c confirms that. It renders exports into their own target at the export resolution, so 4K exports
+don't depend on the window size.
 
 ## Distant Horizons
 
@@ -52,5 +73,36 @@ the renderer treats it as albedo, rebuilds normals from depth and uses a generic
 DH runs its own TAA and jitters its geometry for it. Turn DH's TAA off in its settings before offline
 exports; its public API doesn't expose that setting.
 
-Known before running: Replay Mod's frame capture reads back through OpenGL pixel buffers, so 1c likely
-fails at the capture stage even if the start and finish hooks fire.
+## Bedrock inputs
+
+At startup the mod reads Bedrock's vanilla resource pack and logs a `[bedrock]` summary. It looks on every
+drive for `XboxGames\Minecraft for Windows\Content\data\resource_packs\vanilla`, where the Xbox app installs
+Bedrock since 1.21.120. If Bedrock is somewhere else, or you want to add packs on top, create
+`run\config\bedrockvisuals-packs.txt` (for the dev client) listing one pack folder per line, lowest priority
+first:
+
+```
+C:\XboxGames\Minecraft for Windows\Content\data\resource_packs\vanilla
+```
+
+The `[bedrock]` log also lists the other packs installed beside vanilla, to check whether Vibrant Visuals
+content lives in a separate pack.
+
+To test the loader against a real pack:
+
+```powershell
+.\gradlew.bat test -PbedrockPack="C:\XboxGames\Minecraft for Windows\Content\data\resource_packs\vanilla"
+```
+
+### Texture map
+
+Java and Bedrock name many block textures differently (`oak_log` against `log_oak`).
+`src\main\resources\bedrockvisuals\texture_map.json` maps 1,137 of Java 26.3's 1,300 block textures to
+Bedrock's. Most of the rest are beds (entity textures in Bedrock), block-breaking stages and debug blocks.
+It is generated by pairing each block's faces in both editions, plus hand fixes in
+`tools\texture_map_overrides.json`. To regenerate after a version bump (needs Python, and the 26.3 client
+jar from Gradle's cache):
+
+```powershell
+py tools\gen_texture_map.py "$env:USERPROFILE\.gradle\caches\fabric-loom\26.3\minecraft-client.jar" "C:\XboxGames\Minecraft for Windows\Content\data\resource_packs\vanilla"
+```

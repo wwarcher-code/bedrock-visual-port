@@ -1,6 +1,8 @@
 package dev.bedrockvisuals;
 
+import dev.bedrockvisuals.bedrock.BedrockInputs;
 import dev.bedrockvisuals.compat.DistantHorizonsAdapter;
+import dev.bedrockvisuals.compat.FlawlessFrames;
 import dev.bedrockvisuals.compat.PinnedVersions;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.loader.api.FabricLoader;
@@ -14,8 +16,10 @@ public class BedrockVisualsClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		PinnedVersions.check();
+		BedrockInputs.load(FabricLoader.getInstance().getConfigDir());
 		if (FabricLoader.getInstance().isModLoaded("distanthorizons")) {
 			DistantHorizonsAdapter.register();
 		}
+		FlawlessFrames.register();
 	}
 }

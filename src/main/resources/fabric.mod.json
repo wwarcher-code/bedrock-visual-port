@@ -20,6 +20,6 @@
 	},
 	"suggests": {
 		"distanthorizons": "3.3.4",
-		"replaymod": "*"
+		"flashback": "*"
 	}
 }

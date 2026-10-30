@@ -22,13 +22,25 @@ dependencies {
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 
 	// Hooked mods. Compiled against so hooks can target their classes; none is bundled.
-	// Sodium and Distant Horizons run in the dev client; Replay Mod is added per spike
-	// (drop its jar into run/mods).
+	// Flashback is reached through the FREX flawless frames entrypoint, so it is runtime only.
 	compileOnly "maven.modrinth:sodium:${project.sodium_version}"
 	compileOnly "maven.modrinth:distanthorizons:${project.distanthorizons_version}"
-	compileOnly "maven.modrinth:replaymod:${project.replaymod_version}"
 	localRuntime "maven.modrinth:sodium:${project.sodium_version}"
 	localRuntime "maven.modrinth:distanthorizons:${project.distanthorizons_version}"
+	localRuntime "maven.modrinth:flashback:${project.flashback_version}"
+
+	testImplementation platform("org.junit:junit-bom:${project.junit_version}")
+	testImplementation 'org.junit.jupiter:junit-jupiter'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+	useJUnitPlatform()
+	// Optional: run BedrockPackIntegrationTest against a real pack, e.g.
+	// .\gradlew.bat test -PbedrockPack="C:\XboxGames\Minecraft for Windows\Content\data\resource_packs\vanilla"
+	def bedrockPack = providers.gradleProperty('bedrockPack')
+	inputs.property 'bedrockPack', bedrockPack.orElse('')
+	systemProperty 'bedrockPack', bedrockPack.orElse('').get()
 }
 
 processResources {
@@ -36,7 +48,7 @@ processResources {
 		version                : project.version,
 		sodium_version         : project.sodium_loaded_version,
 		distanthorizons_version: project.distanthorizons_loaded_version,
-		replaymod_version      : project.replaymod_loaded_version,
+		flashback_version      : project.flashback_loaded_version,
 	]
 	inputs.properties props
 

@@ -8,7 +8,7 @@ import java.util.Properties;
 import net.fabricmc.loader.api.FabricLoader;
 
 /**
- * Compares the loaded Sodium, Distant Horizons and Replay Mod versions with the ones pinned in gradle.properties.
+ * Compares the loaded Sodium, Distant Horizons and Flashback versions with the ones pinned in gradle.properties.
  * The hooks target those exact builds, so a mismatch is the first thing to suspect when a hook fails.
  */
 public final class PinnedVersions {

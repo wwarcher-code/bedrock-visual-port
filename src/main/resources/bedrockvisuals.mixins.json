@@ -4,8 +4,7 @@
 	"plugin": "dev.bedrockvisuals.mixin.BedrockVisualsMixinPlugin",
 	"compatibilityLevel": "JAVA_25",
 	"client": [
-		"sodium.DefaultChunkRendererMixin",
-		"replaymod.VideoRendererMixin"
+		"sodium.DefaultChunkRendererMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
