@@ -38,15 +38,25 @@ class BedrockJsonTest {
 	}
 
 	@Test
-	void keyframesAreSortedInterpolatedAndClamped() {
+	void keyframesAreSortedInterpolatedAndWrapAroundTheDay() {
 		// Out of order, as vanilla files write them.
 		JsonObject json = BedrockJson.parse("{\"v\": {\"0.75\": 30.0, \"0.25\": 10.0, \"0.5\": 20.0}}");
 		Curve<Float> curve = BedrockJson.floatCurve(json, "v", 0);
 		assertFalse(curve.isConstant());
-		assertEquals(10, curve.sample(0.0f), EPSILON);
 		assertEquals(10, curve.sample(0.25f), EPSILON);
 		assertEquals(15, curve.sample(0.375f), EPSILON);
-		assertEquals(30, curve.sample(1.0f), EPSILON);
+		// Noon (0) and the next noon (1) sit halfway between the 0.75 key and the next cycle's 0.25 key.
+		assertEquals(20, curve.sample(0.0f), EPSILON);
+		assertEquals(20, curve.sample(1.0f), EPSILON);
+		assertEquals(25, curve.sample(0.875f), EPSILON);
+	}
+
+	@Test
+	void vanillaSunColorIsNearWhiteAtNoon() {
+		JsonObject json = BedrockJson.parse("{\"c\": {\"0.140811\": [255, 173, 81], \"1.000000\": [255, 227, 215]}}");
+		Rgba noon = BedrockJson.colorCurve(json, "c", Rgba.WHITE).sample(0);
+		assertEquals(227 / 255f, noon.g(), EPSILON);
+		assertEquals(215 / 255f, noon.b(), EPSILON);
 	}
 
 	@Test

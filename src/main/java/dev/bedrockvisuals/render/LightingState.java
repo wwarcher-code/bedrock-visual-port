@@ -61,7 +61,8 @@ public record LightingState(
 				linear(lighting.sun().color().sample(time)).mul(sunLevel),
 				new Vector3f(sunDirection).negate(),
 				linear(lighting.moon().color().sample(time)).mul(moonLevel),
-				linear(zenith).mul(SKY_FILL * skyIntensity * (sunLevel + moonLevel)),
+				// The zenith color's own curve already darkens through the evening.
+				linear(zenith).mul(SKY_FILL * skyIntensity),
 				linear(lighting.ambientColor()).mul(lighting.ambientIlluminance() * AMBIENT_SCALE),
 				new Vector3f(BLOCK_LIGHT));
 	}

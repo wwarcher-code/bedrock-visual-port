@@ -5,7 +5,9 @@ import java.util.List;
 
 /**
  * A value that is either constant or keyframed over the day. Keys run from 0 (noon) to 1 (the next noon);
- * values between keys are interpolated linearly, and times outside the keys take the nearest key's value.
+ * values between keys are interpolated linearly. The day is a cycle, so a time before the first key or after
+ * the last blends between the last key and the first across the wrap: vanilla's sun color has keys from
+ * 0.14 to 1.0, and noon (0) sits between its 1.0 and 0.14 keys.
  */
 public final class Curve<T> {
 	private final float[] keys;
@@ -46,11 +48,14 @@ public final class Curve<T> {
 			return values.get(next);
 		}
 		next = -next - 1;
-		if (next == 0) {
-			return values.getFirst();
-		}
-		if (next == keys.length) {
-			return values.getLast();
+		if (next == 0 || next == keys.length) {
+			// Across the wrap, from the last key to the first key of the next cycle.
+			float from = keys[keys.length - 1];
+			float to = keys[0] + 1;
+			float time = next == 0 ? timeOfDay + 1 : timeOfDay;
+			float span = to - from;
+			float t = span <= 0 ? 0 : (time - from) / span;
+			return lerp.apply(values.getLast(), values.getFirst(), t);
 		}
 		float t = (timeOfDay - keys[next - 1]) / (keys[next] - keys[next - 1]);
 		return lerp.apply(values.get(next - 1), values.get(next), t);
