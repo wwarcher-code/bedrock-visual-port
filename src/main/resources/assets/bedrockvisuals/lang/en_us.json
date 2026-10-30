@@ -1,3 +1,4 @@
 {
-	"key.bedrockvisuals.gbuffer_debug": "Cycle G-buffer debug view"
+	"key.bedrockvisuals.gbuffer_debug": "Cycle G-buffer debug view",
+	"key.bedrockvisuals.toggle_lighting": "Toggle deferred lighting"
 }

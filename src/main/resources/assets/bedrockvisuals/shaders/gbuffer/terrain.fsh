@@ -16,6 +16,24 @@ layout(location = 1) out vec4 out_Normal;
 layout(location = 2) out vec4 out_Material;
 layout(location = 3) out vec4 out_Light;
 
+// Minecraft darkens each face by direction (CardinalLighting.DEFAULT, the overworld's): top 1.0, bottom 0.5,
+// north and south 0.8, east and west 0.6. Sodium bakes it into the vertex color; the lighting pass shades
+// by the real normal instead, so it is divided back out. Only axis-aligned faces carry it, and the Nether's
+// values (0.9 top and bottom) aren't handled yet.
+float faceShade(vec3 normal) {
+    vec3 a = abs(normal);
+    if (a.y > 0.999) {
+        return normal.y > 0.0 ? 1.0 : 0.5;
+    }
+    if (a.z > 0.999) {
+        return 0.8;
+    }
+    if (a.x > 0.999) {
+        return 0.6;
+    }
+    return 1.0;
+}
+
 void main() {
     vec4 color = texture(u_BlockTex, v_TexCoord) * v_Color;
 
@@ -32,7 +50,7 @@ void main() {
         normal = -normal;
     }
 
-    out_Albedo = vec4(color.rgb, 1.0);
+    out_Albedo = vec4(min(color.rgb / faceShade(normal), vec3(1.0)), 1.0);
     out_Normal = vec4(normal * 0.5 + 0.5, 1.0);
     // Bedrock's PBR fallback for blocks until texture-set materials arrive in step 4: fully rough,
     // non-metallic, non-emissive, no subsurface.

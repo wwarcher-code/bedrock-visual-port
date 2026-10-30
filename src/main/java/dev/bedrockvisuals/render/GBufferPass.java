@@ -12,6 +12,8 @@ import java.util.Optional;
 import java.util.OptionalDouble;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayerGroup;
 import net.minecraft.client.renderer.chunk.ChunkSectionsToRender;
+import org.joml.Matrix4f;
+import org.joml.Matrix4fc;
 import org.joml.Vector4f;
 
 /**
@@ -19,8 +21,8 @@ import org.joml.Vector4f;
  * main pass. While it runs, Sodium's pipelines are swapped for their {@link GBufferTerrainPipelines G-buffer
  * variants}.
  *
- * <p>Step 2 adds this pass beside the normal frame, which still draws terrain as usual; the deferred
- * lighting pass in step 3 replaces that second terrain draw.
+ * <p>With deferred lighting on, the {@link LightingPass} then lights the G-buffer into the main target and
+ * Minecraft's main pass skips Sodium's opaque terrain; with it off, the normal frame draws terrain as usual.
  */
 public final class GBufferPass {
 	private static final Vector4f CLEAR = new Vector4f(0, 0, 0, 0);
@@ -32,6 +34,9 @@ public final class GBufferPass {
 	private static boolean reported;
 	/** Set when the pass fails; the game keeps running without it and the error is logged once. */
 	private static boolean disabled;
+	private static final Matrix4f PROJECTION = new Matrix4f();
+	private static final Matrix4f MODEL_VIEW = new Matrix4f();
+	private static boolean drewTerrain;
 
 	private GBufferPass() {
 	}
@@ -45,7 +50,28 @@ public final class GBufferPass {
 		return GBUFFER;
 	}
 
+	/** Called by the Sodium hook for each terrain draw in this pass. */
+	public static void recordMatrices(Matrix4fc projection, Matrix4fc modelView) {
+		PROJECTION.set(projection);
+		MODEL_VIEW.set(modelView);
+		drewTerrain = true;
+	}
+
+	/** True when this frame's G-buffer holds terrain, so it can replace the vanilla terrain draw. */
+	public static boolean hasTerrain() {
+		return drewTerrain && !disabled;
+	}
+
+	public static Matrix4fc projection() {
+		return PROJECTION;
+	}
+
+	public static Matrix4fc modelView() {
+		return MODEL_VIEW;
+	}
+
 	public static void render(ChunkSectionsToRender chunks, RenderTarget main, GpuSampler sampler, GpuTextureView blockAtlas) {
+		drewTerrain = false;
 		if (disabled) {
 			return;
 		}
@@ -53,6 +79,7 @@ public final class GBufferPass {
 			renderTerrain(chunks, main, sampler, blockAtlas);
 		} catch (RuntimeException e) {
 			disabled = true;
+			drewTerrain = false;
 			BedrockVisualsClient.LOGGER.error("[gbuffer] terrain pass failed; G-buffer disabled until restart", e);
 			return;
 		}

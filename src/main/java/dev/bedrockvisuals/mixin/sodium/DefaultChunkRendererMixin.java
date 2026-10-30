@@ -31,6 +31,9 @@ abstract class DefaultChunkRendererMixin {
 			RenderPass renderPass, GpuSampler sampler, GpuBufferSlice uniforms, GpuBuffer buffer, OitStage oitStage,
 			CallbackInfo ci) {
 		SodiumAdapter.onTerrainPass(pass, renderPass);
+		if (GBufferPass.isActive()) {
+			GBufferPass.recordMatrices(matrices.projection(), matrices.modelView());
+		}
 	}
 
 	/** During the G-buffer pass, draw with the G-buffer variant of whichever pipeline Sodium picked. */

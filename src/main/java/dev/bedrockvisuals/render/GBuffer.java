@@ -17,7 +17,10 @@ import java.util.Map;
  */
 public final class GBuffer {
 	public enum Target {
-		/** RGB: block color (texture times vertex tint and ambient occlusion), no lighting. A: unused. */
+		/**
+		 * RGB: block color (texture times vertex tint and ambient occlusion) with Minecraft's per-face shading
+		 * divided out, no lighting. A: unused.
+		 */
 		ALBEDO("albedo"),
 		/** RGB: world-space normal, mapped from [-1, 1] to [0, 1]. A: unused. */
 		NORMAL("normal"),
@@ -59,7 +62,8 @@ public final class GBuffer {
 			views.put(target, device.createTextureView(texture));
 		}
 		depth = device.createTexture(() -> "Bedrock Visuals G-buffer depth",
-				GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, GpuFormat.D32_FLOAT,
+				GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_SRC,
+				GpuFormat.D32_FLOAT,
 				width, height, 1, 1);
 		depthView = device.createTextureView(depth);
 	}
@@ -74,6 +78,10 @@ public final class GBuffer {
 
 	public GpuTextureView depthView() {
 		return depthView;
+	}
+
+	public GpuTexture depth() {
+		return depth;
 	}
 
 	public int width() {

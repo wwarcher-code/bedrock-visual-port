@@ -67,14 +67,39 @@ G-buffer: four 8-bit RGBA targets plus a depth buffer, sized to the window.
 | material | metalness, emissive, roughness, subsurface; for now Bedrock's fallback (fully rough) |
 | light | red: block light, green: sky light |
 
-The normal frame is untouched; step 3's deferred lighting replaces it. Press **F7** in game to cycle the
+Press **F7** in game to cycle the
 screen through albedo, normal, material, light and back to normal (rebind it under Controls, Miscellaneous).
 The log shows `[gbuffer] first terrain pass drawn into <width>x<height> G-buffer` once the pass runs. If the
 pass fails, it logs `[gbuffer] terrain pass failed` with the error and switches itself off; the game keeps
 running.
 
-Known limits for now: translucent terrain (water, glass) and Distant Horizons terrain aren't in the
-G-buffer yet; albedo still includes Minecraft's per-face shading baked into Sodium's vertex colors.
+Known limits for now: translucent terrain (water, glass), entities and Distant Horizons terrain aren't in the
+G-buffer yet. Albedo has Minecraft's per-face shading divided out using the overworld's values, so Nether
+block tops and bottoms are slightly off.
+
+## Deferred lighting (step 3)
+
+Right after the G-buffer pass, a full-screen pass lights it into the main image; pixels without terrain are
+left alone so the sky shows through. The G-buffer's depth is then copied over the main depth, and
+Minecraft's main pass skips Sodium's solid and cutout terrain, which is already drawn. Entities, water,
+glass and Distant Horizons terrain still draw the vanilla way on top. Press **F8** to switch deferred
+lighting off and compare with vanilla.
+
+What lights each pixel:
+
+- **Sun and moon:** direction from the time of day (and Bedrock's orbital offset); color and brightness
+  from the Bedrock lighting settings for the player's biome. No shadows until step 5, so a face's sky
+  light stands in for whether the sun reaches it.
+- **Sky fill:** Bedrock's zenith sky color, scaled by sky light.
+- **Ambient, block light and emissive:** Bedrock's ambient floor, a warm torch color by block light, and
+  the material buffer's emissive channel.
+- **Surface model:** Lambert diffuse plus GGX specular from the material buffer (all fully rough until the
+  Bedrock material maps are wired in), then a filmic tone curve until Bedrock's tone mapping in step 7.
+
+Bedrock's files give brightness curves but not how its renderer exposes them, so the scale factors marked
+`TUNE` in `LightingState` are placeholders for the fidelity pass. The log shows `[lighting] first frame lit
+by the deferred lighting pass` once it runs; if the pass fails it logs `[lighting] deferred lighting failed`
+and falls back to vanilla terrain.
 
 ## Flashback
 
