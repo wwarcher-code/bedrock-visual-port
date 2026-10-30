@@ -75,21 +75,34 @@ exports; its public API doesn't expose that setting.
 
 ## Bedrock inputs
 
-At startup the mod reads Bedrock's vanilla packs and logs a `[bedrock]` summary. Bedrock builds vanilla from a
-stack: `vanilla_base`, `vanilla`, then one `vanilla_<version>` pack per release, newest winning. The mod
-finds that stack on any drive under `XboxGames\Minecraft for Windows\Content\data\resource_packs`, where the
-Xbox app installs Bedrock since 1.21.120. To use other folders, or add packs on top, create
-`run\config\bedrockvisuals-packs.txt` (for the dev client) listing one pack folder per line, lowest
-priority first:
+At startup the mod reads Bedrock's vanilla packs and logs a `[bedrock]` summary. It takes two sources:
 
-```
-C:\XboxGames\Minecraft for Windows\Content\data\resource_packs\vanilla
-```
+- **Your Bedrock install**, for lighting, atmosphere, color grading, water, fog and biome settings.
+  Bedrock builds vanilla from a stack: `vanilla_base`, `vanilla`, then one `vanilla_<version>` pack per
+  release, newest winning. The mod finds it on any drive under
+  `XboxGames\Minecraft for Windows\Content\data\resource_packs`, where the Xbox app installs Bedrock since
+  1.21.120. The install bundles its JSON into `.brarchive` files, which the mod reads.
+- **Mojang's `bedrock-samples` repo**, for the material maps: each block's `_mers` image (metalness,
+  emissive, roughness, subsurface) and its few `_normal` maps. The install stores its texture images in a
+  form the mod can't read. Block colors come from Java's own textures, so only these extra maps are needed.
 
-To test the loader against a real pack:
+Download the material maps once, pinned to Bedrock 1.26.60 (about 46 MB):
 
 ```powershell
-.\gradlew.bat test --rerun -PbedrockPack="C:\XboxGames\Minecraft for Windows\Content\data\resource_packs"
+git clone --depth 1 --branch v1.26.60.5 --filter=blob:none --sparse https://github.com/Mojang/bedrock-samples "$HOME\bedrock-samples"
+```
+```powershell
+git -C "$HOME\bedrock-samples" sparse-checkout set --no-cone "/resource_pack/textures/**/*.texture_set.json" "/resource_pack/textures/**/*_mers.*" "/resource_pack/textures/**/*_normal.tga"
+```
+
+The mod picks up `$HOME\bedrock-samples\resource_pack` automatically and layers it over the install. To use
+other folders instead, create `run\config\bedrockvisuals-packs.txt` (for the dev client) listing one folder
+per line, lowest priority first; an install's `resource_packs` folder expands to its vanilla stack.
+
+To test the loader against both sources, separated by a semicolon:
+
+```powershell
+.\gradlew.bat test --rerun "-PbedrockPack=C:\XboxGames\Minecraft for Windows\Content\data\resource_packs;$HOME\bedrock-samples\resource_pack"
 ```
 
 ### Texture map

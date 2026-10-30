@@ -15,13 +15,16 @@ import java.util.stream.Stream;
 
 /**
  * Finds the Bedrock resource packs to read. A packs file, one folder per line, wins when present. Otherwise
- * the vanilla stack is taken from the Xbox app's install folder (Bedrock 1.21.120 and later) on any drive.
+ * the vanilla stack is taken from the Xbox app's install folder (Bedrock 1.21.120 and later) on any drive,
+ * with Mojang's bedrock-samples pack on top when it has been downloaded to the user's home folder: the
+ * install keeps its texture images in a form the mod can't read, so the material maps come from there.
  *
  * <p>Bedrock builds vanilla from several packs: vanilla_base, vanilla, then one vanilla_&lt;version&gt;
  * pack per release with that release's changes. Later versions override earlier ones.
  */
 public final class BedrockInstall {
 	static final Path INSTALL_SUFFIX = Path.of("XboxGames", "Minecraft for Windows", "Content", "data", "resource_packs");
+	static final Path SAMPLES = Path.of(System.getProperty("user.home"), "bedrock-samples", "resource_pack");
 	private static final Pattern VERSIONED = Pattern.compile("vanilla_(\\d+(\\.\\d+)*)");
 
 	private BedrockInstall() {
@@ -36,13 +39,34 @@ public final class BedrockInstall {
 		if (Files.isRegularFile(packsFile)) {
 			return readPacksFile(packsFile);
 		}
+		List<Path> stack = new ArrayList<>();
 		for (Path root : FileSystems.getDefault().getRootDirectories()) {
 			Path packs = root.resolve(INSTALL_SUFFIX);
 			if (Files.isDirectory(packs.resolve("vanilla"))) {
-				return vanillaStack(packs);
+				stack.addAll(vanillaStack(packs));
+				break;
 			}
 		}
-		return List.of();
+		if (Files.isDirectory(SAMPLES)) {
+			stack.add(SAMPLES);
+		}
+		return stack;
+	}
+
+	/**
+	 * Expands each folder: an install's resource_packs folder becomes its vanilla stack, anything else is
+	 * one pack.
+	 */
+	public static List<Path> expand(List<Path> folders) {
+		List<Path> stack = new ArrayList<>();
+		for (Path folder : folders) {
+			if (Files.isDirectory(folder.resolve("vanilla"))) {
+				stack.addAll(vanillaStack(folder));
+			} else {
+				stack.add(folder);
+			}
+		}
+		return stack;
 	}
 
 	/** vanilla_base, vanilla, then the versioned vanilla packs oldest first. */

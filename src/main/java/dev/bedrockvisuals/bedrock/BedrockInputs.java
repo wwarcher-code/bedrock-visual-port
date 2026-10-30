@@ -28,7 +28,7 @@ public final class BedrockInputs {
 	public static void load(Path configDir) {
 		textureMap = TextureMap.load();
 		Path packsFile = configDir.resolve("bedrockvisuals-packs.txt");
-		List<Path> packs = BedrockInstall.findPacks(packsFile);
+		List<Path> packs = BedrockInstall.expand(BedrockInstall.findPacks(packsFile));
 		if (packs.isEmpty()) {
 			BedrockVisualsClient.LOGGER.warn("[bedrock] no Bedrock install found; list your pack folders in {}", packsFile);
 			return;
@@ -38,8 +38,7 @@ public final class BedrockInputs {
 				BedrockVisualsClient.LOGGER.warn("[bedrock] pack folder {} does not exist", folder);
 			}
 		}
-		BedrockVisualsClient.LOGGER.info("[bedrock] loading {} packs from {}: {}", packs.size(), packs.getFirst().getParent(),
-				packs.stream().map(p -> p.getFileName().toString()).toList());
+		BedrockVisualsClient.LOGGER.info("[bedrock] loading {} packs: {}", packs.size(), packs);
 
 		long start = System.nanoTime();
 		BedrockPack loaded = BedrockPack.load(packs);

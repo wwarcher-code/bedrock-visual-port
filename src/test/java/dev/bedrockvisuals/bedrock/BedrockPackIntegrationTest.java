@@ -9,9 +9,9 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
- * Loads a real Bedrock pack. Skipped unless Gradle gets -PbedrockPack=&lt;folder&gt;: an install's
- * resource_packs folder (its vanilla stack is loaded), or a single pack such as resource_pack in Mojang's
- * bedrock-samples.
+ * Loads a real Bedrock pack. Skipped unless Gradle gets -PbedrockPack=&lt;folders&gt;, separated by
+ * semicolons, lowest priority first: an install's resource_packs folder (its vanilla stack is loaded), or a
+ * single pack such as resource_pack in Mojang's bedrock-samples.
  */
 class BedrockPackIntegrationTest {
 	@Test
@@ -19,10 +19,8 @@ class BedrockPackIntegrationTest {
 		String folder = System.getProperty("bedrockPack", "");
 		assumeTrue(!folder.isEmpty(), "no -PbedrockPack given");
 
-		Path path = Path.of(folder);
-		List<Path> packs = java.nio.file.Files.isDirectory(path.resolve("vanilla"))
-				? BedrockInstall.vanillaStack(path) : List.of(path);
-		BedrockPack pack = BedrockPack.load(packs);
+		List<Path> folders = java.util.Arrays.stream(folder.split(";")).map(String::strip).map(Path::of).toList();
+		BedrockPack pack = BedrockPack.load(BedrockInstall.expand(folders));
 		System.out.println(pack.summary());
 		pack.problems().stream().limit(20).forEach(System.out::println);
 		if (pack.problems().size() > 20) {
@@ -36,7 +34,8 @@ class BedrockPackIntegrationTest {
 
 		TextureMap map = TextureMap.load();
 		long found = List.of("oak_log", "red_wool", "stone", "oak_planks", "glass")
-				.stream().filter(t -> map.textureSetFor(pack, t).isPresent()).count();
+				.stream().filter(t -> map.textureSetFor(pack, t)
+						.filter(set -> set.material().isPresent()).isPresent()).count();
 		assertEquals(5, found);
 	}
 }

@@ -52,11 +52,13 @@ class BedrockPackTest {
 	void badFilesAreReportedNotThrown() throws IOException {
 		write(temp.resolve("fogs/broken.json"), "{ not json");
 		write(temp.resolve("textures/blocks/stone.texture_set.json"),
-				"{\"format_version\": \"1.21.30\", \"minecraft:texture_set\": {\"color\": \"stone\"}}");
+				"{\"format_version\": \"1.21.30\", \"minecraft:texture_set\": {\"color\": \"stone\", "
+						+ "\"metalness_emissive_roughness_subsurface\": \"stone_mers\"}}");
 
 		BedrockPack pack = BedrockPack.load(List.of(temp));
 		assertTrue(pack.problems().stream().anyMatch(p -> p.contains("broken.json")));
-		// stone.png doesn't exist, so the texture set is reported too.
+		// stone_mers doesn't exist, so the texture set is reported too. (A missing color image is fine: block
+		// colors come from Java's textures.)
 		assertTrue(pack.problems().stream().anyMatch(p -> p.contains("stone.texture_set.json")));
 	}
 
