@@ -41,7 +41,10 @@ public final class ShadowPass {
 
 	private static GpuTexture depth;
 	private static GpuTextureView depthView;
-	/** The pass needs a color attachment beside the depth; nothing is written to it. */
+	/**
+	 * The pass carries a color attachment beside the depth, matched by the pipeline's color target
+	 * ({@link ShadowTerrainPipelines#UNUSED_COLOR}); nothing is written to it.
+	 */
 	private static GpuTexture unusedColor;
 	private static GpuTextureView unusedColorView;
 	private static GpuBuffer data;

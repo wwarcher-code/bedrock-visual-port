@@ -1,9 +1,12 @@
 package dev.bedrockvisuals.render;
 
+import com.mojang.renderpearl.api.GpuFormat;
 import com.mojang.renderpearl.api.pipeline.BindGroupLayout;
+import com.mojang.renderpearl.api.pipeline.ColorTargetState;
 import com.mojang.renderpearl.api.pipeline.RenderPipeline;
 import com.mojang.renderpearl.api.pipeline.UniformType;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -12,6 +15,13 @@ import java.util.concurrent.ConcurrentHashMap;
  * those once per frame, so a second view through its matrices would be ignored).
  */
 public final class ShadowTerrainPipelines {
+	/**
+	 * The shadow pass's unused color attachment; the pipeline must declare a target matching it, so it does,
+	 * with writes off.
+	 */
+	static final ColorTargetState UNUSED_COLOR = new ColorTargetState(Optional.empty(), GpuFormat.R8_UNORM,
+			ColorTargetState.WRITE_NONE);
+
 	static final BindGroupLayout SHADOW_DATA = BindGroupLayout.builder()
 			.withUniform("ShadowData", UniformType.UNIFORM_BUFFER)
 			.build();
@@ -28,6 +38,7 @@ public final class ShadowTerrainPipelines {
 	private static RenderPipeline build(RenderPipeline sodium) {
 		return SodiumPipelineVariants.copy(sodium, "shadow")
 				.withBindGroupLayout(SHADOW_DATA)
+				.withColorTargetState(UNUSED_COLOR)
 				.withCull(false)
 				.build();
 	}
