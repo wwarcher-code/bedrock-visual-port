@@ -19,7 +19,7 @@
 		"sodium": "*"
 	},
 	"suggests": {
-		"voxy": "*",
+		"distanthorizons": "3.3.4",
 		"replaymod": "*"
 	}
 }

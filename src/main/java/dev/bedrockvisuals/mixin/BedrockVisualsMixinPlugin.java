@@ -12,7 +12,6 @@ import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
 public class BedrockVisualsMixinPlugin implements IMixinConfigPlugin {
 	private static final Map<String, String> MOD_BY_PACKAGE = Map.of(
 			".sodium.", "sodium",
-			".voxy.", "voxy",
 			".replaymod.", "replaymod");
 
 	@Override

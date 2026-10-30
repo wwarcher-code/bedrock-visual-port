@@ -21,21 +21,22 @@ dependencies {
 	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 
-	// Hooked mods. Compiled against so mixins can target their classes; none is bundled.
-	// Only Sodium runs in the dev client: Voxy 0.2.20 refuses the Vulkan backend, and
-	// Replay Mod is added per spike (drop its jar into run/mods).
+	// Hooked mods. Compiled against so hooks can target their classes; none is bundled.
+	// Sodium and Distant Horizons run in the dev client; Replay Mod is added per spike
+	// (drop its jar into run/mods).
 	compileOnly "maven.modrinth:sodium:${project.sodium_version}"
-	compileOnly "maven.modrinth:voxy:${project.voxy_version}"
+	compileOnly "maven.modrinth:distanthorizons:${project.distanthorizons_version}"
 	compileOnly "maven.modrinth:replaymod:${project.replaymod_version}"
 	localRuntime "maven.modrinth:sodium:${project.sodium_version}"
+	localRuntime "maven.modrinth:distanthorizons:${project.distanthorizons_version}"
 }
 
 processResources {
 	def props = [
-		version          : project.version,
-		sodium_version   : project.sodium_loaded_version,
-		voxy_version     : project.voxy_loaded_version,
-		replaymod_version: project.replaymod_loaded_version,
+		version                : project.version,
+		sodium_version         : project.sodium_loaded_version,
+		distanthorizons_version: project.distanthorizons_loaded_version,
+		replaymod_version      : project.replaymod_loaded_version,
 	]
 	inputs.properties props
 
