@@ -2,8 +2,6 @@ package dev.bedrockvisuals.bedrock;
 
 import com.google.gson.JsonObject;
 import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -12,13 +10,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.BiFunction;
-import java.util.stream.Stream;
 
 /**
  * Everything Vibrant Visuals reads from one or more Bedrock resource packs, layered in order: a later pack
  * replaces an earlier pack's file with the same identifier or texture name, as Bedrock's pack stack does.
  *
- * <p>Loading never fails on a single bad file; it is skipped and listed in {@link #problems()}.
+ * <p>Installed packs bundle their JSON into .brarchive files; those are read like loose files. Loading
+ * never fails on a single bad file; it is skipped and listed in {@link #problems()}.
  */
 public final class BedrockPack {
 	private static final String TEXTURE_SET_SUFFIX = ".texture_set.json";
@@ -44,17 +42,16 @@ public final class BedrockPack {
 	/** @param packRoots resource pack folders (each holding manifest.json), lowest priority first */
 	public static BedrockPack load(List<Path> packRoots) {
 		BedrockPack pack = new BedrockPack();
-		for (Path root : packRoots) {
-			pack.readPack(root);
-		}
+		PackFiles files = PackFiles.of(packRoots, pack.problems);
+		pack.read(files);
 		pack.resolveSettings();
 		return pack;
 	}
 
-	private void readPack(Path root) {
+	private void read(PackFiles files) {
 		for (SettingsKind kind : SettingsKind.values()) {
-			for (Path file : jsonFiles(root.resolve(kind.folder), false)) {
-				read(file, json -> {
+			for (String path : jsonFiles(files, kind.folder, false)) {
+				read(files, path, json -> {
 					JsonObject settings = BedrockJson.object(json, kind.rootKey);
 					String id = BedrockJson.string(BedrockJson.object(settings, "description"), "identifier", null);
 					if (id == null) {
@@ -64,35 +61,31 @@ public final class BedrockPack {
 				});
 			}
 		}
-		for (Path file : jsonFiles(root.resolve("biomes"), false)) {
-			if (file.getFileName().toString().endsWith(".client_biome.json")) {
-				read(file, json -> {
+		for (String path : jsonFiles(files, "biomes", false)) {
+			if (path.endsWith(".client_biome.json")) {
+				read(files, path, json -> {
 					JsonObject biome = BedrockJson.object(json, ClientBiome.KEY);
 					String id = BedrockJson.string(BedrockJson.object(biome, "description"), "identifier", null);
 					biomes.put(id, ClientBiome.parse(id, biome));
 				});
 			}
 		}
-		Path textures = root.resolve("textures");
-		for (Path file : jsonFiles(textures, true)) {
-			String fileName = file.getFileName().toString();
-			if (fileName.endsWith(TEXTURE_SET_SUFFIX)) {
-				String name = textures.relativize(file).toString().replace('\\', '/');
-				name = name.substring(0, name.length() - TEXTURE_SET_SUFFIX.length());
-				String finalName = name;
-				read(file, json -> textureSets.put(finalName,
-						TextureSet.parse(finalName, file.getParent(), BedrockJson.object(json, TextureSet.KEY))));
+		for (String path : jsonFiles(files, "textures", true)) {
+			if (path.endsWith(TEXTURE_SET_SUFFIX)) {
+				// Named by path under textures/, e.g. "blocks/stone".
+				String name = path.substring("textures/".length(), path.length() - TEXTURE_SET_SUFFIX.length());
+				String folder = path.substring(0, path.lastIndexOf('/') + 1);
+				read(files, path, json -> textureSets.put(name, TextureSet.parse(name,
+						base -> files.image(folder + base), BedrockJson.object(json, TextureSet.KEY))));
 			}
 		}
-		Path localLighting = root.resolve("local_lighting/local_lighting.json");
-		Path pointLights = root.resolve("point_lights/global.json");
-		Path lightsFile = Files.isRegularFile(localLighting) ? localLighting : pointLights;
-		if (Files.isRegularFile(lightsFile)) {
-			read(lightsFile, json -> localLights = LocalLights.parse(json));
+		String lights = files.exists("local_lighting/local_lighting.json")
+				? "local_lighting/local_lighting.json" : "point_lights/global.json";
+		if (files.exists(lights)) {
+			read(files, lights, json -> localLights = LocalLights.parse(json));
 		}
-		Path pbr = root.resolve("pbr/global.json");
-		if (Files.isRegularFile(pbr)) {
-			read(pbr, json -> pbrFallback = PbrFallback.parse(json));
+		if (files.exists("pbr/global.json")) {
+			read(files, "pbr/global.json", json -> pbrFallback = PbrFallback.parse(json));
 		}
 	}
 
@@ -139,23 +132,16 @@ public final class BedrockPack {
 		void accept(JsonObject json) throws IOException;
 	}
 
-	private void read(Path file, JsonConsumer consumer) {
+	private void read(PackFiles files, String path, JsonConsumer consumer) {
 		try {
-			consumer.accept(BedrockJson.read(file));
+			consumer.accept(files.json(path));
 		} catch (IOException | RuntimeException e) {
-			problems.add(file + ": " + e.getMessage());
+			problems.add(path + ": " + e.getMessage());
 		}
 	}
 
-	private static List<Path> jsonFiles(Path folder, boolean recursive) {
-		if (!Files.isDirectory(folder)) {
-			return List.of();
-		}
-		try (Stream<Path> files = recursive ? Files.walk(folder) : Files.list(folder)) {
-			return files.filter(f -> f.toString().endsWith(".json") && Files.isRegularFile(f)).sorted().toList();
-		} catch (IOException e) {
-			throw new UncheckedIOException(e);
-		}
+	private static List<String> jsonFiles(PackFiles files, String folder, boolean recursive) {
+		return files.list(folder, recursive).stream().filter(path -> path.endsWith(".json")).toList();
 	}
 
 	public List<String> problems() {

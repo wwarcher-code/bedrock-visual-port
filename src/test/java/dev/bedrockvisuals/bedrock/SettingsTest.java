@@ -66,7 +66,7 @@ class SettingsTest {
 	@Test
 	void merConstantsHaveNoSubsurface() {
 		JsonObject set = BedrockJson.parse("{\"color\": \"#FF0000\", \"metalness_emissive_roughness\": [255, 0, 128]}");
-		TextureSet textureSet = TextureSet.parse("test", java.nio.file.Path.of("."), set);
+		TextureSet textureSet = TextureSet.parse("test", base -> java.util.Optional.empty(), set);
 		assertFalse(textureSet.hasSubsurface());
 		assertEquals(0, textureSet.material().constant().a(), EPSILON);
 		assertEquals(1, textureSet.material().constant().r(), EPSILON);
