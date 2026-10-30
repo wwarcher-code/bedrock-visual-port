@@ -30,4 +30,11 @@ class LightingStateTest {
 		assertEquals((float) Math.cos(Math.toRadians(30)), noon.y, EPSILON);
 		assertEquals(0, noon.x, EPSILON);
 	}
+
+	@Test
+	void exposureBrightensAsTheLightFades() {
+		assertEquals(1, LightingState.exposure(1), EPSILON);
+		assertEquals(2, LightingState.exposure(0.25f), EPSILON);
+		assertEquals(2.5f, LightingState.exposure(0), EPSILON);
+	}
 }

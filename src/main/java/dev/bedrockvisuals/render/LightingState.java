@@ -31,10 +31,19 @@ public record LightingState(
 	private static final float SUN_SCALE = 1f / 100f;
 	/** TUNE: Bedrock's full moon (0.4) maps to a dim but readable night. */
 	private static final float MOON_SCALE = 0.12f / 0.4f;
-	/** TUNE: how strongly the sky's zenith color fills shadowed faces. */
-	private static final float SKY_FILL = 1.5f;
+	/**
+	 * TUNE: how strongly the sky's zenith color fills shadowed faces. Kept well below the sun: at 1.5 the blue
+	 * fill outweighed the afternoon sun on green surfaces and shadows all but vanished.
+	 */
+	private static final float SKY_FILL = 0.4f;
 	/** TUNE: Bedrock's ambient illuminance (0.02 in vanilla) as a floor everywhere. */
-	private static final float AMBIENT_SCALE = 5f;
+	private static final float AMBIENT_SCALE = 2.5f;
+	/**
+	 * TUNE: a stand-in for Bedrock's automatic exposure, which brightens the image as the light fades:
+	 * 1 / sqrt(key light), where the key is the sun and moon level, capped at {@link #MAX_EXPOSURE}.
+	 */
+	private static final float MIN_KEY_LIGHT = 0.16f;
+	private static final float MAX_EXPOSURE = 2.5f;
 	/** Warm torchlight; Bedrock's local light colors replace it once a pack defines them. */
 	private static final Vector3f BLOCK_LIGHT = new Vector3f(1.0f, 0.72f, 0.45f);
 
@@ -56,15 +65,20 @@ public record LightingState(
 		float sunLevel = lighting.sun().illuminance().sample(time) * SUN_SCALE;
 		float moonLevel = lighting.moon().illuminance().sample(time) * MOON_SCALE;
 		float skyIntensity = lighting.skyIntensity().sample(time);
+		float exposure = exposure(sunLevel + moonLevel);
 		return new LightingState(
 				sunDirection,
-				linear(lighting.sun().color().sample(time)).mul(sunLevel),
+				linear(lighting.sun().color().sample(time)).mul(sunLevel * exposure),
 				new Vector3f(sunDirection).negate(),
-				linear(lighting.moon().color().sample(time)).mul(moonLevel),
+				linear(lighting.moon().color().sample(time)).mul(moonLevel * exposure),
 				// The zenith color's own curve already darkens through the evening.
-				linear(zenith).mul(SKY_FILL * skyIntensity),
-				linear(lighting.ambientColor()).mul(lighting.ambientIlluminance() * AMBIENT_SCALE),
+				linear(zenith).mul(SKY_FILL * skyIntensity * exposure),
+				linear(lighting.ambientColor()).mul(lighting.ambientIlluminance() * AMBIENT_SCALE * exposure),
 				new Vector3f(BLOCK_LIGHT));
+	}
+
+	static float exposure(float keyLight) {
+		return Math.min(1f / (float) Math.sqrt(Math.max(keyLight, MIN_KEY_LIGHT)), MAX_EXPOSURE);
 	}
 
 	private static LightingState fallback(float time) {
