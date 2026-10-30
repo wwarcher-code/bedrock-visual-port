@@ -55,6 +55,27 @@ Select-String -Path run\logs\latest.log -Pattern "\[spike|\[bedrock\]|matches th
 DH keeps compositing and fogging as normal until the renderer's composite exists (step 2) and calls
 `setRendererOwnsComposite(true)`.
 
+## G-buffer (step 2)
+
+Before Minecraft's main pass, the mod draws Sodium's solid and cutout terrain a second time into its own
+G-buffer: four 8-bit RGBA targets plus a depth buffer, sized to the window.
+
+| Target | Contents |
+| --- | --- |
+| albedo | block color: texture times vertex tint and ambient occlusion, no lighting |
+| normal | world-space face normal, mapped to 0–1 |
+| material | metalness, emissive, roughness, subsurface; for now Bedrock's fallback (fully rough) |
+| light | red: block light, green: sky light |
+
+The normal frame is untouched; step 3's deferred lighting replaces it. Press **F7** in game to cycle the
+screen through albedo, normal, material, light and back to normal (rebind it under Controls, Miscellaneous).
+The log shows `[gbuffer] first terrain pass drawn into <width>x<height> G-buffer` once the pass runs. If the
+pass fails, it logs `[gbuffer] terrain pass failed` with the error and switches itself off; the game keeps
+running.
+
+Known limits for now: translucent terrain (water, glass) and Distant Horizons terrain aren't in the
+G-buffer yet; albedo still includes Minecraft's per-face shading baked into Sodium's vertex colors.
+
 ## Flashback
 
 Flashback is reached through FREX's flawless frames API, which it already uses to tell renderers an export
