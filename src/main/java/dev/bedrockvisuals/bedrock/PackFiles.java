@@ -49,6 +49,16 @@ final class PackFiles {
 	static PackFiles of(List<Path> packRoots, List<String> problems) {
 		PackFiles view = new PackFiles();
 		for (Path root : packRoots) {
+			if (!Files.isDirectory(root)) {
+				continue;
+			}
+			try {
+				// Files.walk doesn't follow a pack folder that is itself a link.
+				root = root.toRealPath();
+			} catch (IOException e) {
+				problems.add(root + ": " + e.getMessage());
+				continue;
+			}
 			view.addLoose(root);
 			view.addArchives(root, problems);
 		}
@@ -56,9 +66,6 @@ final class PackFiles {
 	}
 
 	private void addLoose(Path root) {
-		if (!Files.isDirectory(root)) {
-			return;
-		}
 		try (Stream<Path> walk = Files.walk(root)) {
 			walk.filter(Files::isRegularFile).forEach(file -> {
 				String path = relative(root, file);

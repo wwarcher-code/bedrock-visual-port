@@ -9,8 +9,9 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
- * Loads a real Bedrock pack. Skipped unless Gradle gets -PbedrockPack=&lt;folder&gt; (the vanilla pack in a
- * Bedrock install, or resource_pack in Mojang's bedrock-samples).
+ * Loads a real Bedrock pack. Skipped unless Gradle gets -PbedrockPack=&lt;folder&gt;: an install's
+ * resource_packs folder (its vanilla stack is loaded), or a single pack such as resource_pack in Mojang's
+ * bedrock-samples.
  */
 class BedrockPackIntegrationTest {
 	@Test
@@ -18,7 +19,10 @@ class BedrockPackIntegrationTest {
 		String folder = System.getProperty("bedrockPack", "");
 		assumeTrue(!folder.isEmpty(), "no -PbedrockPack given");
 
-		BedrockPack pack = BedrockPack.load(List.of(Path.of(folder)));
+		Path path = Path.of(folder);
+		List<Path> packs = java.nio.file.Files.isDirectory(path.resolve("vanilla"))
+				? BedrockInstall.vanillaStack(path) : List.of(path);
+		BedrockPack pack = BedrockPack.load(packs);
 		System.out.println(pack.summary());
 		pack.problems().forEach(System.out::println);
 		assertEquals(List.of(), pack.problems());

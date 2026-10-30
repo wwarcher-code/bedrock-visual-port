@@ -37,10 +37,13 @@ dependencies {
 test {
 	useJUnitPlatform()
 	// Optional: run BedrockPackIntegrationTest against a real pack, e.g.
-	// .\gradlew.bat test -PbedrockPack="C:\XboxGames\Minecraft for Windows\Content\data\resource_packs\vanilla"
+	// .\gradlew.bat test --rerun -PbedrockPack="C:\XboxGames\Minecraft for Windows\Content\data\resource_packs"
 	def bedrockPack = providers.gradleProperty('bedrockPack')
 	inputs.property 'bedrockPack', bedrockPack.orElse('')
 	systemProperty 'bedrockPack', bedrockPack.orElse('').get()
+	testLogging {
+		showStandardStreams = true
+	}
 }
 
 processResources {

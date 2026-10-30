@@ -89,7 +89,7 @@ C:\XboxGames\Minecraft for Windows\Content\data\resource_packs\vanilla
 To test the loader against a real pack:
 
 ```powershell
-.\gradlew.bat test -PbedrockPack="C:\XboxGames\Minecraft for Windows\Content\data\resource_packs\vanilla_1.26.60"
+.\gradlew.bat test --rerun -PbedrockPack="C:\XboxGames\Minecraft for Windows\Content\data\resource_packs"
 ```
 
 ### Texture map
