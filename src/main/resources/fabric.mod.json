@@ -1,0 +1,25 @@
+{
+	"schemaVersion": 1,
+	"id": "bedrockvisuals",
+	"version": "${version}",
+	"name": "Bedrock Visuals",
+	"description": "Personal-use deferred PBR renderer reproducing Bedrock's Vibrant Visuals on the native Vulkan backend.",
+	"authors": ["Liam"],
+	"license": "All-Rights-Reserved",
+	"environment": "client",
+	"entrypoints": {
+		"client": ["dev.bedrockvisuals.BedrockVisualsClient"]
+	},
+	"mixins": ["bedrockvisuals.mixins.json"],
+	"depends": {
+		"fabricloader": ">=0.20.1",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*",
+		"sodium": "*"
+	},
+	"suggests": {
+		"voxy": "*",
+		"replaymod": "*"
+	}
+}

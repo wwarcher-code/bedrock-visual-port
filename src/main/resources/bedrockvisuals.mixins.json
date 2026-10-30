@@ -1,0 +1,14 @@
+{
+	"required": true,
+	"package": "dev.bedrockvisuals.mixin",
+	"plugin": "dev.bedrockvisuals.mixin.BedrockVisualsMixinPlugin",
+	"compatibilityLevel": "JAVA_25",
+	"client": [
+		"sodium.DefaultChunkRendererMixin",
+		"voxy.AbstractRenderPipelineMixin",
+		"replaymod.VideoRendererMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

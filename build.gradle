@@ -1,0 +1,49 @@
+plugins {
+	id 'net.fabricmc.fabric-loom' version "${loom_version}"
+}
+
+repositories {
+	exclusiveContent {
+		forRepository {
+			maven {
+				name = 'Modrinth'
+				url = 'https://api.modrinth.com/maven'
+			}
+		}
+		filter {
+			includeGroup 'maven.modrinth'
+		}
+	}
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+	// Hooked mods. Compiled against so mixins can target their classes; none is bundled.
+	// Only Sodium runs in the dev client: Voxy 0.2.20 refuses the Vulkan backend, and
+	// Replay Mod is added per spike (drop its jar into run/mods).
+	compileOnly "maven.modrinth:sodium:${project.sodium_version}"
+	compileOnly "maven.modrinth:voxy:${project.voxy_version}"
+	compileOnly "maven.modrinth:replaymod:${project.replaymod_version}"
+	localRuntime "maven.modrinth:sodium:${project.sodium_version}"
+}
+
+processResources {
+	def props = [
+		version          : project.version,
+		sodium_version   : project.sodium_loaded_version,
+		voxy_version     : project.voxy_loaded_version,
+		replaymod_version: project.replaymod_loaded_version,
+	]
+	inputs.properties props
+
+	filesMatching(['fabric.mod.json', 'bedrockvisuals.pins.properties']) {
+		expand props
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+}
