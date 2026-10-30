@@ -75,23 +75,21 @@ exports; its public API doesn't expose that setting.
 
 ## Bedrock inputs
 
-At startup the mod reads Bedrock's vanilla resource pack and logs a `[bedrock]` summary. It looks on every
-drive for `XboxGames\Minecraft for Windows\Content\data\resource_packs\vanilla`, where the Xbox app installs
-Bedrock since 1.21.120. If Bedrock is somewhere else, or you want to add packs on top, create
-`run\config\bedrockvisuals-packs.txt` (for the dev client) listing one pack folder per line, lowest priority
-first:
+At startup the mod reads Bedrock's vanilla packs and logs a `[bedrock]` summary. Bedrock builds vanilla from a
+stack: `vanilla_base`, `vanilla`, then one `vanilla_<version>` pack per release, newest winning. The mod
+finds that stack on any drive under `XboxGames\Minecraft for Windows\Content\data\resource_packs`, where the
+Xbox app installs Bedrock since 1.21.120. To use other folders, or add packs on top, create
+`run\config\bedrockvisuals-packs.txt` (for the dev client) listing one pack folder per line, lowest
+priority first:
 
 ```
 C:\XboxGames\Minecraft for Windows\Content\data\resource_packs\vanilla
 ```
 
-The `[bedrock]` log also lists the other packs installed beside vanilla, to check whether Vibrant Visuals
-content lives in a separate pack.
-
 To test the loader against a real pack:
 
 ```powershell
-.\gradlew.bat test -PbedrockPack="C:\XboxGames\Minecraft for Windows\Content\data\resource_packs\vanilla"
+.\gradlew.bat test -PbedrockPack="C:\XboxGames\Minecraft for Windows\Content\data\resource_packs\vanilla_1.26.60"
 ```
 
 ### Texture map

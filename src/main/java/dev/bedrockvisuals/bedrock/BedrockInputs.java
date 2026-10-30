@@ -38,8 +38,8 @@ public final class BedrockInputs {
 				BedrockVisualsClient.LOGGER.warn("[bedrock] pack folder {} does not exist", folder);
 			}
 		}
-		BedrockVisualsClient.LOGGER.info("[bedrock] loading packs {}", packs);
-		BedrockVisualsClient.LOGGER.info("[bedrock] packs installed beside it: {}", BedrockInstall.siblingPacks(packs.getFirst()));
+		BedrockVisualsClient.LOGGER.info("[bedrock] loading {} packs from {}: {}", packs.size(), packs.getFirst().getParent(),
+				packs.stream().map(p -> p.getFileName().toString()).toList());
 
 		long start = System.nanoTime();
 		BedrockPack loaded = BedrockPack.load(packs);

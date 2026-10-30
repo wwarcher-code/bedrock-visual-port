@@ -1,5 +1,6 @@
 package dev.bedrockvisuals.compat;
 
+import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.renderpearl.api.commands.RenderPass;
 import dev.bedrockvisuals.BedrockVisualsClient;
 import java.util.Set;
@@ -20,8 +21,8 @@ public final class SodiumAdapter {
 
 	public static void onTerrainPass(TerrainRenderPass pass, RenderPass renderPass) {
 		if (REPORTED.add(pass)) {
-			BedrockVisualsClient.LOGGER.info("[spike 1a] Sodium terrain pass {} (translucent={}) target={} renderPass={}",
-					pass.getPipeline(), pass.isTranslucent(), pass.getTarget(), renderPass.getClass().getName());
+			BedrockVisualsClient.LOGGER.info("[spike 1a] Sodium terrain pass {} (translucent={}) target={} backend={}",
+					pass.getPipeline(), pass.isTranslucent(), pass.getTarget(), RenderSystem.getBackendDescription());
 		}
 	}
 }

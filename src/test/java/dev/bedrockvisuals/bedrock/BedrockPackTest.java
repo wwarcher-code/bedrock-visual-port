@@ -69,4 +69,14 @@ class BedrockPackTest {
 		assertTrue(set.hasSubsurface());
 		assertTrue(set.material().image().toString().endsWith("crimson_planks_mers.tga"));
 	}
+
+	@Test
+	void vanillaStackOrdersVersionsNumerically() throws IOException {
+		for (String name : List.of("vanilla_1.21.120", "vanilla", "chemistry", "vanilla_1.21.20", "vanilla_base",
+				"vanilla_1.26.60", "experimental_y_2026_drop_1")) {
+			Files.createDirectories(temp.resolve(name));
+		}
+		List<String> stack = BedrockInstall.vanillaStack(temp).stream().map(p -> p.getFileName().toString()).toList();
+		assertEquals(List.of("vanilla_base", "vanilla", "vanilla_1.21.20", "vanilla_1.21.120", "vanilla_1.26.60"), stack);
+	}
 }
