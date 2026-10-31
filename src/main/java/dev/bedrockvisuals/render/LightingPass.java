@@ -38,6 +38,7 @@ public final class LightingPass {
 			.withUniform("Depth", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("ShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
+			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
 			.build();
 
 	private static final RenderPipeline PIPELINE = RenderPipeline.builder()
@@ -51,6 +52,7 @@ public final class LightingPass {
 			.build();
 
 	private static GpuBuffer data;
+	private static GpuBuffer grading;
 
 	private LightingPass() {
 	}
@@ -61,6 +63,8 @@ public final class LightingPass {
 		if (data == null) {
 			data = RenderSystem.getDevice().createBuffer(() -> "Bedrock Visuals lighting data",
 					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, DATA_SIZE);
+			grading = RenderSystem.getDevice().createBuffer(() -> "Bedrock Visuals grading data",
+					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, ColorGrading.DATA_SIZE);
 		}
 		CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
 		Matrix4f inverseViewProjection = new Matrix4f(projection).mul(modelView).invert();
@@ -81,6 +85,9 @@ public final class LightingPass {
 					.putVec4(GBufferDebugView.showsShadows() ? 1 : 0, 0, 0, 0);
 			putVec4(builder, light.skyHorizon(), 0);
 			encoder.writeToBuffer(data.slice(), builder.get());
+			Std140Builder gradingBuilder = Std140Builder.onStack(stack, ColorGrading.DATA_SIZE);
+			ColorGrading.write(gradingBuilder, ColorGrading.current());
+			encoder.writeToBuffer(grading.slice(), gradingBuilder.get());
 		}
 
 		GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
@@ -96,6 +103,7 @@ public final class LightingPass {
 			pass.setUniform("ShadowMap", ShadowPass.depthView() != null ? ShadowPass.depthView() : gbuffer.depthView(),
 					nearest);
 			pass.setUniform("LightingData", data);
+			pass.setUniform("GradingData", grading);
 			pass.draw(3, 1, 0, 0);
 		}
 	}

@@ -42,6 +42,7 @@ class SettingsTest {
 				  "tone_mapping": {"operator": "reinhard_luminance"}}}""", ColorGradingSettings.KEY));
 		assertEquals(Vec3.of(1.15f), grading.midtones().contrast());
 		assertEquals(Vec3.of(1), grading.midtones().gain());
+		assertEquals(Vec3.of(2.2f), grading.midtones().gamma());
 		assertFalse(grading.shadows().enabled());
 		assertTrue(grading.temperature().inverted());
 		assertEquals(6500, grading.temperature().kelvin(), EPSILON);

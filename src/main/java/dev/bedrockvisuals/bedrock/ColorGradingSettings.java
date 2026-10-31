@@ -24,7 +24,8 @@ public record ColorGradingSettings(
 					thresholdKey == null ? 0 : BedrockJson.number(json, thresholdKey, defaultThreshold),
 					BedrockJson.vec3(json, "contrast", Vec3.of(1)),
 					BedrockJson.vec3(json, "gain", Vec3.of(1)),
-					BedrockJson.vec3(json, "gamma", Vec3.of(1)),
+					// Applied as the final encoding after tone mapping; Bedrock's documented standard is 2.2.
+					BedrockJson.vec3(json, "gamma", Vec3.of(2.2f)),
 					BedrockJson.vec3(json, "offset", Vec3.of(0)),
 					BedrockJson.vec3(json, "saturation", Vec3.of(1)));
 		}
