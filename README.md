@@ -64,11 +64,12 @@ G-buffer: four 8-bit RGBA targets plus a depth buffer, sized to the window.
 | --- | --- |
 | albedo | block color: texture times vertex tint and ambient occlusion, no lighting |
 | normal | world-space face normal, mapped to 0–1 |
-| material | metalness, emissive, roughness, subsurface; for now Bedrock's fallback (fully rough) |
+| material | metalness, emissive, roughness, subsurface, from Bedrock's material maps (step 4) |
 | light | red: block light, green: sky light |
 
-Press **F7** in game to cycle the
-screen through albedo, normal, material, light and back to normal (rebind it under Controls, Miscellaneous).
+Press **F7** in game to cycle the screen through albedo, normal, material, light, the shadow test (white
+lit, black shadowed, red outside the shadow map) and back to normal (rebind it under Controls,
+Miscellaneous).
 The log shows `[gbuffer] first terrain pass drawn into <width>x<height> G-buffer` once the pass runs. If the
 pass fails, it logs `[gbuffer] terrain pass failed` with the error and switches itself off; the game keeps
 running.
@@ -89,11 +90,17 @@ What lights each pixel:
 
 - **Sun and moon:** direction from the time of day (and Bedrock's orbital offset); color and brightness
   from the Bedrock lighting settings for the player's biome. Shadows come from the shadow map below.
-- **Sky fill:** Bedrock's zenith sky color, scaled by sky light.
+- **Sky fill:** the sky hemisphere each face sees, blending Bedrock's horizon and zenith sky colors by the
+  face's direction, plus sun and sky light bouncing off the ground onto faces turned towards it; scaled
+  by sky light.
+- **Reflected sky:** smooth and metallic surfaces mirror the sky gradient in the reflected direction,
+  weighted by Fresnel and roughness, until real reflections exist.
 - **Ambient, block light and emissive:** Bedrock's ambient floor, a warm torch color by block light, and
   the material buffer's emissive channel.
-- **Surface model:** Lambert diffuse plus GGX specular from the material buffer (all fully rough until the
-  Bedrock material maps are wired in), then a filmic tone curve until Bedrock's tone mapping in step 7.
+- **Surface model:** Lambert diffuse plus GGX specular from the material buffer, then Bedrock's color
+  grading and tone mapping (step 7).
+- **Exposure:** a stand-in for Bedrock's automatic exposure brightens the image as the sun and moon fade,
+  up to 2.5x.
 
 Bedrock's files give brightness curves but not how its renderer exposes them, so the scale factors marked
 `TUNE` in `LightingState` are placeholders for the fidelity pass. The log shows `[lighting] first frame lit
@@ -111,6 +118,37 @@ Sodium hands every pass the chunks the camera can see, so for now terrain behind
 from it casts no shadows into view; sky light still darkens caves, whose roofs may be missing from the
 map. The log shows `[shadows] first shadow map drawn` once the pass runs; if it fails it logs
 `[shadows] shadow pass failed` and the lighting carries on without shadows.
+
+## Materials (step 4)
+
+`MaterialAtlas` builds a second texture laid out exactly like Java's block atlas, with each Java sprite's
+rectangle holding the Bedrock material map (MERS) of the texture set the texture map points it at, and
+Bedrock's PBR fallback everywhere else. The G-buffer shader reads it at the block texture coordinates, with
+the block atlas's sampler, so materials filter and mip like colors. It is rebuilt whenever Minecraft
+recreates the block atlas and logs `[materials] built ... material atlas`. Animated Bedrock textures (a
+strip of frames) contribute their first frame. Subsurface scattering is stored but not used yet.
+
+Bedrock's material maps are TGA files, which Minecraft can't read; `TgaImage` decodes them, and matches
+Pillow on all 3,328 TGA files in the 1.26.60 samples.
+
+## Color grading and tone mapping (step 7)
+
+The lighting pass ends as Bedrock documents it: the biome's color grading on the HDR color (temperature,
+then saturation, contrast about the scene's average luminance, gain and offset, with optional shadow and
+highlight bands), then the biome's tone-mapping operator, then its gamma as the final encoding. All six
+operators are implemented. Two pieces are approximations marked `TUNE`: "generic", vanilla's operator, is
+Mojang's unpublished hand-tuned curve, approximated from ACES; and the average luminance is fixed at
+middle grey until the renderer measures it.
+
+## Checking shaders
+
+`tools\check_shaders.py` compiles every shader with glslangValidator, resolving includes from the mod and
+the Sodium jar, with and without the cutout define, so GLSL errors show up without launching the game. It
+needs Python and glslangValidator (from the Vulkan SDK) on the path:
+
+```powershell
+py tools\check_shaders.py "$env:USERPROFILE\.gradle\caches\modules-2\files-2.1\maven.modrinth\sodium\mc26.3-0.9.2-fabric\<hash>\sodium-mc26.3-0.9.2-fabric.jar"
+```
 
 ## Flashback
 
@@ -168,9 +206,10 @@ Java and Bedrock name many block textures differently (`oak_log` against `log_oa
 `src\main\resources\bedrockvisuals\texture_map.json` maps 1,137 of Java 26.3's 1,300 block textures to
 Bedrock's. Most of the rest are beds (entity textures in Bedrock), block-breaking stages and debug blocks.
 It is generated by pairing each block's faces in both editions, plus hand fixes in
-`tools\texture_map_overrides.json`. To regenerate after a version bump (needs Python, and the 26.3 client
-jar from Gradle's cache):
+`tools\texture_map_overrides.json`. To regenerate after a version bump, run the generator against a full
+(not sparse) `bedrock-samples` checkout of the new version, since it needs every block image's name and the
+install's images aren't readable files (needs Python, and the 26.3 client jar from Gradle's cache):
 
 ```powershell
-py tools\gen_texture_map.py "$env:USERPROFILE\.gradle\caches\fabric-loom\26.3\minecraft-client.jar" "C:\XboxGames\Minecraft for Windows\Content\data\resource_packs\vanilla"
+py tools\gen_texture_map.py "$env:USERPROFILE\.gradle\caches\fabric-loom\26.3\minecraft-client.jar" "<full bedrock-samples>\resource_pack"
 ```
