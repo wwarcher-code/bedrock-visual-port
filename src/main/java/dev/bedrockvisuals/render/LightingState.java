@@ -24,6 +24,7 @@ public record LightingState(
 		Vector3f moonDirection,
 		Vector3f moon,
 		Vector3f sky,
+		Vector3f skyHorizon,
 		Vector3f ambient,
 		Vector3f blockLight) {
 
@@ -32,10 +33,10 @@ public record LightingState(
 	/** TUNE: Bedrock's full moon (0.4) maps to a dim but readable night. */
 	private static final float MOON_SCALE = 0.12f / 0.4f;
 	/**
-	 * TUNE: how strongly the sky's zenith color fills shadowed faces. Kept well below the sun: at 1.5 the blue
-	 * fill outweighed the afternoon sun on green surfaces and shadows all but vanished.
+	 * TUNE: how strongly the sky fills shadowed faces. Kept well below the sun: at 1.5 the blue fill
+	 * outweighed the afternoon sun on green surfaces and shadows all but vanished.
 	 */
-	private static final float SKY_FILL = 0.4f;
+	private static final float SKY_FILL = 0.5f;
 	/** TUNE: Bedrock's ambient illuminance (0.02 in vanilla) as a floor everywhere. */
 	private static final float AMBIENT_SCALE = 2.5f;
 	/**
@@ -60,6 +61,7 @@ public record LightingState(
 				.unwrapKey().map(key -> key.identifier().toString()).orElse("minecraft:plains"));
 		LightingSettings lighting = pack.get().lighting(biome.lighting());
 		Rgba zenith = pack.get().atmosphere(biome.atmosphere()).skyZenithColor().sample(time);
+		Rgba horizon = pack.get().atmosphere(biome.atmosphere()).skyHorizonColor().sample(time);
 
 		Vector3f sunDirection = orbit(time, lighting.orbitalOffsetDegrees().sample(time));
 		float sunLevel = lighting.sun().illuminance().sample(time) * SUN_SCALE;
@@ -71,8 +73,9 @@ public record LightingState(
 				linear(lighting.sun().color().sample(time)).mul(sunLevel * exposure),
 				new Vector3f(sunDirection).negate(),
 				linear(lighting.moon().color().sample(time)).mul(moonLevel * exposure),
-				// The zenith color's own curve already darkens through the evening.
+				// The sky color curves already darken through the evening.
 				linear(zenith).mul(SKY_FILL * skyIntensity * exposure),
+				linear(horizon).mul(SKY_FILL * skyIntensity * exposure),
 				linear(lighting.ambientColor()).mul(lighting.ambientIlluminance() * AMBIENT_SCALE * exposure),
 				new Vector3f(BLOCK_LIGHT));
 	}
@@ -84,9 +87,10 @@ public record LightingState(
 	private static LightingState fallback(float time) {
 		Vector3f sunDirection = orbit(time, 0);
 		float day = Math.max(sunDirection.y, 0);
+		Vector3f sky = new Vector3f(0.15f, 0.2f, 0.3f).mul(day + 0.1f);
 		return new LightingState(sunDirection, new Vector3f(day), new Vector3f(sunDirection).negate(),
-				new Vector3f(0.12f * Math.max(-sunDirection.y, 0)), new Vector3f(0.15f, 0.2f, 0.3f).mul(day + 0.1f),
-				new Vector3f(0.1f), new Vector3f(BLOCK_LIGHT));
+				new Vector3f(0.12f * Math.max(-sunDirection.y, 0)), sky, new Vector3f(sky).mul(1.5f),
+				new Vector3f(0.05f), new Vector3f(BLOCK_LIGHT));
 	}
 
 	/**

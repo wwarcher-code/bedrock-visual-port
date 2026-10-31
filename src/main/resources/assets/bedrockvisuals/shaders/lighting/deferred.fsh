@@ -23,7 +23,11 @@ layout(std140) uniform LightingData {
     mat4 ShadowViewProjection;  // camera-relative world space to shadow clip space (ShadowProjection.java)
     vec4 ShadowParams;          // x: map valid, y: texel size in UV, z: normal offset in blocks, w: cast by the moon
     vec4 DebugParams;           // x: draw the shadow test instead of lit color
+    vec4 SkyHorizonColor;       // sky fill seen towards the horizon; SkyColor is the zenith's
 };
+
+// TUNE: share of light reaching the ground that bounces back onto faces turned towards it.
+const float GROUND_BOUNCE = 0.2;
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
@@ -139,9 +143,14 @@ void main() {
     vec3 color = directLight(n, v, sunDir, SunColor.rgb * sunVisibility, diffuseColor, f0, roughness);
     color += directLight(n, v, moonDir, MoonColor.rgb * moonVisibility, diffuseColor, f0, roughness);
 
-    // Sky fill brightest on upward faces, falling off with sky access.
-    float skyFacing = 0.6 + 0.4 * n.y;
-    color += diffuseColor * SkyColor.rgb * skyFacing * skyLight * skyLight;
+    // Sky fill from the hemisphere a face sees: upward faces see mostly the zenith, walls half the sky, mostly
+    // its brighter horizon, and their lower half the ground, which bounces back some sun and sky.
+    float upness = n.y * 0.5 + 0.5;
+    vec3 skySeen = mix(SkyHorizonColor.rgb, SkyColor.rgb, upness) * upness;
+    // The ground in front of a shaded wall is usually sunlit, so the bounce ignores this pixel's own shadow.
+    vec3 groundLight = SunColor.rgb * max(sunDir.y, 0.0) * skyFallback + SkyColor.rgb;
+    vec3 bounce = GROUND_BOUNCE * groundLight * (1.0 - upness);
+    color += diffuseColor * (skySeen + bounce) * skyLight * skyLight;
     color += diffuseColor * AmbientColor.rgb;
     color += diffuseColor * BlockLightColor.rgb * pow(blockLight, 3.0) * 1.2;
     color += albedo * emissive * 2.0;
