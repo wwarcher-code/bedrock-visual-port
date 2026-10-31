@@ -151,6 +151,15 @@ void main() {
     vec3 groundLight = SunColor.rgb * max(sunDir.y, 0.0) * skyFallback + SkyColor.rgb;
     vec3 bounce = GROUND_BOUNCE * groundLight * (1.0 - upness);
     color += diffuseColor * (skySeen + bounce) * skyLight * skyLight;
+
+    // Reflected sky: smooth and metallic surfaces mirror their surroundings. Until there are reflections, the
+    // sky gradient in the mirror direction stands in, fading out with roughness and sky access.
+    float nDotV = max(dot(n, v), 1e-4);
+    vec3 mirror = reflect(-v, n);
+    vec3 skyInMirror = mix(SkyHorizonColor.rgb, SkyColor.rgb, clamp(mirror.y * 0.5 + 0.5, 0.0, 1.0));
+    vec3 grazingF0 = max(vec3(1.0 - roughness), f0);
+    vec3 skyFresnel = f0 + (grazingF0 - f0) * pow(1.0 - nDotV, 5.0);
+    color += skyInMirror * skyFresnel * (1.0 - 0.7 * roughness) * skyLight * skyLight;
     color += diffuseColor * AmbientColor.rgb;
     color += diffuseColor * BlockLightColor.rgb * pow(blockLight, 3.0) * 1.2;
     color += albedo * emissive * 2.0;

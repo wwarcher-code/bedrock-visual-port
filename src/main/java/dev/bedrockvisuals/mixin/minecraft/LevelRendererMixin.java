@@ -46,7 +46,7 @@ abstract class LevelRendererMixin {
 			FeatureRenderDispatcher.PreparedFrame frame, boolean arg4, boolean arg5, CallbackInfo ci) {
 		RenderTarget main = targets.main.get();
 		DeferredRenderer.beforeMainPass(chunks, main, chunkLayerSampler,
-				textureManager.getTexture(TextureAtlas.LOCATION_BLOCKS).getTextureView());
+				(TextureAtlas) textureManager.getTexture(TextureAtlas.LOCATION_BLOCKS));
 	}
 
 	@Redirect(method = "executeSolid", at = @At(value = "INVOKE",

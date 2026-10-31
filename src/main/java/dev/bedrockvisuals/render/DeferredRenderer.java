@@ -4,12 +4,12 @@ import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.renderpearl.api.textures.GpuSampler;
-import com.mojang.renderpearl.api.textures.GpuTextureView;
 import dev.bedrockvisuals.BedrockVisualsClient;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.renderer.chunk.ChunkSectionsToRender;
+import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.network.chat.Component;
 
 /**
@@ -44,13 +44,13 @@ public final class DeferredRenderer {
 
 	/** Called just before Minecraft opens its main render pass. */
 	public static void beforeMainPass(ChunkSectionsToRender chunks, RenderTarget main, GpuSampler sampler,
-			GpuTextureView blockAtlas) {
+			TextureAtlas blockAtlas) {
 		replacedTerrain = false;
 		LightingState light = enabled && !lightingFailed ? LightingState.current() : null;
 		if (light != null) {
-			ShadowPass.render(chunks, sampler, blockAtlas, light);
+			ShadowPass.render(chunks, sampler, blockAtlas.getTextureView(), light);
 		}
-		GBufferPass.render(chunks, main, sampler, blockAtlas);
+		GBufferPass.render(chunks, main, sampler, blockAtlas.getTextureView(), MaterialAtlas.view(blockAtlas));
 		if (light == null || !GBufferPass.hasTerrain()) {
 			return;
 		}

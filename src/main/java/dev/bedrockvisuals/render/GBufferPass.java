@@ -70,13 +70,14 @@ public final class GBufferPass {
 		return MODEL_VIEW;
 	}
 
-	public static void render(ChunkSectionsToRender chunks, RenderTarget main, GpuSampler sampler, GpuTextureView blockAtlas) {
+	public static void render(ChunkSectionsToRender chunks, RenderTarget main, GpuSampler sampler, GpuTextureView blockAtlas,
+			GpuTextureView materials) {
 		drewTerrain = false;
 		if (disabled) {
 			return;
 		}
 		try {
-			renderTerrain(chunks, main, sampler, blockAtlas);
+			renderTerrain(chunks, main, sampler, blockAtlas, materials);
 		} catch (RuntimeException e) {
 			disabled = true;
 			drewTerrain = false;
@@ -91,7 +92,7 @@ public final class GBufferPass {
 	}
 
 	private static void renderTerrain(ChunkSectionsToRender chunks, RenderTarget main, GpuSampler sampler,
-			GpuTextureView blockAtlas) {
+			GpuTextureView blockAtlas, GpuTextureView materials) {
 		GBUFFER.ensureSize(main.width, main.height);
 		CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
 		RenderPassDescriptor.Builder descriptor = RenderPassDescriptor.builder(() -> "Bedrock Visuals G-buffer terrain");
@@ -103,6 +104,8 @@ public final class GBufferPass {
 		active = true;
 		try (RenderPass pass = encoder.createRenderPass(descriptor.build())) {
 			RenderSystem.bindDefaultUniforms(pass);
+			// Same sampler as the block atlas, so materials filter and mip exactly like colors.
+			pass.setUniform("u_MaterialTex", materials, sampler);
 			chunks.renderGroup(ChunkSectionLayerGroup.OPAQUE, pass, sampler, blockAtlas, false);
 		} finally {
 			active = false;

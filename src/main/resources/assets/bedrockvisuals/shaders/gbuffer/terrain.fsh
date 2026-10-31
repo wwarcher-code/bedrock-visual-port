@@ -10,6 +10,7 @@ layout(location = 2) in vec2 v_LightCoord;
 layout(location = 3) in vec3 v_Position;
 
 uniform sampler2D u_BlockTex;
+uniform sampler2D u_MaterialTex; // Bedrock MERS laid out like the block atlas (MaterialAtlas.java)
 
 layout(location = 0) out vec4 out_Albedo;
 layout(location = 1) out vec4 out_Normal;
@@ -52,8 +53,6 @@ void main() {
 
     out_Albedo = vec4(min(color.rgb / faceShade(normal), vec3(1.0)), 1.0);
     out_Normal = vec4(normal * 0.5 + 0.5, 1.0);
-    // Bedrock's PBR fallback for blocks until texture-set materials arrive in step 4: fully rough,
-    // non-metallic, non-emissive, no subsurface.
-    out_Material = vec4(0.0, 0.0, 1.0, 0.0);
+    out_Material = texture(u_MaterialTex, v_TexCoord);
     out_Light = vec4(v_LightCoord, 0.0, 1.0);
 }
