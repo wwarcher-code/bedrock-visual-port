@@ -183,6 +183,11 @@ public final class BedrockPack {
 		return Optional.ofNullable(textureSets.get(name));
 	}
 
+	/** Every loaded texture set's name, e.g. "blocks/stone". */
+	public java.util.Set<String> textureSetNames() {
+		return java.util.Collections.unmodifiableSet(textureSets.keySet());
+	}
+
 	public LocalLights localLights() {
 		return localLights;
 	}

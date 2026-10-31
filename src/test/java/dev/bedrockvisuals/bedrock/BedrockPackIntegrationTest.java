@@ -37,5 +37,22 @@ class BedrockPackIntegrationTest {
 				.stream().filter(t -> map.textureSetFor(pack, t)
 						.filter(set -> set.material().isPresent()).isPresent()).count();
 		assertEquals(5, found);
+
+		// Every material map a block texture set points at decodes.
+		List<String> undecodable = new java.util.ArrayList<>();
+		int decoded = 0;
+		for (String name : pack.textureSetNames()) {
+			TextureSet set = pack.textureSet(name).orElseThrow();
+			if (name.startsWith("blocks/") && set.material().image() != null) {
+				try {
+					TgaImage.read(set.material().image());
+					decoded++;
+				} catch (java.io.IOException e) {
+					undecodable.add(name + ": " + e.getMessage());
+				}
+			}
+		}
+		System.out.println(decoded + " block material maps decoded");
+		assertEquals(List.of(), undecodable);
 	}
 }
