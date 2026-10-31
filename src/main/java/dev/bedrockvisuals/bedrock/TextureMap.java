@@ -38,6 +38,11 @@ public final class TextureMap {
 		}
 	}
 
+	/** Every mapped Java block texture name. */
+	public java.util.Set<String> javaTextures() {
+		return javaToBedrock.keySet();
+	}
+
 	public int size() {
 		return javaToBedrock.size();
 	}

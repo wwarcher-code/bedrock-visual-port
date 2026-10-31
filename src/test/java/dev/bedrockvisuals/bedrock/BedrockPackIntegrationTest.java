@@ -54,5 +54,33 @@ class BedrockPackIntegrationTest {
 		}
 		System.out.println(decoded + " block material maps decoded");
 		assertEquals(List.of(), undecodable);
+
+		// A material atlas with every mapped Java texture in a 16x16 grid slot.
+		List<String> names = map.javaTextures().stream().sorted().toList();
+		int columns = 64;
+		int rows = (names.size() + columns - 1) / columns;
+		List<MaterialAtlasImage.Slot> slots = new java.util.ArrayList<>();
+		for (int i = 0; i < names.size(); i++) {
+			slots.add(new MaterialAtlasImage.Slot(names.get(i), (i % columns) * 16, (i / columns) * 16, 16, 16));
+		}
+		MaterialAtlasImage.Result atlas = MaterialAtlasImage.build(columns * 16, rows * 16, 5, slots,
+				name -> map.textureSetFor(pack, name), pack.pbrFallback().blocks());
+		System.out.println(atlas.filledSlots() + " of " + slots.size() + " atlas slots filled from texture sets");
+		assertEquals(List.of(), atlas.problems());
+		assertTrue(atlas.filledSlots() > 900);
+
+		// Bedrock's iron block averages metalness 191 and roughness 137 of 255.
+		MaterialAtlasImage.Slot iron = slots.get(names.indexOf("iron_block"));
+		long metal = 0;
+		long rough = 0;
+		for (int y = 0; y < 16; y++) {
+			for (int x = 0; x < 16; x++) {
+				int value = atlas.levels().getFirst()[(iron.y() + y) * atlas.width() + iron.x() + x];
+				metal += value >> 16 & 0xFF;
+				rough += value & 0xFF;
+			}
+		}
+		assertEquals(191, metal / 256.0, 1);
+		assertEquals(137, rough / 256.0, 1);
 	}
 }
