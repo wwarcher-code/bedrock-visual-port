@@ -24,8 +24,8 @@ import org.lwjgl.system.MemoryUtil;
 /**
  * The GPU copy of {@link MaterialAtlasImage}: Bedrock's material maps at the same texture coordinates as
  * Java's block atlas, so the G-buffer shader reads material and color with one UV. Rebuilt whenever Minecraft
- * recreates the block atlas (resource reloads); without a Bedrock pack, a single texel of Bedrock's default
- * fallback (fully rough) stands in.
+ * recreates the block atlas (resource reloads); without a Bedrock pack, or if building fails, a single texel
+ * of Bedrock's default fallback (fully rough) stands in.
  */
 public final class MaterialAtlas {
 	private static final Rgba ROUGH = new Rgba(0, 0, 1, 0);
@@ -35,6 +35,8 @@ public final class MaterialAtlas {
 	/** The block atlas texture the current material atlas was built for. */
 	private static GpuTexture builtFor;
 	private static GpuTextureView placeholder;
+	/** Set when building fails; the fallback material is used until restart and the error is logged once. */
+	private static boolean failed;
 
 	private MaterialAtlas() {
 	}
@@ -45,8 +47,15 @@ public final class MaterialAtlas {
 		if (pack.isEmpty() || atlasTexture == null) {
 			return placeholder();
 		}
-		if (atlasTexture != builtFor) {
-			rebuild(blockAtlas, atlasTexture, pack.get(), BedrockInputs.textureMap());
+		if (atlasTexture != builtFor && !failed) {
+			try {
+				rebuild(blockAtlas, atlasTexture, pack.get(), BedrockInputs.textureMap());
+			} catch (RuntimeException e) {
+				failed = true;
+				close();
+				BedrockVisualsClient.LOGGER.error("[materials] building the material atlas failed; blocks use the "
+						+ "fallback material until restart", e);
+			}
 		}
 		return view != null ? view : placeholder();
 	}
