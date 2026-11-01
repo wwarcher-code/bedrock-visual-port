@@ -4,6 +4,8 @@ import dev.bedrockvisuals.bedrock.BedrockInputs;
 import dev.bedrockvisuals.compat.DistantHorizonsAdapter;
 import dev.bedrockvisuals.compat.FlawlessFrames;
 import dev.bedrockvisuals.compat.PinnedVersions;
+import dev.bedrockvisuals.devtools.DevCommands;
+import dev.bedrockvisuals.devtools.TestCapture;
 import dev.bedrockvisuals.render.DeferredRenderer;
 import dev.bedrockvisuals.render.GBufferDebugView;
 import net.fabricmc.api.ClientModInitializer;
@@ -25,5 +27,7 @@ public class BedrockVisualsClient implements ClientModInitializer {
 		FlawlessFrames.register();
 		GBufferDebugView.register();
 		DeferredRenderer.register();
+		TestCapture.register();
+		DevCommands.register();
 	}
 }

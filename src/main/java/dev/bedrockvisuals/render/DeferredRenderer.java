@@ -70,6 +70,18 @@ public final class DeferredRenderer {
 		}
 	}
 
+	public static boolean isEnabled() {
+		return enabled;
+	}
+
+	public static void setEnabled(boolean on) {
+		enabled = on;
+	}
+
+	public static boolean lightingFailed() {
+		return lightingFailed;
+	}
+
 	/** Whether Minecraft's main pass should skip drawing Sodium's opaque terrain this frame. */
 	public static boolean replacesTerrain() {
 		return replacedTerrain;

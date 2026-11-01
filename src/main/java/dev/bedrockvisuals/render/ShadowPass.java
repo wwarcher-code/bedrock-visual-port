@@ -75,6 +75,10 @@ public final class ShadowPass {
 		return valid;
 	}
 
+	public static boolean isDisabled() {
+		return disabled;
+	}
+
 	/** Whether the map was cast from the moon rather than the sun. */
 	public static boolean fromMoon() {
 		return fromMoon;

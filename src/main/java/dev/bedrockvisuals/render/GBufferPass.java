@@ -57,6 +57,10 @@ public final class GBufferPass {
 		drewTerrain = true;
 	}
 
+	public static boolean isDisabled() {
+		return disabled;
+	}
+
 	/** True when this frame's G-buffer holds terrain, so it can replace the vanilla terrain draw. */
 	public static boolean hasTerrain() {
 		return drewTerrain && !disabled;

@@ -37,6 +37,7 @@ public final class MaterialAtlas {
 	private static GpuTextureView placeholder;
 	/** Set when building fails; the fallback material is used until restart and the error is logged once. */
 	private static boolean failed;
+	private static String status = "not built yet";
 
 	private MaterialAtlas() {
 	}
@@ -55,6 +56,7 @@ public final class MaterialAtlas {
 				close();
 				BedrockVisualsClient.LOGGER.error("[materials] building the material atlas failed; blocks use the "
 						+ "fallback material until restart", e);
+				status = "FAILED: " + e;
 			}
 		}
 		return view != null ? view : placeholder();
@@ -90,9 +92,16 @@ public final class MaterialAtlas {
 		}
 
 		image.problems().stream().limit(10).forEach(p -> BedrockVisualsClient.LOGGER.warn("[materials] {}", p));
+		status = String.format("%dx%d, %d mip levels, %d of %d block sprites from Bedrock texture sets, %d problems",
+				width, height, image.levels().size(), image.filledSlots(), slots.size(), image.problems().size());
 		BedrockVisualsClient.LOGGER.info("[materials] built {}x{} material atlas with {} mip levels in {} ms: "
 						+ "{} of {} block sprites from Bedrock texture sets", width, height, image.levels().size(),
 				(System.nanoTime() - start) / 1_000_000, image.filledSlots(), slots.size());
+	}
+
+	/** A one-line summary of the last build, for diagnostics. */
+	public static String status() {
+		return BedrockInputs.pack().isEmpty() ? "no Bedrock pack; fallback material" : status;
 	}
 
 	private static void upload(CommandEncoder encoder, int[] argb, int level, int width, int height) {

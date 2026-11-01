@@ -14,7 +14,7 @@ import net.minecraft.network.chat.Component;
  * sees it (white lit, black shadowed, red outside the shadow map; needs deferred lighting on).
  */
 public final class GBufferDebugView {
-	private enum View {
+	public enum View {
 		OFF("off", null),
 		ALBEDO("albedo", GBuffer.Target.ALBEDO),
 		NORMAL("normal", GBuffer.Target.NORMAL),
@@ -22,7 +22,7 @@ public final class GBufferDebugView {
 		LIGHT("light", GBuffer.Target.LIGHT),
 		SHADOWS("shadows", null);
 
-		final String label;
+		public final String label;
 		final GBuffer.Target target;
 
 		View(String label, GBuffer.Target target) {
@@ -49,6 +49,14 @@ public final class GBufferDebugView {
 				}
 			}
 		});
+	}
+
+	public static View view() {
+		return showing;
+	}
+
+	public static void setView(View view) {
+		showing = view;
 	}
 
 	/** True when the lighting pass should draw its shadow test instead of lit color. */
