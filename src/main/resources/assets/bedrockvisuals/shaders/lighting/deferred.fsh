@@ -37,8 +37,9 @@ layout(std140) uniform GradingData {
     vec4 ToneMapping;  // x: operator (ColorGradingSettings.ToneMapping order), y: average luminance
 };
 
-// TUNE: share of light reaching the ground that bounces back onto faces turned towards it.
-const float GROUND_BOUNCE = 0.2;
+// Share of light reaching the ground that bounces back onto faces turned towards it: a neutral ground albedo
+// of 0.12 times a bounce strength, fitted with LightingState's factors to Bedrock screenshots.
+const float GROUND_BOUNCE = 0.175;
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
@@ -113,7 +114,7 @@ vec3 tonemap(vec3 c) {
     if (operator == 4) {
         return aces(c);
     }
-    const float GENERIC_SATURATION = 0.885;
+    const float GENERIC_SATURATION = 0.907;
     c = max(mix(vec3(luminance), c, GENERIC_SATURATION), 0.0);
     return clamp(c * (aces(vec3(luminance)).x / max(luminance, 1e-5)), 0.0, 1.0);
 }
@@ -218,12 +219,14 @@ void main() {
     vec3 color = directLight(n, v, sunDir, SunColor.rgb * sunVisibility, diffuseColor, f0, roughness);
     color += directLight(n, v, moonDir, MoonColor.rgb * moonVisibility, diffuseColor, f0, roughness);
 
-    // Sky fill from the hemisphere a face sees: upward faces see mostly the zenith, walls half the sky, mostly
-    // its brighter horizon, and their lower half the ground, which bounces back some sun and sky.
+    // Sky fill from the hemisphere a face sees: upward faces see all of the sky, walls half of it and the
+    // ground below, which bounces back some sun, moon and sky. The fill takes the zenith's color even on walls:
+    // in Bedrock, shaded walls are blue, not the paler horizon haze (the fit settled on all zenith).
     float upness = n.y * 0.5 + 0.5;
-    vec3 skySeen = mix(SkyHorizonColor.rgb, SkyColor.rgb, upness) * upness;
+    vec3 skySeen = SkyColor.rgb * upness;
     // The ground in front of a shaded wall is usually sunlit, so the bounce ignores this pixel's own shadow.
-    vec3 groundLight = SunColor.rgb * max(sunDir.y, 0.0) * skyFallback + SkyColor.rgb;
+    vec3 groundLight = (SunColor.rgb * max(sunDir.y, 0.0) + MoonColor.rgb * max(moonDir.y, 0.0)) * skyFallback
+            + SkyColor.rgb;
     vec3 bounce = GROUND_BOUNCE * groundLight * (1.0 - upness);
     color += diffuseColor * (skySeen + bounce) * skyLight * skyLight;
 
@@ -231,12 +234,16 @@ void main() {
     // sky gradient in the mirror direction stands in, fading out with roughness and sky access.
     float nDotV = max(dot(n, v), 1e-4);
     vec3 mirror = reflect(-v, n);
-    vec3 skyInMirror = mix(SkyHorizonColor.rgb, SkyColor.rgb, clamp(mirror.y * 0.5 + 0.5, 0.0, 1.0));
+    // The horizon color is the glow towards the sun at sunset; most of the horizon is closer to the zenith's
+    // blue, so it gets at most 30% (at full weight, walls facing away from the sun turned pink).
+    float horizonShare = 0.3 * (1.0 - clamp(mirror.y * 0.5 + 0.5, 0.0, 1.0));
+    vec3 skyInMirror = mix(SkyColor.rgb, SkyHorizonColor.rgb, horizonShare);
     vec3 grazingF0 = max(vec3(1.0 - roughness), f0);
     vec3 skyFresnel = f0 + (grazingF0 - f0) * pow(1.0 - nDotV, 5.0);
     color += skyInMirror * skyFresnel * (1.0 - 0.7 * roughness) * skyLight * skyLight;
     color += diffuseColor * AmbientColor.rgb;
-    color += diffuseColor * BlockLightColor.rgb * pow(blockLight, 3.0) * 1.2;
+    // BlockLightColor carries its exposure (LightingState.blockLightStrength): faint by day, strong at night.
+    color += diffuseColor * BlockLightColor.rgb * pow(blockLight, 3.0);
     color += albedo * emissive * 2.0;
 
     fragColor = vec4(pow(clamp(tonemap(grade(color)), 0.0, 1.0), 1.0 / max(Gamma.rgb, vec3(0.1))), 1.0);

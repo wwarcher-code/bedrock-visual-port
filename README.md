@@ -94,21 +94,21 @@ What lights each pixel:
 
 - **Sun and moon:** direction from the time of day (and Bedrock's orbital offset); color and brightness
   from the Bedrock lighting settings for the player's biome. Shadows come from the shadow map below.
-- **Sky fill:** the sky hemisphere each face sees, blending Bedrock's horizon and zenith sky colors by the
-  face's direction, plus sun and sky light bouncing off the ground onto faces turned towards it; scaled
-  by sky light.
+- **Sky fill:** the share of the sky each face sees, in Bedrock's zenith sky color (shaded walls come out
+  blue, as in Bedrock), plus sun, moon and sky light bouncing off the ground onto faces turned towards it;
+  scaled by sky light.
 - **Reflected sky:** smooth and metallic surfaces mirror the sky gradient in the reflected direction,
   weighted by Fresnel and roughness, until real reflections exist.
-- **Ambient, block light and emissive:** Bedrock's ambient floor, a warm torch color by block light, and
-  the material buffer's emissive channel.
+- **Ambient, block light and emissive:** Bedrock's ambient floor, a warm torch color by block light (faint
+  by day and strong at night, as Bedrock's exposure makes it), and the material buffer's emissive channel.
 - **Surface model:** Lambert diffuse plus GGX specular from the material buffer, then Bedrock's color
   grading and tone mapping (step 7).
 - **Exposure:** a stand-in for Bedrock's automatic exposure brightens the image as the sun and moon fade,
   by up to 1.44x, so evenings stay nearly as bright as noon.
 
-Bedrock's files give brightness curves but not how its renderer exposes them. The sky fill, ambient, moon
-and exposure factors in `LightingState`, and the "generic" tone map's saturation, were fitted to Vibrant
-Visuals screenshots of the test scene at four times of day (TESTING.md, "Bedrock reference shots"). The log shows `[lighting] first frame lit
+Bedrock's files give brightness curves but not how its renderer exposes them. The sky fill, bounce, ambient,
+moon, block light and exposure factors in `LightingState`, and the "generic" tone map's saturation, were
+fitted to Vibrant Visuals screenshots of the test scene's grass and a shaded wall at four times of day (TESTING.md, "Bedrock reference shots"). The log shows `[lighting] first frame lit
 by the deferred lighting pass` once it runs; if the pass fails it logs `[lighting] deferred lighting failed`
 and falls back to vanilla terrain.
 
