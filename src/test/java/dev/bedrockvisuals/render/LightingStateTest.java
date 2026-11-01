@@ -33,8 +33,9 @@ class LightingStateTest {
 
 	@Test
 	void exposureBrightensAsTheLightFades() {
-		assertEquals(1, LightingState.exposure(1), EPSILON);
-		assertEquals(2, LightingState.exposure(0.25f), EPSILON);
-		assertEquals(2.5f, LightingState.exposure(0), EPSILON);
+		assertEquals(1.5f, LightingState.exposure(1), EPSILON);
+		assertEquals(1.5f / 0.8f, LightingState.exposure(0.8f), EPSILON);
+		assertEquals(1.5f * 1.44f, LightingState.exposure(0.25f), EPSILON);
+		assertEquals(1.5f * 1.44f, LightingState.exposure(0), EPSILON);
 	}
 }

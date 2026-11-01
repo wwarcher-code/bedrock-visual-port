@@ -90,9 +90,9 @@ vec3 hable(vec3 c) {
 }
 
 // Bedrock's six operators, numbered as ColorGradingSettings.ToneMapping. Reinhard's extended forms use a white
-// point of 4. "Generic" is Mojang's hand-tuned curve with no published formula; until the fidelity pass,
-// it is approximated as ACES applied half per channel, half to luminance, to keep more hue saturation in
-// bright areas as Bedrock's documentation describes.
+// point of 4. "Generic" is Mojang's hand-tuned curve with no published formula. It is approximated as ACES on
+// luminance, which keeps hue, after a slight desaturation: both fitted to Bedrock screenshots of the test
+// scene (LightingState.java).
 vec3 tonemap(vec3 c) {
     int operator = int(ToneMapping.x + 0.5);
     const float WHITE = 4.0;
@@ -113,8 +113,9 @@ vec3 tonemap(vec3 c) {
     if (operator == 4) {
         return aces(c);
     }
-    vec3 byLuminance = c * (aces(vec3(luminance)).x / max(luminance, 1e-5));
-    return clamp(mix(aces(c), byLuminance, 0.5), 0.0, 1.0);
+    const float GENERIC_SATURATION = 0.885;
+    c = max(mix(vec3(luminance), c, GENERIC_SATURATION), 0.0);
+    return clamp(c * (aces(vec3(luminance)).x / max(luminance, 1e-5)), 0.0, 1.0);
 }
 
 float ggx(float nDotH, float roughness) {

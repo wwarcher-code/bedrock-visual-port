@@ -16,7 +16,7 @@ import org.joml.Vector3f;
  * at the current time of day. Colors are linear RGB.
  *
  * <p>Bedrock's files give illuminance curves (the sun peaks at 100) but not how its renderer exposes them,
- * so the scale factors marked TUNE are placeholders until the fidelity pass compares against Bedrock.
+ * so the scale factors were fitted to Bedrock screenshots of the test scene (see below).
  */
 public record LightingState(
 		Vector3f sunDirection,
@@ -30,21 +30,26 @@ public record LightingState(
 
 	/** TUNE: Bedrock's noon sun illuminance maps to 1. */
 	private static final float SUN_SCALE = 1f / 100f;
-	/** TUNE: Bedrock's full moon (0.4) maps to a dim but readable night. */
-	private static final float MOON_SCALE = 0.12f / 0.4f;
-	/**
-	 * TUNE: how strongly the sky fills shadowed faces. Kept well below the sun: at 1.5 the blue fill
-	 * outweighed the afternoon sun on green surfaces and shadows all but vanished.
+	/*
+	 * The factors below were fitted to Bedrock 1.26.60 itself: the test scene's grass, measured in Vibrant
+	 * Visuals screenshots at noon, afternoon, low sun and midnight, against this renderer's model of the same
+	 * pixel (sun, sky fill, ambient, moon, grading, tone map). The fit lands within about 5 sRGB levels per
+	 * channel at all four times. Bedrock lights far more from the sky and its ambient floor than from the
+	 * sun, which is why its orange evening sun barely tints the ground.
 	 */
-	private static final float SKY_FILL = 0.5f;
-	/** TUNE: Bedrock's ambient illuminance (0.02 in vanilla) as a floor everywhere. */
-	private static final float AMBIENT_SCALE = 2.5f;
+	/** Bedrock's full moon (0.4) is a faint light; the night is mostly the ambient floor. */
+	private static final float MOON_SCALE = 0.1f;
+	/** How strongly the sky's zenith color fills faces that see the sky. */
+	private static final float SKY_FILL = 1.05f;
+	/** Bedrock's ambient illuminance (0.02 in vanilla) as a floor everywhere. */
+	private static final float AMBIENT_SCALE = 7.5f;
 	/**
-	 * TUNE: a stand-in for Bedrock's automatic exposure, which brightens the image as the light fades:
-	 * 1 / sqrt(key light), where the key is the sun and moon level, capped at {@link #MAX_EXPOSURE}.
+	 * A stand-in for Bedrock's automatic exposure: a base exposure, brightened in proportion as the key light
+	 * (the sun and moon level) fades, by at most {@link #MAX_COMPENSATION}. In practice everything but full
+	 * noon sits at the cap, so evenings stay nearly as bright as noon, as in Bedrock.
 	 */
-	private static final float MIN_KEY_LIGHT = 0.16f;
-	private static final float MAX_EXPOSURE = 2.5f;
+	private static final float BASE_EXPOSURE = 1.5f;
+	private static final float MAX_COMPENSATION = 1.44f;
 	/** Warm torchlight; Bedrock's local light colors replace it once a pack defines them. */
 	private static final Vector3f BLOCK_LIGHT = new Vector3f(1.0f, 0.72f, 0.45f);
 
@@ -81,7 +86,7 @@ public record LightingState(
 	}
 
 	static float exposure(float keyLight) {
-		return Math.min(1f / (float) Math.sqrt(Math.max(keyLight, MIN_KEY_LIGHT)), MAX_EXPOSURE);
+		return BASE_EXPOSURE * Math.min(1f / Math.max(keyLight, 1e-4f), MAX_COMPENSATION);
 	}
 
 	private static LightingState fallback(float time) {

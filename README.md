@@ -104,10 +104,11 @@ What lights each pixel:
 - **Surface model:** Lambert diffuse plus GGX specular from the material buffer, then Bedrock's color
   grading and tone mapping (step 7).
 - **Exposure:** a stand-in for Bedrock's automatic exposure brightens the image as the sun and moon fade,
-  up to 2.5x.
+  by up to 1.44x, so evenings stay nearly as bright as noon.
 
-Bedrock's files give brightness curves but not how its renderer exposes them, so the scale factors marked
-`TUNE` in `LightingState` are placeholders for the fidelity pass. The log shows `[lighting] first frame lit
+Bedrock's files give brightness curves but not how its renderer exposes them. The sky fill, ambient, moon
+and exposure factors in `LightingState`, and the "generic" tone map's saturation, were fitted to Vibrant
+Visuals screenshots of the test scene at four times of day (TESTING.md, "Bedrock reference shots"). The log shows `[lighting] first frame lit
 by the deferred lighting pass` once it runs; if the pass fails it logs `[lighting] deferred lighting failed`
 and falls back to vanilla terrain.
 
@@ -140,8 +141,9 @@ Pillow on all 3,328 TGA files in the 1.26.60 samples.
 The lighting pass ends as Bedrock documents it: the biome's color grading on the HDR color (temperature,
 then saturation, contrast about the scene's average luminance, gain and offset, with optional shadow and
 highlight bands), then the biome's tone-mapping operator, then its gamma as the final encoding. All six
-operators are implemented. Two pieces are approximations marked `TUNE`: "generic", vanilla's operator, is
-Mojang's unpublished hand-tuned curve, approximated from ACES; and the average luminance is fixed at
+operators are implemented. Two pieces are approximations: "generic", vanilla's operator, is Mojang's
+unpublished hand-tuned curve, approximated as hue-preserving ACES with its saturation fitted to Bedrock
+screenshots; and the average luminance is fixed at
 middle grey until the renderer measures it.
 
 ## Checking shaders
