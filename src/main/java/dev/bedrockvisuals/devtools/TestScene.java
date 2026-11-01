@@ -10,7 +10,7 @@ import net.minecraft.client.Minecraft;
  *
  * <p>Every command is relative to the player's block and the scene always faces north, whichever way the
  * player looks: the last command snaps the player to the centre of their block, looking north and slightly
- * down at it. From there, left to right: a water pool, a stone-brick pillar with a torch, a roofed overhang
+ * down at it. From there: a water pool in front on the left; behind it, left to right, a stone-brick pillar with a torch, a roofed overhang
  * that shades the ground beneath it, and an oak tree; in front, a row of material samples. The sun crosses
  * from east to west, so shadows fall across the view. Needs cheats on.
  */
@@ -40,8 +40,9 @@ public final class TestScene {
 		for (int i = 0; i < SAMPLES.length; i++) {
 			commands.add(set(edition, i - 5, 0, 1, SAMPLES[i]));
 		}
-		// Water pool, left.
-		commands.add(fill(edition, -6, -1, 5, -4, -1, 8, "water"));
+		// Water pool, front left, between the camera and the samples: anywhere behind the row, the row hides it
+		// from standing eye height.
+		commands.add(fill(edition, -6, -1, -5, -3, -1, -2, "water"));
 		// Pillar with a torch beside it.
 		commands.add(fill(edition, -2, 0, 6, -2, 5, 6, "stone_bricks"));
 		commands.add(set(edition, -1, 0, 5, "torch"));

@@ -19,7 +19,7 @@ setblock ~2 ~ ~-10 glass
 setblock ~3 ~ ~-10 oak_leaves ["persistent_bit"=true]
 setblock ~4 ~ ~-10 polished_andesite
 setblock ~5 ~ ~-10 oak_planks
-fill ~-6 ~-1 ~-14 ~-4 ~-1 ~-17 water
+fill ~-6 ~-1 ~-4 ~-3 ~-1 ~-7 water
 fill ~-2 ~ ~-15 ~-2 ~5 ~-15 stone_bricks
 setblock ~-1 ~ ~-14 torch
 fill ~1 ~ ~-16 ~1 ~2 ~-16 oak_log
