@@ -20,11 +20,9 @@ of minutes.
    ```
 
    It pulls Claude's latest push and starts the game in BVTest. If the pull fails, it stops and says so.
-2. The first time in a world (or after Claude changes the scene), type `/bv scene`. It builds the test scene
-   three blocks in front of you: a row of material samples (metals, gems, glowing blocks, glass,
-   leaves, stone, wood), a pool of water, a pillar with a torch, a roofed overhang that casts shade, and a
-   tree. Stand back a few blocks
-   and look at it.
+2. Type `/bv scene`. It builds the test scene north of you (a row of material samples, a pool of water, a
+   pillar with a torch, a roofed overhang that casts shade, and a tree) and turns you to face it, so every
+   capture uses the same camera. Run it before each capture, after a pull, or after you've moved.
 3. Press **F9** and stand still for about ten seconds. The mod hides the HUD, clears the weather,
    and takes screenshots at noon, afternoon, low sun and midnight, each with deferred lighting, vanilla,
    the shadow test and the material view, plus albedo, normal and light at noon. Then it restores the time,
@@ -35,6 +33,45 @@ of minutes.
    for one at full size.
 
 Captures are kept under `run\bedrock-visuals-captures\<date and time>\`.
+
+## Bedrock reference shots
+
+Tuning needs the real Vibrant Visuals to compare against. The reference pack builds the identical scene in
+Bedrock (generated from the same code as `/bv scene`) and stands you in the same spot, so a Bedrock
+screenshot lines up with the Java capture.
+
+### Once
+
+1. In File Explorer, open the project folder, then `bedrock`, and double-click `BedrockVisualsTest.mcpack`.
+   Bedrock opens and shows "Import started", then "Successfully imported". (If Windows asks which app to
+   open it with, choose Minecraft.)
+2. Turn on Vibrant Visuals: from the title screen, **Settings**, then **Video**, then set **Graphics Mode** to
+   **Vibrant Visuals**. Set **Field of View** to the number on the `window` line of the Java report.
+3. Make the world: **Play**, then **Create New**, then **Create New World**.
+   - **General:** World Name `BVTest`, Game Mode **Creative**, Difficulty **Peaceful**.
+   - **Advanced:** turn **Flat World** on.
+   - **Cheats:** turn **Cheats** on (Bedrock warns that achievements are disabled; that's fine).
+   - **Behavior Packs:** under **Available**, click **Bedrock Visuals test scene**, then **Activate**.
+   - Click **Create**.
+
+### Each time
+
+1. Open the BVTest world (**Play**, then **Worlds**). Press **T** to open chat and type each command, then
+   Enter:
+
+   ```
+   /function bv/scene
+   ```
+
+   This builds the scene, faces you north at it, stops the clock and weather, and sets noon.
+2. Type `/function bv/noon`. It hides the HUD. Wait a few seconds for the chat to fade, then press
+   **Win+Alt+PrtScn**. Windows saves the shot to `Videos\Captures` in your user folder. (If
+   nothing happens, the Xbox Game Bar is off; use **Win+PrtScn** instead, which saves to
+   `Pictures\Screenshots`.)
+3. Repeat step 2 with `/function bv/afternoon`, `/function bv/lowsun` and `/function bv/midnight`.
+4. `/function bv/hud` brings the HUD back. Send Claude the four screenshots.
+
+Don't move between the commands: the shots must be taken from where `bv/scene` puts you.
 
 ## Keys and commands
 

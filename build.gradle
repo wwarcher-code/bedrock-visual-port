@@ -41,9 +41,24 @@ test {
 	def bedrockPack = providers.gradleProperty('bedrockPack')
 	inputs.property 'bedrockPack', bedrockPack.orElse('')
 	systemProperty 'bedrockPack', bedrockPack.orElse('').get()
+	// -PupdateBedrockPack rewrites the Bedrock test pack's scene function from TestScene.java.
+	def updateBedrockPack = providers.gradleProperty('updateBedrockPack').isPresent()
+	inputs.property 'updateBedrockPack', updateBedrockPack
+	systemProperty 'updateBedrockPack', updateBedrockPack
+	inputs.dir('bedrock/test-pack')
 	testLogging {
 		showStandardStreams = true
 	}
+}
+
+// The Bedrock reference pack (see TESTING.md), as a .mcpack Bedrock imports on double-click. The built file is
+// committed so it arrives with a git pull: .\gradlew.bat bedrockTestPack after changing bedrock\test-pack.
+tasks.register('bedrockTestPack', Zip) {
+	from 'bedrock/test-pack'
+	destinationDirectory = file('bedrock')
+	archiveFileName = 'BedrockVisualsTest.mcpack'
+	preserveFileTimestamps = false
+	reproducibleFileOrder = true
 }
 
 // The commit the mod was built from, shown in test reports so a stale build is obvious.

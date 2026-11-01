@@ -54,7 +54,8 @@ final class DiagnosticsReport {
 		}
 		Minecraft minecraft = Minecraft.getInstance();
 		line("window " + minecraft.getWindow().getWidth() + "x" + minecraft.getWindow().getHeight()
-				+ ", render distance " + minecraft.options.getEffectiveRenderDistance() + " chunks");
+				+ ", render distance " + minecraft.options.getEffectiveRenderDistance() + " chunks, field of view "
+				+ minecraft.options.fov().get());
 		section("Renderer");
 		line("deferred lighting " + (DeferredRenderer.isEnabled() ? "on" : "off")
 				+ (DeferredRenderer.lightingFailed() ? " (FAILED, see log)" : ""));

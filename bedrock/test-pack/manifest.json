@@ -1,0 +1,29 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "Bedrock Visuals test scene",
+    "description": "Builds the Bedrock Visuals test scene: /function bv/scene",
+    "uuid": "6f1c2a4e-8b3d-4c7a-9e21-5d0b7f3a9c41",
+    "version": [
+      1,
+      0,
+      0
+    ],
+    "min_engine_version": [
+      1,
+      21,
+      0
+    ]
+  },
+  "modules": [
+    {
+      "type": "data",
+      "uuid": "a3e95b70-2f4d-4e8c-b1a6-0c7d9e5f2b18",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    }
+  ]
+}
