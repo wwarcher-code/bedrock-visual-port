@@ -12,6 +12,7 @@ import dev.bedrockvisuals.render.GBufferPass;
 import dev.bedrockvisuals.render.GBufferTerrainPipelines;
 import dev.bedrockvisuals.render.ShadowPass;
 import dev.bedrockvisuals.render.ShadowTerrainPipelines;
+import dev.bedrockvisuals.render.WaterPass;
 import net.caffeinemc.mods.sodium.client.model.quad.properties.ModelQuadFacing;
 import net.caffeinemc.mods.sodium.client.render.chunk.ChunkRenderMatrices;
 import net.caffeinemc.mods.sodium.client.render.chunk.DefaultChunkRenderer;
@@ -21,6 +22,7 @@ import net.caffeinemc.mods.sodium.client.render.viewport.CameraTransform;
 import net.caffeinemc.mods.sodium.client.util.FogParameters;
 import net.minecraft.client.renderer.oit.OitStage;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
@@ -28,6 +30,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(value = DefaultChunkRenderer.class, remap = false)
 abstract class DefaultChunkRendererMixin {
+	/** Set while Sodium draws translucent terrain with the water inputs bound. */
+	@Unique
+	private static boolean bedrockvisuals$water;
+
 	@Inject(method = "render", at = @At("HEAD"))
 	private void bedrockvisuals$onRender(ChunkRenderMatrices matrices, ChunkRenderListIterable renderLists,
 			TerrainRenderPass pass, CameraTransform camera, FogParameters fog, boolean indexedPass,
@@ -40,9 +46,21 @@ abstract class DefaultChunkRendererMixin {
 		if (ShadowPass.isActive()) {
 			ShadowPass.countTerrainDraw();
 		}
+		bedrockvisuals$water = false;
+		if (pass.isTranslucent() && !GBufferPass.isActive() && !ShadowPass.isActive() && WaterPass.isActive()) {
+			try {
+				WaterPass.bind(renderPass);
+				bedrockvisuals$water = true;
+			} catch (RuntimeException e) {
+				WaterPass.fail(e);
+			}
+		}
 	}
 
-	/** During the G-buffer and shadow passes, draw with that pass's variant of whichever pipeline Sodium picked. */
+	/**
+	 * During the G-buffer and shadow passes, draw with that pass's variant of whichever pipeline Sodium picked;
+	 * in the translucent pass, with the water variant of each OIT stage's pipeline.
+	 */
 	@Redirect(method = "render", at = @At(value = "INVOKE",
 			target = "Lcom/mojang/blaze3d/systems/RenderSystem;getCompiledPipeline(Lcom/mojang/renderpearl/api/pipeline/RenderPipeline;)Lcom/mojang/renderpearl/api/pipeline/CompiledRenderPipeline;"))
 	private CompiledRenderPipeline bedrockvisuals$usePassPipeline(RenderPipeline pipeline) {
@@ -50,6 +68,14 @@ abstract class DefaultChunkRendererMixin {
 			pipeline = ShadowTerrainPipelines.variantOf(pipeline);
 		} else if (GBufferPass.isActive()) {
 			pipeline = GBufferTerrainPipelines.variantOf(pipeline);
+		} else if (bedrockvisuals$water && WaterPass.isActive()) {
+			try {
+				CompiledRenderPipeline water = RenderSystem.getCompiledPipeline(WaterPass.variantOf(pipeline));
+				WaterPass.reportFirstUse();
+				return water;
+			} catch (RuntimeException e) {
+				WaterPass.fail(e);
+			}
 		}
 		return RenderSystem.getCompiledPipeline(pipeline);
 	}

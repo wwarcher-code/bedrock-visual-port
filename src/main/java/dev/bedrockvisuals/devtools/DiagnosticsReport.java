@@ -11,6 +11,7 @@ import dev.bedrockvisuals.render.GBufferPass;
 import dev.bedrockvisuals.render.LightingState;
 import dev.bedrockvisuals.render.MaterialAtlas;
 import dev.bedrockvisuals.render.ShadowPass;
+import dev.bedrockvisuals.render.WaterPass;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -62,6 +63,7 @@ final class DiagnosticsReport {
 		line("G-buffer " + (GBufferPass.isDisabled() ? "FAILED, see log" : "ok"));
 		line("shadows " + (ShadowPass.isDisabled() ? "FAILED, see log" : ShadowPass.isValid() ? "ok" : "no map this frame"));
 		line("materials " + MaterialAtlas.status());
+		line("water " + WaterPass.status());
 		line("Bedrock packs " + BedrockInputs.pack().map(pack -> pack.summary()).orElse("NOT LOADED"));
 		if (minecraft.player != null && minecraft.level != null) {
 			section("Player");

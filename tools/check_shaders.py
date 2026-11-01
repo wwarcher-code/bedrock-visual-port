@@ -1,10 +1,11 @@
 """Compiles the mod's shaders with glslangValidator to catch GLSL errors without launching the game.
 
-Resolves #include <namespace:path> the way Minecraft's shader loader does, from the mod's assets and the
-pinned Sodium jar, and adds the defines Sodium's terrain pipelines use. Each terrain shader is checked with
-and without ALPHA_CUTOUT.
+Resolves #include <namespace:path> the way Minecraft's shader loader does, from the mod's assets, the
+pinned Sodium jar and (optionally) the Minecraft client jar, and adds the defines Sodium's terrain pipelines
+use. Each terrain shader is checked with and without ALPHA_CUTOUT; the water shader, which includes
+Minecraft's OIT code and so needs the Minecraft jar, is also checked in each OIT stage.
 
-Usage: python tools/check_shaders.py <sodium jar>
+Usage: python tools/check_shaders.py <sodium jar> [<minecraft client jar>]
 """
 import pathlib
 import re
@@ -19,18 +20,25 @@ INCLUDE = re.compile(r'^\s*#include\s*<([a-z0-9_]+):([^>]+)>', re.M)
 TERRAIN_DEFINES = ["USE_VERTEX_COMPRESSION", "USE_FOG"]
 
 
-def loader(sodium_jar):
-    jar = zipfile.ZipFile(sodium_jar)
+# Minecraft 26.3's OIT pipelines (RenderPipelines.OIT_*_SNIPPET): shared defines, then one set per stage.
+OIT_DEFINES = ["OIT", "OIT_WAVELET_RANK 2", "OIT_COEFF_COUNT 8", "OIT_COEFF_ATTACHMENT_COUNT 2",
+               "RENDERPEARL_DEPTH_IS_ZERO_TO_ONE"]
+OIT_STAGES = [["OIT_ALPHA_ONLY", "OIT_DEPTH_BOUNDS"], ["OIT_ALPHA_ONLY", "OIT_TRANSMITTANCE"], ["OIT_ACCUMULATE"]]
+
+
+def loader(*jar_paths):
+    jars = [zipfile.ZipFile(p) for p in jar_paths]
 
     def read(namespace, path):
-        local = ASSETS / namespace / "shaders" / path
-        if local.exists():
-            return local.read_text()
-        for candidate in (f"assets/{namespace}/shaders/{path}", f"assets/{namespace}/shaders/include/{path}"):
-            try:
-                return jar.read(candidate).decode()
-            except KeyError:
-                pass
+        for local in (ASSETS / namespace / "shaders" / path, ASSETS / namespace / "shaders" / "include" / path):
+            if local.exists():
+                return local.read_text()
+        for jar in jars:
+            for candidate in (f"assets/{namespace}/shaders/{path}", f"assets/{namespace}/shaders/include/{path}"):
+                try:
+                    return jar.read(candidate).decode()
+                except KeyError:
+                    pass
         raise FileNotFoundError(f"{namespace}:{path}")
     return read
 
@@ -52,13 +60,18 @@ def with_defines(source, defines):
     return "\n".join(lines[:insert] + [f"#define {d}" for d in defines] + lines[insert:])
 
 
-def main(sodium_jar):
-    read = loader(sodium_jar)
+def main(sodium_jar, minecraft_jar=None):
+    read = loader(*[j for j in (sodium_jar, minecraft_jar) if j])
     failures = 0
     for shader in sorted((ASSETS / "bedrockvisuals/shaders").rglob("*.[vf]sh")):
         stage = "vert" if shader.suffix == ".vsh" else "frag"
         terrain = shader.stem == "terrain"
         variants = [TERRAIN_DEFINES, TERRAIN_DEFINES + ["ALPHA_CUTOUT 0.5"]] if terrain else [[]]
+        if shader.parent.name == "water":
+            if not minecraft_jar:
+                print(f"skip  {shader.relative_to(ASSETS)} (needs the Minecraft client jar)")
+                continue
+            variants = [TERRAIN_DEFINES + OIT_DEFINES + s for s in OIT_STAGES]
         for defines in variants:
             source = with_defines(expand(shader.read_text(), read, set()), defines)
             with tempfile.NamedTemporaryFile("w", suffix="." + stage, delete=False) as tmp:
@@ -74,6 +87,6 @@ def main(sodium_jar):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
+    if len(sys.argv) not in (2, 3):
         sys.exit(__doc__)
-    main(sys.argv[1])
+    main(*sys.argv[1:])

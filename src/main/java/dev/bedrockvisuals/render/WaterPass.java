@@ -1,0 +1,138 @@
+package dev.bedrockvisuals.render;
+
+import com.mojang.blaze3d.buffers.Std140Builder;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.renderpearl.api.buffers.GpuBuffer;
+import com.mojang.renderpearl.api.commands.RenderPass;
+import com.mojang.renderpearl.api.pipeline.BindGroupLayout;
+import com.mojang.renderpearl.api.pipeline.ColorTargetState;
+import com.mojang.renderpearl.api.pipeline.RenderPipeline;
+import com.mojang.renderpearl.api.pipeline.UniformType;
+import com.mojang.renderpearl.api.textures.FilterMode;
+import com.mojang.renderpearl.api.textures.GpuSampler;
+import dev.bedrockvisuals.BedrockVisualsClient;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.client.renderer.texture.TextureAtlas;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.resources.Identifier;
+import org.lwjgl.system.MemoryStack;
+
+/**
+ * Bedrock-style water in Sodium's translucent pass. Minecraft draws translucent terrain with order-independent
+ * transparency, in three stages (depth bounds, transmittance, accumulate), each with its own pipeline. Each
+ * gets a variant with the same color targets, bind groups and defines plus the water inputs: the G-buffer's
+ * depth and albedo (what lies beneath the water), the frame's lighting and grading, and the water data. The
+ * shader shades water fragments and passes every other translucent block through as Sodium would, and
+ * Minecraft's OIT composite blends the result over the deferred-lit terrain.
+ */
+public final class WaterPass {
+	static final BindGroupLayout INPUTS = BindGroupLayout.builder()
+			.withUniform("u_GBufferDepth", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("u_GBufferAlbedo", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
+			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
+			.withUniform("WaterData", UniformType.UNIFORM_BUFFER)
+			.build();
+	/** std140 size of WaterData in water/terrain.fsh: four vec4s. */
+	private static final int DATA_SIZE = 4 * 16;
+
+	/*
+	 * TUNE: pure water's absorption and scattering per block (metre), linear RGB, from published measurements
+	 * at roughly 650, 550 and 450 nm (Pope and Fry 1997; Morel 1974). Bedrock's default water has no particles
+	 * (chlorophyll, sediment and dissolved matter are all 0), so it is pure water: red is gone within a few
+	 * blocks, which gives the blue-green tint. The particle concentrations aren't modelled yet.
+	 */
+	private static final float[] ABSORPTION = {0.34f, 0.056f, 0.0092f};
+	private static final float[] SCATTERING = {0.0008f, 0.0019f, 0.0049f};
+
+	private static final Map<RenderPipeline, RenderPipeline> VARIANTS = new ConcurrentHashMap<>();
+	private static GpuBuffer data;
+	/** True between {@link #prepare} and the end of the frame's main pass, when the inputs are valid. */
+	private static boolean ready;
+	private static boolean failed;
+	private static boolean reported;
+
+	private WaterPass() {
+	}
+
+	/** Called after the lighting pass: whether this frame's water can be shaded, and its data written. */
+	public static void prepare(TextureAtlas blockAtlas, boolean lit) {
+		ready = false;
+		if (failed || !lit || LightingPass.lightingData() == null) {
+			return;
+		}
+		try {
+			if (data == null) {
+				data = RenderSystem.getDevice().createBuffer(() -> "Bedrock Visuals water data",
+						GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, DATA_SIZE);
+			}
+			try (MemoryStack stack = MemoryStack.stackPush()) {
+				Std140Builder builder = Std140Builder.onStack(stack, DATA_SIZE);
+				putRect(builder, blockAtlas.getSprite(Identifier.withDefaultNamespace("block/water_still")));
+				putRect(builder, blockAtlas.getSprite(Identifier.withDefaultNamespace("block/water_flow")));
+				builder.putVec4(ABSORPTION[0], ABSORPTION[1], ABSORPTION[2], 0);
+				builder.putVec4(SCATTERING[0], SCATTERING[1], SCATTERING[2], 1);
+				RenderSystem.getDevice().createCommandEncoder().writeToBuffer(data.slice(), builder.get());
+			}
+			ready = true;
+		} catch (RuntimeException e) {
+			fail(e);
+		}
+	}
+
+	private static void putRect(Std140Builder builder, TextureAtlasSprite sprite) {
+		builder.putVec4(sprite.getU0(), sprite.getV0(), sprite.getU1(), sprite.getV1());
+	}
+
+	/** Whether Sodium's translucent terrain should be drawn with the water variants this frame. */
+	public static boolean isActive() {
+		return ready && !failed;
+	}
+
+	/** Binds the water inputs on the render pass Sodium is about to draw translucent terrain into. */
+	public static void bind(RenderPass pass) {
+		GBuffer gbuffer = GBufferPass.gbuffer();
+		GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
+		pass.setUniform("u_GBufferDepth", gbuffer.depthView(), nearest);
+		pass.setUniform("u_GBufferAlbedo", gbuffer.view(GBuffer.Target.ALBEDO), nearest);
+		pass.setUniform("LightingData", LightingPass.lightingData());
+		pass.setUniform("GradingData", LightingPass.gradingData());
+		pass.setUniform("WaterData", data);
+	}
+
+	public static RenderPipeline variantOf(RenderPipeline sodium) {
+		return VARIANTS.computeIfAbsent(sodium, WaterPass::build);
+	}
+
+	private static RenderPipeline build(RenderPipeline sodium) {
+		RenderPipeline.Builder builder = SodiumPipelineVariants.copy(sodium, "water").withBindGroupLayout(INPUTS);
+		// The OIT stages write different targets with their own blending; keep them exactly.
+		List<ColorTargetState> targets = sodium.getColorTargetStates();
+		for (int i = 0; i < targets.size(); i++) {
+			builder.withColorTargetState(i, targets.get(i));
+		}
+		return builder.build();
+	}
+
+	/** The variant failed to build or compile: vanilla water until restart. */
+	public static void fail(RuntimeException e) {
+		if (!failed) {
+			failed = true;
+			BedrockVisualsClient.LOGGER.error("[water] water shading failed; vanilla water until restart", e);
+		}
+	}
+
+	public static void reportFirstUse() {
+		if (!reported) {
+			reported = true;
+			BedrockVisualsClient.LOGGER.info("[water] translucent terrain drawn with Bedrock water shading");
+		}
+	}
+
+	/** A one-line summary for diagnostics. */
+	public static String status() {
+		return failed ? "FAILED (see log)" : reported ? "ok" : "not drawn yet";
+	}
+}

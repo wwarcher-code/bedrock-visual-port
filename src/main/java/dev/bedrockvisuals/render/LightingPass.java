@@ -108,6 +108,15 @@ public final class LightingPass {
 		}
 	}
 
+	/** This frame's LightingData buffer, shared with the water shader; null before the first frame. */
+	static GpuBuffer lightingData() {
+		return data;
+	}
+
+	static GpuBuffer gradingData() {
+		return grading;
+	}
+
 	private static void putVec4(Std140Builder builder, Vector3f xyz, float w) {
 		builder.putVec4(xyz.x, xyz.y, xyz.z, w);
 	}

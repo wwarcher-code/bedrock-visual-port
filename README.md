@@ -124,6 +124,21 @@ from it casts no shadows into view; sky light still darkens caves, whose roofs m
 map. The log shows `[shadows] first shadow map drawn` once the pass runs; if it fails it logs
 `[shadows] shadow pass failed` and the lighting carries on without shadows.
 
+## Water
+
+Minecraft 26.3 draws translucent terrain with order-independent transparency, in three stages (depth
+bounds, transmittance, accumulate). `WaterPass` swaps each stage's Sodium pipeline for a variant with the
+same targets and blending, whose shader leaves glass, ice and other translucent blocks exactly as Sodium
+draws them and shades water as Vibrant Visuals does: clear water that absorbs light along the path down to
+the bottom (read from the G-buffer's depth), a sky reflection weighted by Fresnel, a sun glint, and sky
+light scattered back out of the water. Bedrock's default water has no particles, so it is pure water, and
+uses pure water's measured absorption and scattering: red fades within a few blocks, leaving the blue-green
+tint. The log shows `[water] translucent terrain drawn with Bedrock water shading` once it runs; if it fails
+it logs `[water] water shading failed` and water draws the vanilla way.
+
+Not yet: waves, caustics, refraction, reflections of anything but the sky, shadows on the water, and the
+underwater view.
+
 ## Materials (step 4)
 
 `MaterialAtlas` builds a second texture laid out exactly like Java's block atlas, with each Java sprite's
@@ -149,11 +164,12 @@ middle grey until the renderer measures it.
 ## Checking shaders
 
 `tools\check_shaders.py` compiles every shader with glslangValidator, resolving includes from the mod and
-the Sodium jar, with and without the cutout define, so GLSL errors show up without launching the game. It
-needs Python and glslangValidator (from the Vulkan SDK) on the path:
+the Sodium and Minecraft jars, with and without the cutout define (and the water shader in each OIT stage),
+so GLSL errors show up without launching the game. It needs Python and glslangValidator (from the Vulkan
+SDK) on the path:
 
 ```powershell
-py tools\check_shaders.py "$env:USERPROFILE\.gradle\caches\modules-2\files-2.1\maven.modrinth\sodium\mc26.3-0.9.2-fabric\<hash>\sodium-mc26.3-0.9.2-fabric.jar"
+py tools\check_shaders.py "$env:USERPROFILE\.gradle\caches\modules-2\files-2.1\maven.modrinth\sodium\mc26.3-0.9.2-fabric\<hash>\sodium-mc26.3-0.9.2-fabric.jar" "$env:USERPROFILE\.gradle\caches\fabric-loom\minecraftMaven\net\minecraft\minecraft-merged-deobf\26.3\minecraft-merged-deobf-26.3.jar"
 ```
 
 ## Flashback
