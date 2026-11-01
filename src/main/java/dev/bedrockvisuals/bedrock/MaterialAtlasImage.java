@@ -18,8 +18,15 @@ import java.util.function.Function;
  * MER map has no subsurface, so its alpha is written as 0.
  */
 public final class MaterialAtlasImage {
-	/** Where one Java sprite sits in the atlas, in texels. */
-	public record Slot(String javaTexture, int x, int y, int width, int height) {
+	/**
+	 * Where one Java sprite sits in the atlas, in texels: {@code x} and {@code y} are where its pixels start, and
+	 * {@code padding} is the border Java's atlas keeps around it for mipmapping, which gets the sprite's edge
+	 * texels so lower mips don't blend in the fallback.
+	 */
+	public record Slot(String javaTexture, int x, int y, int width, int height, int padding) {
+		public Slot(String javaTexture, int x, int y, int width, int height) {
+			this(javaTexture, x, y, width, height, 0);
+		}
 	}
 
 	/** ARGB pixels, row by row from the top, for each mip level; level 0 is the full size. */
@@ -36,6 +43,16 @@ public final class MaterialAtlasImage {
 	 */
 	public static Result build(int width, int height, int mipLevels, List<Slot> slots,
 			Function<String, Optional<TextureSet>> textureSets, Rgba fallback) {
+		return build(width, height, mipLevels, slots, textureSets, fallback, TgaImage::read);
+	}
+
+	/** Reads one material map; tests pass images directly. */
+	interface ImageReader {
+		TgaImage read(Path path) throws IOException;
+	}
+
+	static Result build(int width, int height, int mipLevels, List<Slot> slots,
+			Function<String, Optional<TextureSet>> textureSets, Rgba fallback, ImageReader reader) {
 		int[] pixels = new int[width * height];
 		java.util.Arrays.fill(pixels, argb(fallback));
 		Map<Path, TgaImage> decoded = new HashMap<>();
@@ -54,7 +71,7 @@ public final class MaterialAtlasImage {
 				filled++;
 				continue;
 			}
-			TgaImage image = decoded.computeIfAbsent(material.image(), path -> decode(path, problems));
+			TgaImage image = decoded.computeIfAbsent(material.image(), path -> decode(reader, path, problems));
 			if (image == null) {
 				continue;
 			}
@@ -64,9 +81,9 @@ public final class MaterialAtlasImage {
 		return new Result(width, height, mipChain(pixels, width, height, mipLevels), filled, List.copyOf(problems));
 	}
 
-	private static TgaImage decode(Path path, List<String> problems) {
+	private static TgaImage decode(ImageReader reader, Path path, List<String> problems) {
 		try {
-			return TgaImage.read(path);
+			return reader.read(path);
 		} catch (IOException e) {
 			problems.add(path + ": " + e.getMessage());
 			return null;
@@ -74,9 +91,10 @@ public final class MaterialAtlasImage {
 	}
 
 	private static void fill(int[] pixels, int atlasWidth, Slot slot, int value) {
-		for (int y = 0; y < slot.height(); y++) {
+		int p = slot.padding();
+		for (int y = -p; y < slot.height() + p; y++) {
 			int row = (slot.y() + y) * atlasWidth + slot.x();
-			java.util.Arrays.fill(pixels, row, row + slot.width(), value);
+			java.util.Arrays.fill(pixels, row - p, row + slot.width() + p, value);
 		}
 	}
 
@@ -87,14 +105,19 @@ public final class MaterialAtlasImage {
 	private static void copyFirstFrame(int[] pixels, int atlasWidth, Slot slot, TgaImage image, boolean subsurface) {
 		int frameHeight = image.height() > image.width() && image.height() % image.width() == 0
 				? image.width() : image.height();
-		for (int y = 0; y < slot.height(); y++) {
-			int sourceY = y * frameHeight / slot.height();
+		int p = slot.padding();
+		for (int y = -p; y < slot.height() + p; y++) {
+			int sourceY = clamp(y, slot.height()) * frameHeight / slot.height();
 			int row = (slot.y() + y) * atlasWidth + slot.x();
-			for (int x = 0; x < slot.width(); x++) {
-				int value = image.argb(x * image.width() / slot.width(), sourceY);
+			for (int x = -p; x < slot.width() + p; x++) {
+				int value = image.argb(clamp(x, slot.width()) * image.width() / slot.width(), sourceY);
 				pixels[row + x] = subsurface ? value : value & 0x00FFFFFF;
 			}
 		}
+	}
+
+	private static int clamp(int value, int size) {
+		return Math.max(0, Math.min(size - 1, value));
 	}
 
 	/** Each level is a 2x2 box filter of the one above, as the block atlas's mips are. */

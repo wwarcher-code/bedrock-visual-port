@@ -67,17 +67,20 @@ public final class MaterialAtlas {
 		builtFor = atlasTexture;
 		close();
 
+		int width = atlasTexture.getWidth(0);
+		int height = atlasTexture.getHeight(0);
 		List<MaterialAtlasImage.Slot> slots = new ArrayList<>();
 		TextureAtlasSprite missing = blockAtlas.missingSprite();
 		for (String name : map.javaTextures()) {
 			TextureAtlasSprite sprite = blockAtlas.getSprite(Identifier.withDefaultNamespace("block/" + name));
 			if (sprite != missing) {
-				slots.add(new MaterialAtlasImage.Slot(name, sprite.getX(), sprite.getY(), sprite.contents().width(),
-						sprite.contents().height()));
+				// getX and getY are the corner of the sprite's padded cell; its pixels start where its UVs do.
+				int x = Math.round(sprite.getU0() * width);
+				int y = Math.round(sprite.getV0() * height);
+				slots.add(new MaterialAtlasImage.Slot(name, x, y, sprite.contents().width(),
+						sprite.contents().height(), x - sprite.getX()));
 			}
 		}
-		int width = atlasTexture.getWidth(0);
-		int height = atlasTexture.getHeight(0);
 		MaterialAtlasImage.Result image = MaterialAtlasImage.build(width, height, atlasTexture.getMipLevels(), slots,
 				name -> map.textureSetFor(pack, name), pack.pbrFallback().blocks());
 
@@ -92,8 +95,9 @@ public final class MaterialAtlas {
 		}
 
 		image.problems().stream().limit(10).forEach(p -> BedrockVisualsClient.LOGGER.warn("[materials] {}", p));
-		status = String.format("%dx%d, %d mip levels, %d of %d block sprites from Bedrock texture sets, %d problems",
-				width, height, image.levels().size(), image.filledSlots(), slots.size(), image.problems().size());
+		status = String.format("%dx%d, %d mip levels, sprite padding %d, %d of %d block sprites from Bedrock texture sets, %d problems",
+				width, height, image.levels().size(), slots.isEmpty() ? 0 : slots.getFirst().padding(), image.filledSlots(),
+				slots.size(), image.problems().size());
 		BedrockVisualsClient.LOGGER.info("[materials] built {}x{} material atlas with {} mip levels in {} ms: "
 						+ "{} of {} block sprites from Bedrock texture sets", width, height, image.levels().size(),
 				(System.nanoTime() - start) / 1_000_000, image.filledSlots(), slots.size());
