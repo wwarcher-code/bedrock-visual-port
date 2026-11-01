@@ -64,12 +64,12 @@ screenshot lines up with the Java capture.
    ```
 
    This builds the scene, faces you north at it, stops the clock and weather, and sets noon.
-2. Type `/function bv/noon`. It hides the HUD. Wait a few seconds for the chat to fade, then press
-   **Win+Alt+PrtScn**. Windows saves the shot to `Videos\Captures` in your user folder. (If
-   nothing happens, the Xbox Game Bar is off; use **Win+PrtScn** instead, which saves to
-   `Pictures\Screenshots`.)
+2. Type `/function bv/noon`. It hides the HUD; press **F1** as well to hide your hand. Wait a few seconds for
+   the chat to fade, then press
+   **Win+Alt+PrtScn**. Windows saves the shot to `Videos\Captures` in your user folder. Win+Alt+PrtScn captures only the game; Win+PrtScn
+   captures the whole desktop, which works but is harder to compare.
 3. Repeat step 2 with `/function bv/afternoon`, `/function bv/lowsun` and `/function bv/midnight`.
-4. `/function bv/hud` brings the HUD back. Send Claude the four screenshots.
+4. Press **F1** again and type `/function bv/hud` to bring the HUD back. Send Claude the four screenshots.
 
 Don't move between the commands: the shots must be taken from where `bv/scene` puts you.
 
