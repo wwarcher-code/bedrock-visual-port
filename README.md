@@ -130,14 +130,17 @@ Minecraft 26.3 draws translucent terrain with order-independent transparency, in
 bounds, transmittance, accumulate). `WaterPass` swaps each stage's Sodium pipeline for a variant with the
 same targets and blending, whose shader leaves glass, ice and other translucent blocks exactly as Sodium
 draws them and shades water as Vibrant Visuals does: clear water that absorbs light along the path down to
-the bottom (read from the G-buffer's depth), a sky reflection weighted by Fresnel, a sun glint, and sky
-light scattered back out of the water. Bedrock's default water has no particles, so it is pure water, and
+the bottom (read from the G-buffer's depth), reflections weighted by Fresnel, a sun glint, and sky light
+scattered back out of the water. Right after the lighting pass the lit scene is copied, so the water sees
+the real bottom beneath it, and its reflections march through the G-buffer's depth to pick the reflected
+terrain out of that copy (screen-space reflections), falling back to the sky's colors where the ray finds
+nothing on screen. Bedrock's default water has no particles, so it is pure water, and
 uses pure water's measured absorption and scattering: red fades within a few blocks, leaving the blue-green
 tint. The log shows `[water] translucent terrain drawn with Bedrock water shading` once it runs; if it fails
 it logs `[water] water shading failed` and water draws the vanilla way.
 
-Not yet: waves, caustics, refraction, reflections of anything but the sky, shadows on the water, and the
-underwater view.
+Not yet: waves, caustics, refraction, reflections of entities and of things off screen, shadows on the
+water, and the underwater view.
 
 ## Materials (step 4)
 

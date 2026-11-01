@@ -1,6 +1,7 @@
 package dev.bedrockvisuals.render;
 
 import com.mojang.blaze3d.buffers.Std140Builder;
+import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.renderpearl.api.buffers.GpuBuffer;
 import com.mojang.renderpearl.api.commands.RenderPass;
@@ -10,6 +11,8 @@ import com.mojang.renderpearl.api.pipeline.RenderPipeline;
 import com.mojang.renderpearl.api.pipeline.UniformType;
 import com.mojang.renderpearl.api.textures.FilterMode;
 import com.mojang.renderpearl.api.textures.GpuSampler;
+import com.mojang.renderpearl.api.textures.GpuTexture;
+import com.mojang.renderpearl.api.textures.GpuTextureView;
 import dev.bedrockvisuals.BedrockVisualsClient;
 import java.util.List;
 import java.util.Map;
@@ -23,14 +26,15 @@ import org.lwjgl.system.MemoryStack;
  * Bedrock-style water in Sodium's translucent pass. Minecraft draws translucent terrain with order-independent
  * transparency, in three stages (depth bounds, transmittance, accumulate), each with its own pipeline. Each
  * gets a variant with the same color targets, bind groups and defines plus the water inputs: the G-buffer's
- * depth and albedo (what lies beneath the water), the frame's lighting and grading, and the water data. The
+ * depth (how deep the water is, and what reflections hit), a copy of the lit scene before translucency (what
+ * lies beneath the water, and the reflections' colors), the frame's lighting and grading, and the water data. The
  * shader shades water fragments and passes every other translucent block through as Sodium would, and
  * Minecraft's OIT composite blends the result over the deferred-lit terrain.
  */
 public final class WaterPass {
 	static final BindGroupLayout INPUTS = BindGroupLayout.builder()
 			.withUniform("u_GBufferDepth", UniformType.COMBINED_IMAGE_SAMPLER)
-			.withUniform("u_GBufferAlbedo", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("u_SceneColor", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("WaterData", UniformType.UNIFORM_BUFFER)
@@ -49,6 +53,9 @@ public final class WaterPass {
 
 	private static final Map<RenderPipeline, RenderPipeline> VARIANTS = new ConcurrentHashMap<>();
 	private static GpuBuffer data;
+	/** The lit opaque scene, copied from the main target after the lighting pass. */
+	private static GpuTexture scene;
+	private static GpuTextureView sceneView;
 	/** True between {@link #prepare} and the end of the frame's main pass, when the inputs are valid. */
 	private static boolean ready;
 	private static boolean failed;
@@ -58,12 +65,13 @@ public final class WaterPass {
 	}
 
 	/** Called after the lighting pass: whether this frame's water can be shaded, and its data written. */
-	public static void prepare(TextureAtlas blockAtlas, boolean lit) {
+	public static void prepare(TextureAtlas blockAtlas, RenderTarget main, boolean lit) {
 		ready = false;
 		if (failed || !lit || LightingPass.lightingData() == null) {
 			return;
 		}
 		try {
+			copyScene(main);
 			if (data == null) {
 				data = RenderSystem.getDevice().createBuffer(() -> "Bedrock Visuals water data",
 						GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, DATA_SIZE);
@@ -82,6 +90,23 @@ public final class WaterPass {
 		}
 	}
 
+	private static void copyScene(RenderTarget main) {
+		GpuTexture color = main.getColorTexture();
+		if (scene == null || scene.getWidth(0) != main.width || scene.getHeight(0) != main.height
+				|| scene.getFormat() != color.getFormat()) {
+			if (scene != null) {
+				sceneView.close();
+				scene.close();
+			}
+			scene = RenderSystem.getDevice().createTexture(() -> "Bedrock Visuals scene before translucency",
+					GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, color.getFormat(), main.width,
+					main.height, 1, 1);
+			sceneView = RenderSystem.getDevice().createTextureView(scene);
+		}
+		RenderSystem.getDevice().createCommandEncoder().copyTextureToTexture(color, scene, 0, 0, 0, 0, 0, main.width,
+				main.height);
+	}
+
 	private static void putRect(Std140Builder builder, TextureAtlasSprite sprite) {
 		builder.putVec4(sprite.getU0(), sprite.getV0(), sprite.getU1(), sprite.getV1());
 	}
@@ -96,7 +121,7 @@ public final class WaterPass {
 		GBuffer gbuffer = GBufferPass.gbuffer();
 		GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
 		pass.setUniform("u_GBufferDepth", gbuffer.depthView(), nearest);
-		pass.setUniform("u_GBufferAlbedo", gbuffer.view(GBuffer.Target.ALBEDO), nearest);
+		pass.setUniform("u_SceneColor", sceneView, nearest);
 		pass.setUniform("LightingData", LightingPass.lightingData());
 		pass.setUniform("GradingData", LightingPass.gradingData());
 		pass.setUniform("WaterData", data);

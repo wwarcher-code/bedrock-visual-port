@@ -3,9 +3,10 @@
 // Water variant of Sodium's terrain fragment shader, for the translucent layer in each of Minecraft's OIT
 // stages. Glass, ice and other translucent blocks come out exactly as Sodium draws them. Water (its still
 // and flowing sprites) is shaded as Bedrock's Vibrant Visuals water: clear water that absorbs light along
-// the path to whatever lies beneath (read from the G-buffer's depth), a sky reflection weighted by Fresnel,
-// a sun glint, and sky light scattered back out of the water body. Every stage must see the same opacity, so
-// it depends only on geometry, depth and the water settings (WaterPass.java).
+// the path to whatever lies beneath (read from the G-buffer's depth), screen-space reflections of the scene
+// falling back to the sky, weighted by Fresnel, a sun glint, and light scattered back out of the water.
+// Every stage must see the same opacity, so it depends only on geometry, depth and the water settings
+// (WaterPass.java).
 
 #include <sodium:globals.glsl>
 #include <sodium:fog.glsl>
@@ -22,7 +23,7 @@ layout(location = 5) in vec3 v_Position;
 
 uniform sampler2D u_BlockTex;
 uniform sampler2D u_GBufferDepth;  // opaque terrain behind the water, reversed depth, 0 where there is none
-uniform sampler2D u_GBufferAlbedo;
+uniform sampler2D u_SceneColor;    // the lit opaque scene (sky and terrain), copied before translucency
 
 layout(std140) uniform WaterData {
     vec4 StillRect;   // u0, v0, u1, v1 of the water_still sprite in the block atlas
@@ -142,18 +143,87 @@ WaterSurface waterSurface(vec3 faceNormal) {
     return s;
 }
 
-// The straight-alpha color that, blended over the lit bottom at the surface's opacity, gives the water's
-// look: reflection + glint + (1 - F) * (bottom * transmittance + scattered light).
+// Screen-space reflection: march the mirror ray through the G-buffer's depth. Returns the scene's color at the
+// hit in rgb and a confidence in a (0 where the ray found nothing or left the screen).
+const int SSR_STEPS = 32;
+const int SSR_REFINE = 5;
+const float SSR_MAX_DISTANCE = 96.0;
+
+// Pixel position of a camera-relative point, in gl_FragCoord's orientation; z is the distance along the view
+// axis.
+vec3 toScreen(vec3 position, vec2 size, bool flipY) {
+    vec4 clip = u_ProjectionMatrix * u_ModelViewMatrix * vec4(position, 1.0);
+    vec2 pixel = (clip.xy / clip.w * 0.5 + 0.5) * size;
+    if (flipY) {
+        pixel.y = size.y - pixel.y;
+    }
+    return vec3(pixel, clip.w);
+}
+
+bool onScreen(vec2 pixel, vec2 size) {
+    return all(greaterThanEqual(pixel, vec2(0.0))) && all(lessThan(pixel, size));
+}
+
+vec4 screenSpaceReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
+    float stepLength = 0.25;
+    float travelled = 0.0;
+    vec3 previous = origin;
+    for (int i = 0; i < SSR_STEPS && travelled < SSR_MAX_DISTANCE; i++) {
+        travelled += stepLength;
+        vec3 point = origin + direction * travelled;
+        vec3 screen = toScreen(point, size, flipY);
+        if (screen.z <= 0.0 || !onScreen(screen.xy, size)) {
+            return vec4(0.0);
+        }
+        float depth = texelFetch(u_GBufferDepth, ivec2(screen.xy), 0).r;
+        if (depth > 0.0 && screen.z > viewDistance(depth)) {
+            // Behind the depth buffer: a hit unless far behind it (the ray passed behind an object).
+            if (screen.z - viewDistance(depth) > max(stepLength * 2.0, 1.0)) {
+                return vec4(0.0);
+            }
+            vec3 front = previous;
+            vec3 back = point;
+            for (int j = 0; j < SSR_REFINE; j++) {
+                vec3 middle = (front + back) * 0.5;
+                vec3 m = toScreen(middle, size, flipY);
+                float d = onScreen(m.xy, size) ? texelFetch(u_GBufferDepth, ivec2(m.xy), 0).r : 0.0;
+                if (d > 0.0 && m.z > viewDistance(d)) {
+                    back = middle;
+                } else {
+                    front = middle;
+                }
+            }
+            vec2 hit = clamp(toScreen(back, size, flipY).xy, vec2(0.0), size - 1.0);
+            // Fade towards the screen's edges, where the reflected scene runs out.
+            vec2 edge = min(hit, size - hit) / size;
+            return vec4(texelFetch(u_SceneColor, ivec2(hit), 0).rgb, smoothstep(0.0, 0.08, min(edge.x, edge.y)));
+        }
+        previous = point;
+        stepLength *= 1.18;
+    }
+    return vec4(0.0);
+}
+
+// The straight-alpha color that, blended over the scene beneath at the surface's opacity, gives the water's
+// look: reflection + glint + (1 - F) * (bottom * transmittance + scattered light). The parts combine on screen
+// (after tone mapping), since the scene beneath and the reflections come from the finished image.
 vec3 waterColor(WaterSurface s) {
     vec2 levels = clamp((v_LightCoord * 256.0 - 8.0) / 240.0, 0.0, 1.0);
     float sky = levels.y * levels.y;
     vec3 sunDir = normalize(SunDirection.xyz);
     vec3 moonDir = normalize(MoonDirection.xyz);
+    vec2 size = vec2(textureSize(u_GBufferDepth, 0));
+    // Which way the framebuffer's y runs relative to clip space: whichever puts this fragment where it is.
+    vec2 self = toScreen(v_Position, size, false).xy;
+    bool flipY = abs(self.y - gl_FragCoord.y) > abs(size.y - self.y - gl_FragCoord.y);
 
-    // Sky reflection, with the same horizon handling as the deferred pass's reflections.
+    // Reflection: the scene where the mirror ray lands, else the sky gradient (with the same horizon handling
+    // as the deferred pass's reflections).
     vec3 mirror = reflect(-s.v, s.n);
     float horizonShare = 0.3 * (1.0 - clamp(mirror.y * 0.5 + 0.5, 0.0, 1.0));
-    vec3 reflection = mix(SkyColor.rgb, SkyHorizonColor.rgb, horizonShare) * sky;
+    vec3 skyReflection = toDisplay(mix(SkyColor.rgb, SkyHorizonColor.rgb, horizonShare) * sky);
+    vec4 traced = screenSpaceReflection(v_Position + s.n * 0.02, mirror, size, flipY);
+    vec3 reflection = mix(skyReflection, traced.rgb, traced.a);
 
     // Sun glint.
     float nDotL = max(dot(s.n, sunDir), 0.0);
@@ -166,21 +236,16 @@ vec3 waterColor(WaterSurface s) {
         glint = SunColor.rgb * fresnel * ggx(max(dot(s.n, h), 0.0), GLINT_ROUGHNESS) * geometry / (4.0 * nDotV) * sky;
     }
 
-    // Light inside the water: sun, moon and sky from above, plus the ambient floor, scattered back out in
-    // proportion to the water's single-scattering albedo.
+    // The water body as it would look with nothing beneath: light from above and the ambient floor, scattered
+    // back out in proportion to the water's single-scattering albedo.
     vec3 extinction = Absorption.rgb + Scattering.rgb;
     vec3 inLight = (SunColor.rgb * max(sunDir.y, 0.0) + MoonColor.rgb * max(moonDir.y, 0.0) + SkyColor.rgb) * sky
             + AmbientColor.rgb;
-    vec3 scattered = inLight * (Scattering.rgb / max(extinction, vec3(1e-5))) * (1.0 - s.transmittance);
+    vec3 body = toDisplay(inLight * (Scattering.rgb / max(extinction, vec3(1e-5))));
 
-    // What the deferred pass drew beneath the water, estimated from the G-buffer's albedo with the light an
-    // upward face gets. Only the estimate's error, scaled by (1 - opacity), reaches the screen.
-    vec3 bottomAlbedo = toLinear(texelFetch(u_GBufferAlbedo, ivec2(gl_FragCoord.xy), 0).rgb);
-    vec3 bottom = bottomAlbedo * ((SunColor.rgb * max(sunDir.y, 0.0) + SkyColor.rgb) * sky + AmbientColor.rgb);
-
-    vec3 seen = s.fresnel * reflection + glint + (1.0 - s.fresnel) * (bottom * s.transmittance + scattered);
-    vec3 target = toDisplay(seen);
-    vec3 behind = toDisplay(bottom);
+    vec3 behind = texelFetch(u_SceneColor, ivec2(gl_FragCoord.xy), 0).rgb;
+    vec3 transmitted = behind * s.transmittance + body * (1.0 - s.transmittance);
+    vec3 target = clamp(s.fresnel * reflection + (1.0 - s.fresnel) * transmitted + toDisplay(glint), 0.0, 1.0);
     return clamp((target - (1.0 - s.opacity) * behind) / max(s.opacity, 1e-3), 0.0, 1.0);
 }
 

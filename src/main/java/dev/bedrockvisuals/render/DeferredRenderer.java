@@ -46,7 +46,7 @@ public final class DeferredRenderer {
 	public static void beforeMainPass(ChunkSectionsToRender chunks, RenderTarget main, GpuSampler sampler,
 			TextureAtlas blockAtlas) {
 		replacedTerrain = false;
-		WaterPass.prepare(blockAtlas, false);
+		WaterPass.prepare(blockAtlas, main, false);
 		LightingState light = enabled && !lightingFailed ? LightingState.current() : null;
 		if (light != null) {
 			ShadowPass.render(chunks, sampler, blockAtlas.getTextureView(), light);
@@ -61,7 +61,7 @@ public final class DeferredRenderer {
 			RenderSystem.getDevice().createCommandEncoder().copyTextureToTexture(gbuffer.depth(),
 					main.getDepthTexture(), 0, 0, 0, 0, 0, main.width, main.height);
 			replacedTerrain = true;
-			WaterPass.prepare(blockAtlas, true);
+			WaterPass.prepare(blockAtlas, main, true);
 			if (!reported) {
 				reported = true;
 				BedrockVisualsClient.LOGGER.info("[lighting] first frame lit by the deferred lighting pass");
