@@ -27,4 +27,12 @@ public interface DistantTerrainSource {
 	default boolean wantsRenderDistanceFog() {
 		return false;
 	}
+
+	/**
+	 * Hides (or restores) the source's own clouds for this session, without changing its saved settings:
+	 * this renderer lights Minecraft's clouds as Bedrock does, and the source's clouds would be drawn unlit
+	 * next to them.
+	 */
+	default void hideOwnClouds(boolean hide) {
+	}
 }

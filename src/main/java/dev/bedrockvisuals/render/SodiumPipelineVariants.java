@@ -17,9 +17,14 @@ final class SodiumPipelineVariants {
 
 	/** @param name variant name, used for the shaders and the pipeline location, e.g. "gbuffer" */
 	static RenderPipeline.Builder copy(RenderPipeline sodium, String name) {
-		Identifier shader = Identifier.fromNamespaceAndPath("bedrockvisuals", name + "/terrain");
+		return copy(sodium, Identifier.fromNamespaceAndPath("bedrockvisuals", name + "/" + sodium.getLocation().getPath()),
+				Identifier.fromNamespaceAndPath("bedrockvisuals", name + "/terrain"));
+	}
+
+	/** Any pipeline (not only Sodium's), with the given location and shader. */
+	static RenderPipeline.Builder copy(RenderPipeline sodium, Identifier location, Identifier shader) {
 		RenderPipeline.Builder builder = RenderPipeline.builder()
-				.withLocation(Identifier.fromNamespaceAndPath("bedrockvisuals", name + "/" + sodium.getLocation().getPath()))
+				.withLocation(location)
 				.withVertexShader(shader)
 				.withFragmentShader(shader)
 				.withPushConstantSize(sodium.pushConstantSize())

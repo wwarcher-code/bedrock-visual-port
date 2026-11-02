@@ -2,8 +2,8 @@
 
 Resolves #include <namespace:path> the way Minecraft's shader loader does, from the mod's assets, the
 pinned Sodium jar and (optionally) the Minecraft client jar, and adds the defines Sodium's terrain pipelines
-use. Each terrain shader is checked with and without ALPHA_CUTOUT; the water shader, which includes
-Minecraft's OIT code and so needs the Minecraft jar, is also checked in each OIT stage.
+use. Each terrain shader is checked with and without ALPHA_CUTOUT; the water and cloud shaders, which include
+Minecraft's OIT code and so need the Minecraft jar, are also checked in each OIT stage.
 
 Usage: python tools/check_shaders.py <sodium jar> [<minecraft client jar>]
 """
@@ -67,13 +67,19 @@ def main(sodium_jar, minecraft_jar=None):
         stage = "vert" if shader.suffix == ".vsh" else "frag"
         terrain = shader.stem == "terrain"
         variants = [TERRAIN_DEFINES, TERRAIN_DEFINES + ["ALPHA_CUTOUT 0.5"]] if terrain else [[]]
-        if shader.parent.name == "water":
+        if shader.parent.name in ("water", "clouds"):
             if not minecraft_jar:
                 print(f"skip  {shader.relative_to(ASSETS)} (needs the Minecraft client jar)")
                 continue
-            variants = [TERRAIN_DEFINES + OIT_DEFINES + s for s in OIT_STAGES]
+            base = TERRAIN_DEFINES if shader.parent.name == "water" else []
+            # Java's clouds draw without OIT too, when it's off.
+            variants = [base + OIT_DEFINES + s for s in OIT_STAGES] + ([[]] if shader.parent.name == "clouds" else [])
         for defines in variants:
             source = with_defines(expand(shader.read_text(), read, set()), defines)
+            if stage == "vert":
+                # Minecraft's shader loader provides Vulkan's gl_VertexIndex under OpenGL GLSL (vanilla's
+                # clouds.vsh uses it); glslang's GLSL front end calls it gl_VertexID.
+                source = source.replace("gl_VertexIndex", "gl_VertexID")
             with tempfile.NamedTemporaryFile("w", suffix="." + stage, delete=False) as tmp:
                 tmp.write(source)
             result = subprocess.run(["glslangValidator", "-S", stage, tmp.name], capture_output=True, text=True)

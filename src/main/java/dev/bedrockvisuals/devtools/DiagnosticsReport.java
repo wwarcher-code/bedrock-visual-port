@@ -7,6 +7,7 @@ import dev.bedrockvisuals.bedrock.ColorGradingSettings;
 import dev.bedrockvisuals.bedrock.TimeOfDay;
 import dev.bedrockvisuals.render.AutoExposure;
 import dev.bedrockvisuals.render.ColorGrading;
+import dev.bedrockvisuals.render.CloudPass;
 import dev.bedrockvisuals.render.DeferredRenderer;
 import dev.bedrockvisuals.render.SkyAtmosphere;
 import dev.bedrockvisuals.render.GBufferPass;
@@ -67,6 +68,7 @@ final class DiagnosticsReport {
 		line("shadows " + (ShadowPass.isDisabled() ? "FAILED, see log" : ShadowPass.isValid() ? "ok" : "no map this frame"));
 		line("materials " + MaterialAtlas.status());
 		line("water " + WaterPass.status());
+		line("clouds " + CloudPass.status());
 		line("Bedrock packs " + BedrockInputs.pack().map(pack -> pack.summary()).orElse("NOT LOADED"));
 		if (minecraft.player != null && minecraft.level != null) {
 			section("Player");

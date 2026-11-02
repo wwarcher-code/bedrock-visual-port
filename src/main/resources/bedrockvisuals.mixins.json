@@ -4,6 +4,7 @@
 	"plugin": "dev.bedrockvisuals.mixin.BedrockVisualsMixinPlugin",
 	"compatibilityLevel": "JAVA_25",
 	"client": [
+		"minecraft.CloudRendererMixin",
 		"minecraft.LevelRendererMixin",
 		"minecraft.SkyRendererMixin",
 		"sodium.DefaultChunkRendererMixin"

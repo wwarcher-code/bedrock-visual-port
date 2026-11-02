@@ -136,4 +136,19 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 			return false;
 		}
 	}
+
+	/** Uses DH's API override, which sits on top of the player's own setting and isn't saved. */
+	@Override
+	public void hideOwnClouds(boolean hide) {
+		try {
+			var clouds = DhApi.Delayed.configs.graphics().genericRendering().cloudRenderingEnabled();
+			if (hide) {
+				clouds.setValue(false);
+			} else {
+				clouds.clearValue();
+			}
+		} catch (RuntimeException e) {
+			BedrockVisualsClient.LOGGER.warn("[clouds] couldn't {} Distant Horizons' clouds", hide ? "hide" : "restore", e);
+		}
+	}
 }

@@ -291,6 +291,37 @@ The renderer draws it the same way: the lighting pass shades sky pixels with it,
 sunset fan are skipped, and Java's sun, moon and stars stay. Rain and other weather don't change it yet;
 `atmospheric_weather.json` holds Bedrock's weather variants.
 
+## Clouds
+
+`CloudsForwardPBR` (pass `ForwardPBRTransparent`) lights each cloud cell face. The cloud layer spans
+192.33 to 196.33 (relative to `WorldOrigin.y`). The vertex shader passes the position inside the cell and a
+mask of which neighbouring cells are filled, and paths through the cloud continue into filled neighbours,
+capped at 16 blocks. With `p` the camera-relative position, `V` the view direction (camera to fragment), `L` the
+shadow-casting light's direction and colour × illuminance `E`, and the cloud colour `C`:
+
+- **Ambient.** `SkyAmbientLightColorIntensity.rgb × .w × C`.
+- **Scattered light** (`CloudLightingToggles.y`). `s` is the view's path inside the cloud from this face; from
+  the middle of it, `t` is the light's path. Scattering is
+  `HG(g, dot(L, -V)) × (1 - smoothstep(saturate(s/2 / U.x))) × exp(-t × U.w) × E`, with `U` =
+  `CloudLightingUniforms`, `g = U.y` and `HG = (1 - g²) / 4π / (1 + g(2cos + g))^1.5`. It isn't multiplied
+  by `C`.
+- **Wrapped diffuse** (`CloudLightingToggles.x`). With the wrap `w` (`SubsurfaceScattering…Falloff.y`):
+  `(max((N·L + w)/(1+w)², 0) + max((-N·L + w)/(1+w)², 0) × (1 - smoothstep(saturate(s / U.x)))) / π × C × E`,
+  so thin parts glow from behind.
+- **Reflected sky.** The probe at the reflection direction, at its roughest mip, times the BRDF LUT at F0 0.04,
+  times `U.z`.
+- **Distance.** Mixed towards the atmosphere radiance by `saturate(distance / DistanceControl.x - 0.9)`.
+  Volumetric scattering applies on top.
+- The alpha is the vertex colour's.
+
+`CloudLightingUniforms`, `CloudLightingToggles` and the wrap are runtime values. In the executable, the
+uniforms are a vec4 and the toggles three bytes in the renderer's settings object. The code that fills them
+wasn't found, so the renderer uses TUNE values: U = (4, 0.6, 0.5, 0.15), wrap 0.5.
+
+The renderer applies this to Java's cloud mesh (12×12×4 cells at the same height). Its paths stay inside the
+one cell, because Java's mesh has no neighbour mask. Distant Horizons' own clouds are hidden for the session
+while these are on (through its API override, so its saved setting is untouched).
+
 ## Still to analyse
 
 `NdLFloor`, the SSR ray march itself, volumetric fog and local
