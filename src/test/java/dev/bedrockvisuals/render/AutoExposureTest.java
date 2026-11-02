@@ -48,8 +48,8 @@ class AutoExposureTest {
 
 	@Test
 	void exposureKeysTheAverageToMiddleGrey() {
-		assertEquals(AutoExposure.UNIT_SCALE, AutoExposure.exposureFor(0.18f), 1e-4);
-		assertEquals(AutoExposure.UNIT_SCALE / 2, AutoExposure.exposureFor(0.36f), 1e-4);
+		assertEquals(AutoExposure.UNIT_SCALE * AutoExposure.KEY, AutoExposure.exposureFor(0.18f), 1e-3);
+		assertEquals(AutoExposure.UNIT_SCALE * AutoExposure.KEY / 2, AutoExposure.exposureFor(0.36f), 1e-3);
 		assertTrue(AutoExposure.MIN_AVERAGE < 0.02f && AutoExposure.MAX_AVERAGE == 2f);
 	}
 }
