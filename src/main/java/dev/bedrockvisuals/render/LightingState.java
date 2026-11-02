@@ -104,12 +104,12 @@ public record LightingState(
 	}
 
 	/**
-	 * The air fog at the edge of the render distance. Off while Distant Horizons is installed: its distant
-	 * terrain starts where the render distance ends and isn't drawn by this renderer, so fogging the near
-	 * terrain into the sky there would leave a ring of sky before the distant terrain.
+	 * The air fog at the edge of the render distance. With Distant Horizons it follows DH's own vanilla fog
+	 * toggle (and is on when DH rendering is off): its distant terrain starts where the render distance ends
+	 * and isn't drawn by this renderer, so the fog would otherwise leave a ring of sky before it.
 	 */
 	private static Vector4f distanceFog(FogSettings fog) {
-		if (DistantTerrain.source().isPresent()) {
+		if (DistantTerrain.source().map(source -> !source.wantsRenderDistanceFog()).orElse(false)) {
 			return new Vector4f(0);
 		}
 		float blocks = Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f;

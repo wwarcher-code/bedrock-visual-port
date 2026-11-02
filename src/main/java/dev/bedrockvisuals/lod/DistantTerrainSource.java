@@ -18,4 +18,13 @@ public interface DistantTerrainSource {
 	 * the renderer composites and fogs its output instead. Leave false until that composite exists.
 	 */
 	void setRendererOwnsComposite(boolean owns);
+
+	/**
+	 * Whether the near terrain should get the usual fog at the edge of the render distance: when the source
+	 * isn't drawing, or its own setting asks for vanilla fog. Otherwise its terrain continues past that edge
+	 * and the fog would leave a ring of sky in front of it.
+	 */
+	default boolean wantsRenderDistanceFog() {
+		return false;
+	}
 }

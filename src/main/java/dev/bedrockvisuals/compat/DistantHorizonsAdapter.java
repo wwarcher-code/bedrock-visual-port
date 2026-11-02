@@ -2,6 +2,8 @@ package dev.bedrockvisuals.compat;
 
 import com.mojang.renderpearl.api.textures.GpuTextureView;
 import com.seibel.distanthorizons.api.DhApi;
+import com.seibel.distanthorizons.api.interfaces.config.client.IDhApiFogConfig;
+import com.seibel.distanthorizons.api.interfaces.config.client.IDhApiGraphicsConfig;
 import com.seibel.distanthorizons.api.enums.config.EDhApiDepthDirection;
 import com.seibel.distanthorizons.api.enums.config.EDhApiDepthRange;
 import com.seibel.distanthorizons.api.enums.config.EDhApiRenderingEngine;
@@ -116,5 +118,22 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 	/** DH matrices are row-major; JOML's array constructor reads column-major. */
 	private static Matrix4f toJoml(DhApiMat4f matrix) {
 		return new Matrix4f().set(matrix.getValuesAsArray()).transpose();
+	}
+
+	/** Follows Distant Horizons' own fog settings: its rendering switch and its vanilla fog toggle. */
+	@Override
+	public boolean wantsRenderDistanceFog() {
+		try {
+			IDhApiGraphicsConfig graphics = DhApi.Delayed.configs.graphics();
+			if (!Boolean.TRUE.equals(graphics.renderingEnabled().getValue())) {
+				return true;
+			}
+			IDhApiFogConfig fog = graphics.fog();
+			Boolean enable = fog.enableVanillaFog().getValue();
+			return enable != null ? enable : !Boolean.TRUE.equals(fog.disableVanillaFog().getValue());
+		} catch (RuntimeException e) {
+			// The config isn't ready (DH still loading): no fog, as with DH drawing.
+			return false;
+		}
 	}
 }

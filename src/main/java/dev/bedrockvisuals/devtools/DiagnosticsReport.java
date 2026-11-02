@@ -91,7 +91,7 @@ final class DiagnosticsReport {
 		line(sky == null ? "sky: Java's (no Bedrock atmosphere here)"
 				: "sky: Bedrock's, sun strength " + format(sky.sun().w) + ", moon " + format(sky.moon().w)
 						+ ", distance fog " + (sky.fog().w > 0 ? "from " + format(sky.fog().x * sky.fog().z) + " blocks"
-								: "off (Distant Horizons installed, or no air fog)"));
+								: "off (Distant Horizons' vanilla fog is off, or no air fog)"));
 		line("exposure " + format(AutoExposure.exposure()) + " (metered average luminance "
 				+ format(AutoExposure.averageLuminance()) + " in Bedrock's units, meter " + AutoExposure.meterStatus() + ")");
 		line("meter " + AutoExposure.meterBreakdown());
