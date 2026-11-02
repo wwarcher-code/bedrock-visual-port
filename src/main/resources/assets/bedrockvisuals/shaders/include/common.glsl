@@ -17,6 +17,7 @@ layout(std140) uniform LightingData {
     vec4 ShadowParams;          // x: map valid, y: texel size in UV, z: normal offset in blocks, w: cast by the moon
     vec4 DebugParams;           // x: draw the shadow test instead of lit color
     vec4 SkyHorizonColor;       // sky fill seen towards the horizon; SkyColor is the zenith's
+    vec4 CameraGridOffset;      // the camera's world position modulo 16, to put positions on the texel grid
 };
 
 // Bedrock's color grading and tone mapping for the player's biome (ColorGrading.java).
@@ -114,6 +115,30 @@ float ggx(float nDotH, float roughness) {
 float smithG1(float nDotX, float roughness) {
     float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
     return nDotX / (nDotX * (1.0 - k) + k);
+}
+
+// Bedrock's texel quantization: the point lighting is evaluated at, snapped to the centre of its 1/16-block
+// texel on the face (a camera-relative position and its face normal). Shadows and lighting then come out
+// one value per texel, with shadow edges on the texel grid. Faces that aren't axis-aligned (cross-shaped
+// plants) are left alone.
+const float TEXEL_GRID = 1.0 / 16.0;
+
+vec3 snapToTexel(vec3 position, vec3 n) {
+    vec3 a = abs(n);
+    if (max(a.x, max(a.y, a.z)) < 0.95) {
+        return position;
+    }
+    vec3 axis = round(n);
+    vec3 world = position + CameraGridOffset.xyz;
+    vec3 toCentre = TEXEL_GRID * 0.5 - (world - floor(world / TEXEL_GRID) * TEXEL_GRID);
+    return position + toCentre - dot(toCentre, axis) * axis;
+}
+
+// Bedrock's block light colour by light level (0 to 1): almost white at the source, orange, then red as it
+// falls off. Used where a block has no explicit light colour.
+vec3 blockLightColor(float level) {
+    float l2 = level * level;
+    return vec3(l2, l2 * (0.64 + 0.36 * l2), l2 * (0.4 + 0.6 * l2 * l2));
 }
 
 // HDR linear color to the screen: Bedrock's grading, tone map, then its gamma.

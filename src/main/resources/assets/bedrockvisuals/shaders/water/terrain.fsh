@@ -30,7 +30,12 @@ layout(std140) uniform WaterData {
     vec4 FlowRect;    // the same for water_flow
     vec4 Absorption;  // per block, linear RGB
     vec4 Scattering;  // per block, linear RGB; w: 1 when water shading is on
+    vec4 Animation;   // x: current frame of the surface maps, y: frames in them
 };
+
+// Bedrock's water_still_grey normal map and MERS (WaterSurfaceMaps.java): strips of 16x16 frames.
+uniform sampler2D u_WaterNormal;
+uniform sampler2D u_WaterMers;
 
 #ifndef OIT_ALPHA_ONLY
 layout(location = 0) out vec4 fragColor;
@@ -38,8 +43,6 @@ layout(location = 0) out vec4 fragColor;
 
 // Water's reflectance looking straight down; about 2% for an air-water surface.
 const float WATER_F0 = 0.02;
-// Roughness for the sun glint: smooth, but wide enough to read at Minecraft's scale.
-const float GLINT_ROUGHNESS = 0.12;
 // Light path assumed where nothing opaque lies behind the water (open sea, beyond the terrain).
 const float BOTTOMLESS = 64.0;
 
@@ -111,18 +114,40 @@ float viewDistance(float depth) {
 }
 
 struct WaterSurface {
-    vec3 n;
+    vec3 n;              // with the surface map's per-texel tilt
+    float roughness;     // the surface map's per-texel roughness
     vec3 v;
     float fresnel;
     vec3 transmittance;  // along the path from the surface to the bottom
     float opacity;       // what the OIT stages blend with; the same in every stage
 };
 
-WaterSurface waterSurface(vec3 faceNormal) {
+// This texel's normal and MERS from Bedrock's surface maps, for the current animation frame. The water
+// sprite's UVs cover 16 texels per block (32 for the flowing sprite, which spans two).
+void surfaceTexel(out vec3 tangentNormal, out float roughness) {
+    vec4 rect = inRect(v_TexCoord, StillRect) ? StillRect : FlowRect;
+    vec2 local = (v_TexCoord - rect.xy) / max(rect.zw - rect.xy, vec2(1e-6));
+    float spriteTexels = max(round((rect.z - rect.x) / u_TexelSize.x), 1.0);
+    ivec2 mapSize = textureSize(u_WaterNormal, 0);
+    int frameSize = max(mapSize.x, 1);
+    ivec2 texel = ivec2(mod(floor(local * spriteTexels), float(frameSize)));
+    texel.y += int(Animation.x) * frameSize;
+    texel = clamp(texel, ivec2(0), mapSize - 1);
+    tangentNormal = normalize(texelFetch(u_WaterNormal, texel, 0).xyz * 2.0 - 1.0);
+    roughness = texelFetch(u_WaterMers, texel, 0).b;
+}
+
+WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
     WaterSurface s;
-    s.n = faceNormal;
+    vec3 face = faceNormal;
+    if (dot(face, v_Position) > 0.0) {
+        face = -face;
+    }
+    vec3 tangentNormal;
+    surfaceTexel(tangentNormal, s.roughness);
+    s.n = normalize(tangent * tangentNormal.x + bitangent * tangentNormal.y + face * tangentNormal.z);
     if (dot(s.n, v_Position) > 0.0) {
-        s.n = -s.n;
+        s.n = face;
     }
     s.v = normalize(-v_Position);
     float nDotV = max(dot(s.n, s.v), 1e-4);
@@ -222,8 +247,13 @@ vec3 waterColor(WaterSurface s) {
     vec3 mirror = reflect(-s.v, s.n);
     float horizonShare = 0.3 * (1.0 - clamp(mirror.y * 0.5 + 0.5, 0.0, 1.0));
     vec3 skyReflection = toDisplay(mix(SkyColor.rgb, SkyHorizonColor.rgb, horizonShare) * sky);
-    vec4 traced = screenSpaceReflection(v_Position + s.n * 0.02, mirror, size, flipY);
-    vec3 reflection = mix(skyReflection, traced.rgb, traced.a);
+    // Rougher texels see a blurrier sky (Bedrock picks a convolved cubemap mip by roughness); here the
+    // reflected sky leans towards its average.
+    skyReflection = mix(skyReflection, toDisplay(mix(SkyColor.rgb, SkyHorizonColor.rgb, 0.15) * sky), s.roughness);
+    // Bedrock's SSR is mirror-only: full up to roughness 0.3, gone by 0.4.
+    float ssrWeight = 1.0 - smoothstep(0.3, 0.4, s.roughness);
+    vec4 traced = ssrWeight > 0.0 ? screenSpaceReflection(v_Position + s.n * 0.02, mirror, size, flipY) : vec4(0.0);
+    vec3 reflection = mix(skyReflection, traced.rgb, traced.a * ssrWeight);
 
     // Sun glint.
     float nDotL = max(dot(s.n, sunDir), 0.0);
@@ -232,19 +262,14 @@ vec3 waterColor(WaterSurface s) {
         float nDotV = max(dot(s.n, s.v), 1e-4);
         vec3 h = normalize(sunDir + s.v);
         float fresnel = WATER_F0 + (1.0 - WATER_F0) * pow(1.0 - max(dot(h, s.v), 0.0), 5.0);
-        float geometry = smithG1(nDotV, GLINT_ROUGHNESS) * smithG1(nDotL, GLINT_ROUGHNESS);
-        glint = SunColor.rgb * fresnel * ggx(max(dot(s.n, h), 0.0), GLINT_ROUGHNESS) * geometry / (4.0 * nDotV) * sky;
+        float r = max(s.roughness, 0.05);  // Bedrock's floor
+        float geometry = smithG1(nDotV, r) * smithG1(nDotL, r);
+        glint = SunColor.rgb * fresnel * ggx(max(dot(s.n, h), 0.0), r) * geometry / (4.0 * nDotV) * sky;
     }
 
-    // The water body as it would look with nothing beneath: light from above and the ambient floor, scattered
-    // back out in proportion to the water's single-scattering albedo.
-    vec3 extinction = Absorption.rgb + Scattering.rgb;
-    vec3 inLight = (SunColor.rgb * max(sunDir.y, 0.0) + MoonColor.rgb * max(moonDir.y, 0.0) + SkyColor.rgb) * sky
-            + AmbientColor.rgb;
-    vec3 body = toDisplay(inLight * (Scattering.rgb / max(extinction, vec3(1e-5))));
-
     vec3 behind = texelFetch(u_SceneColor, ivec2(gl_FragCoord.xy), 0).rgb;
-    vec3 transmitted = behind * s.transmittance + body * (1.0 - s.transmittance);
+    // Bedrock's water only absorbs (WaterExtinction); light scattered in the water comes from volumetric fog.
+    vec3 transmitted = behind * s.transmittance;
     vec3 target = clamp(s.fresnel * reflection + (1.0 - s.fresnel) * transmitted + toDisplay(glint), 0.0, 1.0);
     return clamp((target - (1.0 - s.opacity) * behind) / max(s.opacity, 1e-3), 0.0, 1.0);
 }
@@ -252,11 +277,18 @@ vec3 waterColor(WaterSurface s) {
 void main() {
     // Derivatives first, outside any branch: neighbouring pixels may disagree about being water.
     // Flat face normal from screen-space derivatives (turned to face the camera in waterSurface).
-    vec3 faceNormal = normalize(cross(dFdx(v_Position), dFdy(v_Position)));
+    vec3 dpx = dFdx(v_Position);
+    vec3 dpy = dFdy(v_Position);
+    vec3 faceNormal = normalize(cross(dpx, dpy));
+    // Tangent frame from position and UV derivatives: the directions the texture's u and v run on this face.
+    vec2 duvx = dFdx(v_TexCoord);
+    vec2 duvy = dFdy(v_TexCoord);
+    vec3 tangent = normalize(dpx * duvy.y - dpy * duvx.y + vec3(1e-9));
+    vec3 bitangent = normalize(dpy * duvx.x - dpx * duvy.x + vec3(1e-9));
     vec4 color = u_UseRGSS ? sampleRGSS(u_BlockTex, v_TexCoord, u_TexelSize) : sampleNearest(u_BlockTex, v_TexCoord, u_TexelSize);
 
     if (isWater()) {
-        WaterSurface surface = waterSurface(faceNormal);
+        WaterSurface surface = waterSurface(faceNormal, tangent, bitangent);
         #ifdef OIT_ALPHA_ONLY
         executeAlphaOnlyPhase(gl_FragCoord.z, surface.opacity);
         #else

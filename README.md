@@ -139,8 +139,19 @@ uses pure water's measured absorption and scattering: red fades within a few blo
 tint. The log shows `[water] translucent terrain drawn with Bedrock water shading` once it runs; if it fails
 it logs `[water] water shading failed` and water draws the vanilla way.
 
+Each water texel also takes its tilt and roughness from Bedrock's `water_still_grey` normal map and MERS
+(32 frames, animated every 2 ticks like Java's water), and screen-space reflections only apply to texels
+smoother than roughness 0.3, gone by 0.4, as in Bedrock: the reflections break up on the texel grid.
+
 Not yet: waves, caustics, refraction, reflections of entities and of things off screen, shadows on the
 water, and the underwater view.
+
+## Texel quantization
+
+As in Bedrock (see `docs\bedrock-renderer-notes.md`), the point shadows are looked up at is snapped to the
+centre of its 1/16-block texel on each face, so shadows come out one value per texel with edges on the
+texel grid. Block light takes Bedrock's colour curve by light level, near white at the source, orange, then
+red; and the sun and moon only light pixels with some sky light.
 
 ## Materials (step 4)
 

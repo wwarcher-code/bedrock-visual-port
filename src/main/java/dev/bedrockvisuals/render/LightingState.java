@@ -58,8 +58,8 @@ public record LightingState(
 	 */
 	private static final float BLOCK_LIGHT_SCALE = 0.027f;
 	private static final float MIN_BLOCK_KEY = 0.041f;
-	/** Warm torchlight; Bedrock's local light colors replace it once a pack defines them. */
-	private static final Vector3f BLOCK_LIGHT = new Vector3f(1.0f, 0.72f, 0.45f);
+	/** Block light's strength; its colour by level is Bedrock's curve, in the shader (common.glsl). */
+	private static final Vector3f BLOCK_LIGHT = new Vector3f(1.0f, 1.0f, 1.0f);
 
 	public static LightingState current() {
 		ClientLevel level = Minecraft.getInstance().level;

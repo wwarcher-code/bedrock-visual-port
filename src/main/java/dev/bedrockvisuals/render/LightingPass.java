@@ -14,7 +14,9 @@ import com.mojang.renderpearl.api.pipeline.UniformType;
 import com.mojang.renderpearl.api.textures.FilterMode;
 import com.mojang.renderpearl.api.textures.GpuSampler;
 import java.util.Optional;
+import net.minecraft.client.Minecraft;
 import net.minecraft.resources.Identifier;
+import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
 import org.joml.Vector3f;
@@ -25,8 +27,8 @@ import org.lwjgl.system.MemoryStack;
  * terrain for (depth still at the cleared far plane) are discarded, so the sky drawn earlier shows through.
  */
 public final class LightingPass {
-	/** std140 size of the LightingData block in deferred.fsh: two mat4s and ten vec4s. */
-	private static final int DATA_SIZE = 2 * 64 + 10 * 16;
+	/** std140 size of the LightingData block (include/common.glsl): two mat4s and eleven vec4s. */
+	private static final int DATA_SIZE = 2 * 64 + 11 * 16;
 	/** Shadow lookups move this many shadow texels out along the normal, against self-shadowing acne. */
 	private static final float NORMAL_OFFSET_TEXELS = 1.5f;
 
@@ -84,6 +86,11 @@ public final class LightingPass {
 							ShadowPass.fromMoon() ? 1 : 0)
 					.putVec4(GBufferDebugView.showsShadows() ? 1 : 0, 0, 0, 0);
 			putVec4(builder, light.skyHorizon(), 0);
+			// Modulo 16 keeps float precision far from the origin and still lines up with the 1/16 texel grid.
+			Vec3 camera = Minecraft.getInstance().gameRenderer.mainCamera().position();
+			builder.putVec4((float) Math.floorMod((long) Math.floor(camera.x), 16L) + (float) (camera.x - Math.floor(camera.x)),
+					(float) Math.floorMod((long) Math.floor(camera.y), 16L) + (float) (camera.y - Math.floor(camera.y)),
+					(float) Math.floorMod((long) Math.floor(camera.z), 16L) + (float) (camera.z - Math.floor(camera.z)), 0);
 			encoder.writeToBuffer(data.slice(), builder.get());
 			Std140Builder gradingBuilder = Std140Builder.onStack(stack, ColorGrading.DATA_SIZE);
 			ColorGrading.write(gradingBuilder, ColorGrading.current());

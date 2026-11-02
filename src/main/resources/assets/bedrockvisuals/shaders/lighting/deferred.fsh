@@ -91,14 +91,15 @@ void main() {
     // Sky light alone: the stand-in beyond the shadow map, and a guard inside it, since Sodium only hands the
     // shadow pass the chunks the camera sees, so a cave's roof may be missing from the map.
     float skyFallback = pow(skyLight, 4.0);
-    float skyGuard = smoothstep(0.3, 0.8, skyLight);
+    // Bedrock's sky light heuristic: no sun or moon at all where there's no sky light.
+    float skyGuard = skyLight > 0.0 ? 1.0 : 0.0;
 
     vec3 position = world.xyz / world.w;
     vec3 sunDir = normalize(SunDirection.xyz);
     vec3 moonDir = normalize(MoonDirection.xyz);
     bool moonCasts = ShadowParams.w > 0.5;
     float edgeFade;
-    float mapped = shadowVisibility(position, n, moonCasts ? moonDir : sunDir, edgeFade);
+    float mapped = shadowVisibility(snapToTexel(position, n), n, moonCasts ? moonDir : sunDir, edgeFade);
     float casterVisibility = mapped < 0.0 ? skyFallback : mix(skyFallback, mapped * skyGuard, edgeFade);
     if (DebugParams.x > 0.5) {
         fragColor = vec4(mapped < 0.0 ? vec3(1.0, 0.0, 0.0) : vec3(mapped), 1.0);
@@ -134,7 +135,7 @@ void main() {
     color += skyInMirror * skyFresnel * (1.0 - 0.7 * roughness) * skyLight * skyLight;
     color += diffuseColor * AmbientColor.rgb;
     // BlockLightColor carries its exposure (LightingState.blockLightStrength): faint by day, strong at night.
-    color += diffuseColor * BlockLightColor.rgb * pow(blockLight, 3.0);
+    color += diffuseColor * BlockLightColor.rgb * blockLightColor(blockLight);
     color += albedo * emissive * 2.0;
 
     fragColor = vec4(toDisplay(color), 1.0);

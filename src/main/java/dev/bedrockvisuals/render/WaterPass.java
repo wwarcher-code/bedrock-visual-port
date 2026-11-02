@@ -17,6 +17,8 @@ import dev.bedrockvisuals.BedrockVisualsClient;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.resources.Identifier;
@@ -38,9 +40,11 @@ public final class WaterPass {
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("WaterData", UniformType.UNIFORM_BUFFER)
+			.withUniform("u_WaterNormal", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("u_WaterMers", UniformType.COMBINED_IMAGE_SAMPLER)
 			.build();
-	/** std140 size of WaterData in water/terrain.fsh: four vec4s. */
-	private static final int DATA_SIZE = 4 * 16;
+	/** std140 size of WaterData in water/terrain.fsh: five vec4s. */
+	private static final int DATA_SIZE = 5 * 16;
 
 	/*
 	 * TUNE: pure water's absorption and scattering per block (metre), linear RGB, from published measurements
@@ -82,6 +86,11 @@ public final class WaterPass {
 				putRect(builder, blockAtlas.getSprite(Identifier.withDefaultNamespace("block/water_flow")));
 				builder.putVec4(ABSORPTION[0], ABSORPTION[1], ABSORPTION[2], 0);
 				builder.putVec4(SCATTERING[0], SCATTERING[1], SCATTERING[2], 1);
+				// Surface map animation: Bedrock's flipbook advances a frame every 2 ticks, like Java's water.
+				ClientLevel level = Minecraft.getInstance().level;
+				long ticks = level == null ? 0 : level.getGameTime();
+				int frames = WaterSurfaceMaps.frames();
+				builder.putVec4((float) ((ticks / 2) % frames), frames, 0, 0);
 				RenderSystem.getDevice().createCommandEncoder().writeToBuffer(data.slice(), builder.get());
 			}
 			ready = true;
@@ -125,6 +134,8 @@ public final class WaterPass {
 		pass.setUniform("LightingData", LightingPass.lightingData());
 		pass.setUniform("GradingData", LightingPass.gradingData());
 		pass.setUniform("WaterData", data);
+		pass.setUniform("u_WaterNormal", WaterSurfaceMaps.normal(), nearest);
+		pass.setUniform("u_WaterMers", WaterSurfaceMaps.mers(), nearest);
 	}
 
 	public static RenderPipeline variantOf(RenderPipeline sodium) {
