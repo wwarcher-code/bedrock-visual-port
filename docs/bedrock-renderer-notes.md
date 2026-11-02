@@ -197,6 +197,11 @@ The *runtime* values mostly come from JSON files in the install (`Content\data`,
   frames, 100 game ticks, 500 blocks moved, or when sky or block brightness change by 3 or 16.
 - `renderer/atmospheric_weather.json`: rain and thunder sky and cloud colours, sun strength 0 in weather.
 
+How `tone_mapping.json` reaches the shader (from the per-frame setter, which uses the CRT's `exp2`/`exp2f`):
+`ExposureCompensation.y = 2^exposure_compensation` (a key of 1 for vanilla); the average-luminance clamp is
+`0.125 × 2^min_luminance` to `0.125 × 2^max_luminance` (EV100 to luminance: 0.0156 to 2.0 for vanilla); the
+white point is `0.18 × 2^f_stop` (19 stops above middle grey), floored at `min_white_point`.
+
 The generic tone mapper's inputs (contrast, mid-in, mid-out, HDR max, crosstalk) are not in these files.
 The engine computes `b` and `c` from them as in Lottes' curve (`b = (Ph m - Pm) / ((Ph - Pm) m)`,
 `c = Ph (1 - b)`, with `Pm = midIn^a`, `Ph = hdrMax^a`, `m = midOut`) and sends `(a, b, c, crosstalk)`.
