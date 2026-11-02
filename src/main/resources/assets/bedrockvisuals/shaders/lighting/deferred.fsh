@@ -70,8 +70,12 @@ void main() {
     float depth = texture(Depth, texCoord).r;
     if (depth <= 0.0) {
         // No terrain (reversed depth: 0 is the cleared far plane): sky.
+        // The view direction from two points along the pixel's ray, not from the camera to the near plane:
+        // view bobbing moves the camera by about as much as the near plane's distance, which tipped every
+        // sky direction up and down while walking (and the horizon's colours with it).
         vec4 near = InverseViewProjection * vec4(texCoord * 2.0 - 1.0, 1.0, 1.0);
-        vec3 ray = normalize(near.xyz / near.w);
+        vec4 far = InverseViewProjection * vec4(texCoord * 2.0 - 1.0, 0.001, 1.0);
+        vec3 ray = normalize(far.xyz / far.w - near.xyz / near.w);
         if (AtmosphereZenith.w > 0.5) {
             // Bedrock's sky, exposed like everything else. Java's sky gradient was skipped and its sun, moon
             // and stars drawn over black (SkyRendererMixin), so the sky adds onto them: alpha 0 under the
