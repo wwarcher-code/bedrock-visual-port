@@ -5,6 +5,7 @@ import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.platform.NativeImage;
 import dev.bedrockvisuals.BedrockVisualsClient;
 import dev.bedrockvisuals.render.DeferredRenderer;
+import dev.bedrockvisuals.render.AutoExposure;
 import dev.bedrockvisuals.render.GBufferDebugView;
 import dev.bedrockvisuals.render.GBufferDebugView.View;
 import java.io.IOException;
@@ -119,6 +120,8 @@ public final class TestCapture {
 			sheet.add(row);
 			STEPS.add(() -> {
 				command("time set " + time);
+				// Like a cut in Bedrock, jump the exposure to the new scene instead of adapting over a second.
+				AutoExposure.snap();
 				wait = TICKS_AFTER_TIME_CHANGE;
 			});
 			STEPS.add(() -> report.lightingAt(timeLabel + " (" + time + ")"));

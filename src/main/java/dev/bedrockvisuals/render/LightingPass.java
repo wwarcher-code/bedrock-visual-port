@@ -6,7 +6,9 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.renderpearl.api.buffers.GpuBuffer;
 import com.mojang.renderpearl.api.commands.CommandEncoder;
 import com.mojang.renderpearl.api.commands.RenderPass;
+import com.mojang.renderpearl.api.commands.RenderPassDescriptor;
 import com.mojang.renderpearl.api.pipeline.BindGroupLayout;
+import com.mojang.renderpearl.api.pipeline.BlendFunction;
 import com.mojang.renderpearl.api.pipeline.ColorTargetState;
 import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
 import com.mojang.renderpearl.api.pipeline.RenderPipeline;
@@ -20,6 +22,7 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
 import org.joml.Vector3f;
+import org.joml.Vector4f;
 import org.lwjgl.system.MemoryStack;
 
 /**
@@ -48,7 +51,11 @@ public final class LightingPass {
 			.withVertexShader(Identifier.withDefaultNamespace("core/screenquad"))
 			.withFragmentShader(Identifier.fromNamespaceAndPath("bedrockvisuals", "lighting/deferred"))
 			.withBindGroupLayout(LAYOUT)
-			.withColorTargetState(ColorTargetState.DEFAULT)
+			// Terrain replaces the main image; sky pixels output alpha 0 and leave the sky drawn earlier.
+			.withColorTargetState(new ColorTargetState(Optional.of(BlendFunction.TRANSLUCENT),
+					ColorTargetState.DEFAULT.format(), ColorTargetState.WRITE_ALL))
+			.withColorTargetState(new ColorTargetState(Optional.empty(), LuminanceMeter.FORMAT,
+					ColorTargetState.WRITE_ALL))
 			.withDepthStencilState(Optional.empty())
 			.withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
 			.build();
@@ -84,13 +91,14 @@ public final class LightingPass {
 			builder.putMat4f(ShadowPass.viewProjection())
 					.putVec4(ShadowPass.isValid() ? 1 : 0, 1f / ShadowPass.RESOLUTION, NORMAL_OFFSET_TEXELS * texelBlocks,
 							ShadowPass.fromMoon() ? 1 : 0)
-					.putVec4(GBufferDebugView.showsShadows() ? 1 : 0, 0, 0, 0);
+					.putVec4(GBufferDebugView.showsShadows() ? 1 : 0, LightingState.METER_SKY_SCALE, 0, 0);
 			putVec4(builder, light.skyHorizon(), 0);
 			// Modulo 16 keeps float precision far from the origin and still lines up with the 1/16 texel grid.
 			Vec3 camera = Minecraft.getInstance().gameRenderer.mainCamera().position();
 			builder.putVec4((float) Math.floorMod((long) Math.floor(camera.x), 16L) + (float) (camera.x - Math.floor(camera.x)),
 					(float) Math.floorMod((long) Math.floor(camera.y), 16L) + (float) (camera.y - Math.floor(camera.y)),
-					(float) Math.floorMod((long) Math.floor(camera.z), 16L) + (float) (camera.z - Math.floor(camera.z)), 0);
+					(float) Math.floorMod((long) Math.floor(camera.z), 16L) + (float) (camera.z - Math.floor(camera.z)),
+					AutoExposure.exposure());
 			encoder.writeToBuffer(data.slice(), builder.get());
 			Std140Builder gradingBuilder = Std140Builder.onStack(stack, ColorGrading.DATA_SIZE);
 			ColorGrading.write(gradingBuilder, ColorGrading.current());
@@ -98,8 +106,11 @@ public final class LightingPass {
 		}
 
 		GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
-		try (RenderPass pass = encoder.createRenderPass(() -> "Bedrock Visuals deferred lighting",
-				main.getColorTextureView(), Optional.empty())) {
+		RenderPassDescriptor descriptor = RenderPassDescriptor.builder(() -> "Bedrock Visuals deferred lighting")
+				.withColorAttachment(main.getColorTextureView(), Optional.empty())
+				.withColorAttachment(LuminanceMeter.target(main.width, main.height), Optional.of(new Vector4f(0)))
+				.build();
+		try (RenderPass pass = encoder.createRenderPass(descriptor)) {
 			pass.setPipeline(RenderSystem.getCompiledPipeline(PIPELINE));
 			pass.setUniform("Albedo", gbuffer.view(GBuffer.Target.ALBEDO), nearest);
 			pass.setUniform("Normal", gbuffer.view(GBuffer.Target.NORMAL), nearest);
@@ -113,6 +124,7 @@ public final class LightingPass {
 			pass.setUniform("GradingData", grading);
 			pass.draw(3, 1, 0, 0);
 		}
+		LuminanceMeter.measure();
 	}
 
 	/** This frame's LightingData buffer, shared with the water shader; null before the first frame. */

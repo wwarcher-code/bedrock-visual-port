@@ -15,9 +15,9 @@ layout(std140) uniform LightingData {
     vec4 BlockLightColor;
     mat4 ShadowViewProjection;  // camera-relative world space to shadow clip space (ShadowProjection.java)
     vec4 ShadowParams;          // x: map valid, y: texel size in UV, z: normal offset in blocks, w: cast by the moon
-    vec4 DebugParams;           // x: draw the shadow test instead of lit color
+    vec4 DebugParams;           // x: draw the shadow test instead of lit color; y: sky radiance scale for metering
     vec4 SkyHorizonColor;       // sky fill seen towards the horizon; SkyColor is the zenith's
-    vec4 CameraGridOffset;      // the camera's world position modulo 16, to put positions on the texel grid
+    vec4 CameraGridOffset;      // xyz: the camera's world position modulo 16 (texel grid); w: exposure (AutoExposure)
 };
 
 // Bedrock's color grading and tone mapping for the player's biome (ColorGrading.java).
@@ -163,8 +163,9 @@ vec3 blockLightColor(float level) {
     return vec3(l2, l2 * (0.64 + 0.36 * l2), l2 * (0.4 + 0.6 * l2 * l2));
 }
 
-// HDR linear color to the screen: Bedrock's grading, tone map, then its gamma.
+// HDR linear color (before exposure) to the screen: exposure, Bedrock's grading, tone map, then its gamma.
 vec3 toDisplay(vec3 color) {
+    color *= CameraGridOffset.w;
     return pow(clamp(tonemap(grade(color)), 0.0, 1.0), 1.0 / max(Gamma.rgb, vec3(0.1)));
 }
 

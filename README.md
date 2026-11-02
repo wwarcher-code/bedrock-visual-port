@@ -103,11 +103,16 @@ What lights each pixel:
   by day and strong at night, as Bedrock's exposure makes it), and the material buffer's emissive channel.
 - **Surface model:** Lambert diffuse plus GGX specular from the material buffer, then Bedrock's color
   grading and tone mapping (step 7).
-- **Exposure:** a stand-in for Bedrock's automatic exposure brightens the image as the sun and moon fade,
-  by up to 1.44x, so evenings stay nearly as bright as noon.
+- **Exposure:** Bedrock's own automatic exposure (`AutoExposure`). The lighting pass also writes each pixel's
+  luminance before exposure (the sky's from its colours); about ten times a second it's read back and
+  built into Bedrock's histogram: log2 luminance in 254 bins, centre weighted, averaging only the brightest
+  20%, adapting over about a second, clamped, then `exposure = 0.18 / average`. Values from the install's
+  `average_luminance.json` and `tone_mapping.json`. Walk into a cave and the image brightens over a second
+  or so; look back at the sky and it darkens.
 
 Bedrock's files give brightness curves but not how its renderer exposes them. The sky fill, bounce, ambient,
-moon, block light and exposure factors in `LightingState` were
+moon and block light factors in `LightingState`, and the unit scale between this renderer's light values and
+Bedrock's (`AutoExposure.UNIT_SCALE`), were
 fitted to Vibrant Visuals screenshots of the test scene's grass and a shaded wall at four times of day (TESTING.md, "Bedrock reference shots"). The log shows `[lighting] first frame lit
 by the deferred lighting pass` once it runs; if the pass fails it logs `[lighting] deferred lighting failed`
 and falls back to vanilla terrain.

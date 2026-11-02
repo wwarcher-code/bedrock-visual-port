@@ -15,10 +15,12 @@ uniform sampler2D ShadowMap;
 
 // Share of light reaching the ground that bounces back onto faces turned towards it: a neutral ground albedo
 // of 0.12 times a bounce strength, fitted with LightingState's factors to Bedrock screenshots.
-const float GROUND_BOUNCE = 0.259;
+const float GROUND_BOUNCE = 0.198;
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
+// Pre-exposure luminance, for the auto exposure's histogram (LuminanceMeter.java).
+layout(location = 1) out vec4 meterLuminance;
 
 
 vec3 directLight(vec3 n, vec3 v, vec3 l, vec3 radiance, vec3 diffuseColor, vec3 f0, float roughness) {
@@ -66,7 +68,15 @@ float shadowVisibility(vec3 position, vec3 n, vec3 towardsLight, out float edgeF
 void main() {
     float depth = texture(Depth, texCoord).r;
     if (depth <= 0.0) {
-        discard; // reversed depth: 0 is the cleared far plane, so no terrain here
+        // No terrain (reversed depth: 0 is the cleared far plane): leave the sky drawn earlier (alpha 0 under
+        // blending), but meter it, as Bedrock's histogram counts the sky too: its colours, horizon to zenith by
+        // the view's elevation, scaled to radiance.
+        vec4 near = InverseViewProjection * vec4(texCoord * 2.0 - 1.0, 1.0, 1.0);
+        vec3 ray = normalize(near.xyz / near.w);
+        vec3 skyRadiance = DebugParams.y * mix(SkyHorizonColor.rgb, SkyColor.rgb, clamp(ray.y, 0.0, 1.0));
+        meterLuminance = vec4(dot(skyRadiance, LUMA), 0.0, 0.0, 1.0);
+        fragColor = vec4(0.0);
+        return;
     }
 
     vec3 albedo = toLinear(texture(Albedo, texCoord).rgb);
@@ -103,6 +113,7 @@ void main() {
     float casterVisibility = mapped < 0.0 ? skyFallback : mix(skyFallback, mapped * skyGuard, edgeFade);
     if (DebugParams.x > 0.5) {
         fragColor = vec4(mapped < 0.0 ? vec3(1.0, 0.0, 0.0) : vec3(mapped), 1.0);
+        meterLuminance = vec4(0.18, 0.0, 0.0, 1.0);
         return;
     }
     float sunVisibility = moonCasts ? skyFallback : casterVisibility;
@@ -138,5 +149,6 @@ void main() {
     color += diffuseColor * BlockLightColor.rgb * blockLightColor(blockLight);
     color += albedo * emissive * 2.0;
 
+    meterLuminance = vec4(dot(color, LUMA), 0.0, 0.0, 1.0);
     fragColor = vec4(toDisplay(color), 1.0);
 }

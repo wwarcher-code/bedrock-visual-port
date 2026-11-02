@@ -31,18 +31,5 @@ class LightingStateTest {
 		assertEquals(0, noon.x, EPSILON);
 	}
 
-	@Test
-	void exposureBrightensAsTheLightFades() {
-		assertEquals(5.865f, LightingState.exposure(1), EPSILON);
-		assertEquals(5.865f / 0.99f, LightingState.exposure(0.99f), EPSILON);
-		assertEquals(5.865f * 1.022f, LightingState.exposure(0.25f), EPSILON);
-		assertEquals(5.865f * 1.022f, LightingState.exposure(0), EPSILON);
-	}
 
-	@Test
-	void blockLightGlowsAtNightAndFadesByDay() {
-		assertEquals(0.024f, LightingState.blockLightStrength(1), EPSILON);
-		assertEquals(0.024f / 0.03f, LightingState.blockLightStrength(0.03f), EPSILON);
-		assertEquals(0.024f / 0.021f, LightingState.blockLightStrength(0), EPSILON);
-	}
 }

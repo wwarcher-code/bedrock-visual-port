@@ -5,6 +5,7 @@ import com.mojang.renderpearl.api.device.DeviceInfo;
 import dev.bedrockvisuals.bedrock.BedrockInputs;
 import dev.bedrockvisuals.bedrock.ColorGradingSettings;
 import dev.bedrockvisuals.bedrock.TimeOfDay;
+import dev.bedrockvisuals.render.AutoExposure;
 import dev.bedrockvisuals.render.ColorGrading;
 import dev.bedrockvisuals.render.DeferredRenderer;
 import dev.bedrockvisuals.render.GBufferPass;
@@ -84,6 +85,8 @@ final class DiagnosticsReport {
 		line("towards sun " + vector(light.sunDirection()) + ", sun " + vector(light.sun()) + ", moon " + vector(light.moon()));
 		line("sky zenith " + vector(light.sky()) + ", horizon " + vector(light.skyHorizon()) + ", ambient "
 				+ vector(light.ambient()));
+		line("exposure " + format(AutoExposure.exposure()) + " (metered average luminance "
+				+ format(AutoExposure.averageLuminance()) + " in Bedrock's units, meter " + AutoExposure.meterStatus() + ")");
 		line("shadow map " + (ShadowPass.isValid() ? "drawn from the " + (ShadowPass.fromMoon() ? "moon" : "sun")
 				: "not drawn (light too low or failed)"));
 		ColorGradingSettings grading = ColorGrading.current();
