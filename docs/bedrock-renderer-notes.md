@@ -264,6 +264,22 @@ As a check, the function with the JSON's curves, colours converted to linear and
 predicts the reference noon shot's sky closely: (125,165,226) against (138,166,224) high up, and
 (177,194,223) against (182,193,224) at the horizon.
 
+**The sun and moon terms aren't the lighting's illuminance.** In the executable, the `SunColor` and
+`MoonColor` sent with the atmosphere come from the directional lights' records. Each is faded by its light's
+elevation, between two angles from the renderer settings (not read). The reference shots agree:
+
+- Bedrock's afternoon sky is as bright as its noon sky, though the sun's illuminance curve has fallen to 68 by
+  then.
+- The low-sun sky's upper part needs about 4 times the curve's 23.6.
+
+The light's peak (100), faded from 0 at -10° to 1 at +10°, fits noon, afternoon and the upper low-sun sky
+(TUNE: the angles). The colours are linear: sending the JSON's sRGB values unconverted fits far worse.
+
+The horizon blend stop mapping (x min, y start, z mie start, w max) fits the shots best of all 24 orders.
+
+Still off: just above the horizon at low sun, Bedrock's sky is lilac, about (164,151,171), where the function
+gives peach, about (212,149,148). Bedrock's volumetric fog, which scatters into the sky too, isn't modelled.
+
 The renderer draws it the same way: the lighting pass shades sky pixels with it, Java's sky gradient and
 sunset fan are skipped, and Java's sun, moon and stars stay. Rain and other weather don't change it yet;
 `atmospheric_weather.json` holds Bedrock's weather variants.

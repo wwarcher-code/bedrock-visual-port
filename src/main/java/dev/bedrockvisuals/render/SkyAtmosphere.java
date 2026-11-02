@@ -2,6 +2,7 @@ package dev.bedrockvisuals.render;
 
 import com.mojang.blaze3d.buffers.Std140Builder;
 import dev.bedrockvisuals.bedrock.AtmosphereSettings;
+import dev.bedrockvisuals.bedrock.Curve;
 import dev.bedrockvisuals.bedrock.LightingSettings;
 import dev.bedrockvisuals.bedrock.Rgba;
 import org.joml.Vector3f;
@@ -25,7 +26,21 @@ public record SkyAtmosphere(Vector3f zenith, Vector3f horizon, Vector4f blendSto
 	/** std140 size of the AtmosphereData block (lighting/sky.glsl): six vec4s. */
 	static final int DATA_SIZE = 6 * 16;
 
-	static SkyAtmosphere sample(AtmosphereSettings atmosphere, LightingSettings lighting, float time) {
+	/**
+	 * TUNE: the sun's (and moon's) strength in the sky fades in over these elevations, in degrees. Bedrock's
+	 * engine fades it by the light's elevation between two angles from its renderer settings, which weren't
+	 * read; these fit the reference shots (about 0.86 at the low-sun shot's 7°).
+	 */
+	static final float FADE_START_DEGREES = -10f;
+	static final float FADE_END_DEGREES = 10f;
+
+	/**
+	 * The sky doesn't follow the lighting's illuminance curve, which falls to a quarter by the low-sun shot:
+	 * Bedrock's afternoon sky is as bright as noon's. It takes the light's full strength (the curve's peak)
+	 * faded by elevation, which matches the reference shots at noon, afternoon and low sun.
+	 */
+	static SkyAtmosphere sample(AtmosphereSettings atmosphere, LightingSettings lighting, float time,
+			Vector3f sunDirection, Vector3f moonDirection) {
 		Rgba sunColor = lighting.sun().color().sample(time);
 		Rgba moonColor = lighting.moon().color().sample(time);
 		return new SkyAtmosphere(
@@ -35,8 +50,16 @@ public record SkyAtmosphere(Vector3f zenith, Vector3f horizon, Vector4f blendSto
 						atmosphere.horizonBlendMieStart().sample(time), atmosphere.horizonBlendMax().sample(time)),
 				new Vector4f(atmosphere.rayleighStrength().sample(time), atmosphere.sunMieStrength().sample(time),
 						atmosphere.moonMieStrength().sample(time), atmosphere.sunGlareShape().sample(time)),
-				new Vector4f(linear(sunColor), lighting.sun().illuminance().sample(time)),
-				new Vector4f(linear(moonColor), lighting.moon().illuminance().sample(time)));
+				new Vector4f(linear(sunColor), Curve.max(lighting.sun().illuminance()) * fade(sunDirection)),
+				new Vector4f(linear(moonColor), Curve.max(lighting.moon().illuminance()) * fade(moonDirection)));
+	}
+
+	/** 0 below {@link #FADE_START_DEGREES}, 1 above {@link #FADE_END_DEGREES}, linear in the sine between. */
+	static float fade(Vector3f towardsLight) {
+		float start = (float) Math.sin(Math.toRadians(FADE_START_DEGREES));
+		float end = (float) Math.sin(Math.toRadians(FADE_END_DEGREES));
+		float elevation = towardsLight.y / Math.max(towardsLight.length(), 1e-6f);
+		return Math.clamp((elevation - start) / (end - start), 0f, 1f);
 	}
 
 	/** Writes AtmosphereData; {@code null} writes a disabled block (the shader leaves Java's sky). */

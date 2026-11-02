@@ -61,6 +61,15 @@ public final class Curve<T> {
 		return lerp.apply(values.get(next - 1), values.get(next), t);
 	}
 
+	/** The largest keyframe value, for curves of numbers. */
+	public static float max(Curve<Float> curve) {
+		float max = Float.NEGATIVE_INFINITY;
+		for (Float value : curve.values) {
+			max = Math.max(max, value);
+		}
+		return max;
+	}
+
 	@Override
 	public String toString() {
 		return isConstant() ? String.valueOf(values.getFirst()) : keys.length + " keyframes";

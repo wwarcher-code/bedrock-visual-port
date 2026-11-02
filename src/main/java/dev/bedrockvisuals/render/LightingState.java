@@ -95,7 +95,8 @@ public record LightingState(
 				linear(lighting.ambientColor()).mul(lighting.ambientIlluminance() * AMBIENT_SCALE),
 				new Vector3f(BLOCK_LIGHT).mul(BLOCK_LIGHT_SCALE),
 				level.dimensionType().skybox() == DimensionType.Skybox.OVERWORLD
-						? SkyAtmosphere.sample(atmosphere, lighting, time) : null);
+						? SkyAtmosphere.sample(atmosphere, lighting, time, sunDirection, new Vector3f(sunDirection).negate())
+						: null);
 	}
 
 	private static LightingState fallback(float time) {
