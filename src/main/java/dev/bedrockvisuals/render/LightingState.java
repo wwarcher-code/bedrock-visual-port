@@ -48,8 +48,14 @@ public record LightingState(
 	private static final float AMBIENT_SCALE = 0.070f;
 	/** Block light's strength, the same day and night: exposure makes torches glow at night and fade by day. */
 	private static final float BLOCK_LIGHT_SCALE = 0.0593f;
-	/** The sky's radiance for the exposure meter, relative to its fill colours (deferred.fsh). */
-	static final float METER_SKY_SCALE = 0.0278f;
+	/**
+	 * The sky's radiance for the exposure meter, relative to its fill colours (deferred.fsh). Calibrated on a
+	 * real frame of the test scene at midnight (meter diagnostics: the brightest 20% was 20% sky at 0.42 and
+	 * terrain at 0.55, settling at exposure 24 where the fit wants 18): 1.5x the fit's 0.0278 lifts the sky to
+	 * about 0.63, which then fills the brightest 20% and settles near exposure 18.7. By day the exposure sits at
+	 * Bedrock's clamp either way.
+	 */
+	static final float METER_SKY_SCALE = 0.0417f;
 	/** Block light's strength; its colour by level is Bedrock's curve, in the shader (common.glsl). */
 	private static final Vector3f BLOCK_LIGHT = new Vector3f(1.0f, 1.0f, 1.0f);
 
