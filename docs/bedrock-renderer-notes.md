@@ -198,6 +198,35 @@ multiplies the scene, including the sky seen through the surface, by the water's
 view, capping the path where the ray leaves through the surface above the camera. Seen from below, the
 water surface passes the air beyond inside Snell's window and mirrors the water below outside it.
 
+## Volumetric fog (verified in PopulateVolume)
+
+A froxel grid of 8×8-pixel tiles and 96 depth slices (PC ultra, out to 250 blocks), with exponential slice
+spacing `(2^(5.77 z) - 1) × 0.01866`. For each froxel, PopulateVolume works out the medium, then the
+in-scattered light:
+
+- **Medium.**
+  - Water inside the water volume, judged from the water front and back depth (camera underwater
+    flips it): `WaterAlbedoExtinction`, per biome.
+  - Air elsewhere: extinction `AirAlbedoExtinction.w × saturate(HeightFogScaleBias.x × y + .y)` and
+    scattering = extinction × albedo.
+  - The Henyey-Greenstein g is blended between air and water (`HenyeyGreensteinG.xy`).
+  - Scattering is multiplied by `1 - distance fog`, so volumetrics give way to the distance fog.
+- **Light.**
+  - Ambient: `max(block light × block intensity + sky ambient × sky visibility, MinAmbientValue) / 4π`.
+  - Plus the directional light × HG(g, `dot(L, -V)`) × the froxel's cascaded shadow.
+  - Both are times the scattering.
+- VolumeScattering integrates front to back. The composite does `scene × transmittance + in-scatter`, for the
+  sky too.
+
+The air values come from each biome fog's `volumetric` block: `max_density`, `zero_density_height` and
+`max_density_height`, then the `media_coefficients` scattering and absorption, and `henyey_greenstein_g`.
+Plains and the default have none, and the compiled-in default wasn't found. Many biomes set
+`max_density` 0 explicitly, so the default isn't 0. The renderer uses the most common explicit values
+(0.05, scattering 0.04, g 0.6) as a TUNE default.
+
+The renderer ray-marches the same model per pixel: 48 steps with interleaved-gradient jitter, through its
+shadow map and cloud shadows.
+
 ## Engine configuration files
 
 The *runtime* values mostly come from JSON files in the install (`Content\data`, found by name in

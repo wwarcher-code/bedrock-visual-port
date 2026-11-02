@@ -25,9 +25,50 @@ import org.joml.Vector4f;
  *            as fractions of the fog distance, the fog distance in blocks, and 1 when on
  */
 public record SkyAtmosphere(Vector3f zenith, Vector3f horizon, Vector4f blendStops, Vector4f scattering,
-		Vector4f sun, Vector4f moon, Vector4f fog) {
-	/** std140 size of the AtmosphereData block (lighting/sky.glsl): seven vec4s. */
-	static final int DATA_SIZE = 7 * 16;
+		Vector4f sun, Vector4f moon, Vector4f fog, Vector4f volumeAir, Vector4f volumeHeight) {
+	/** std140 size of the AtmosphereData block (lighting/sky.glsl): nine vec4s. */
+	static final int DATA_SIZE = 9 * 16;
+
+	/**
+	 * TUNE: the air volumetric fog for biomes whose fog settings have none (plains and the default). The engine's
+	 * compiled-in default wasn't found; many biomes set max_density 0 explicitly to turn it off, so it isn't 0.
+	 * These are the most common explicit values in the vanilla fogs (taiga, oceans, hills).
+	 */
+	static final FogSettings.VolumetricFog DEFAULT_AIR = new FogSettings.VolumetricFog(0.05f, 320f, 320f,
+			new dev.bedrockvisuals.bedrock.Vec3(0.04f, 0.04f, 0.04f), dev.bedrockvisuals.bedrock.Vec3.of(0), 0.6f);
+
+	/**
+	 * Bedrock's air medium for PopulateVolume (AirAlbedoExtinction, HeightFogScaleBias, HenyeyGreensteinG): albedo
+	 * {@code s / (s + a)}, extinction {@code max_density × (s + a)} per block (TUNE: how the engine folds density into
+	 * the coefficients isn't in the shaders), full density below max_density_height fading to none at
+	 * zero_density_height.
+	 *
+	 * @return {albedo rgb, extinction} and {height scale, height bias, phase g, on}
+	 */
+	static Vector4f[] volume(FogSettings.VolumetricFog air) {
+		if (air == null) {
+			air = DEFAULT_AIR;
+		}
+		float sr = air.scattering().x(), sg = air.scattering().y(), sb = air.scattering().z();
+		float ar = air.absorption().x(), ag = air.absorption().y(), ab = air.absorption().z();
+		float tr = sr + ar, tg = sg + ag, tb = sb + ab;
+		float total = (tr + tg + tb) / 3f;
+		Vector4f albedoExtinction = new Vector4f(tr > 0 ? sr / tr : 0, tg > 0 ? sg / tg : 0, tb > 0 ? sb / tb : 0,
+				air.maxDensity() * total);
+		float zero = air.zeroDensityHeight();
+		float full = air.maxDensityHeight();
+		float scale;
+		float bias;
+		if (Math.abs(zero - full) < 1e-3f) {
+			scale = -1000f;
+			bias = zero * 1000f;
+		} else {
+			scale = 1f / (full - zero);
+			bias = -zero / (full - zero);
+		}
+		Vector4f height = new Vector4f(scale, bias, air.henyeyGreensteinG(), albedoExtinction.w > 0 ? 1 : 0);
+		return new Vector4f[] {albedoExtinction, height};
+	}
 
 	/**
 	 * TUNE: the sun's (and moon's) strength in the sky fades in over these elevations, in degrees. Bedrock's
@@ -43,7 +84,8 @@ public record SkyAtmosphere(Vector3f zenith, Vector3f horizon, Vector4f blendSto
 	 * faded by elevation, which matches the reference shots at noon, afternoon and low sun.
 	 */
 	static SkyAtmosphere sample(AtmosphereSettings atmosphere, LightingSettings lighting, float time,
-			Vector3f sunDirection, Vector3f moonDirection, Vector4f fog) {
+			Vector3f sunDirection, Vector3f moonDirection, Vector4f fog, FogSettings.VolumetricFog air) {
+		Vector4f[] volume = volume(air);
 		Rgba sunColor = lighting.sun().color().sample(time);
 		Rgba moonColor = lighting.moon().color().sample(time);
 		return new SkyAtmosphere(
@@ -55,7 +97,7 @@ public record SkyAtmosphere(Vector3f zenith, Vector3f horizon, Vector4f blendSto
 						atmosphere.moonMieStrength().sample(time), atmosphere.sunGlareShape().sample(time)),
 				new Vector4f(linear(sunColor), Curve.max(lighting.sun().illuminance()) * fade(sunDirection)),
 				new Vector4f(linear(moonColor), Curve.max(lighting.moon().illuminance()) * fade(moonDirection)),
-				fog);
+				fog, volume[0], volume[1]);
 	}
 
 	/**
@@ -82,7 +124,7 @@ public record SkyAtmosphere(Vector3f zenith, Vector3f horizon, Vector4f blendSto
 	/** Writes AtmosphereData; {@code null} writes a disabled block (the shader leaves Java's sky). */
 	static void write(Std140Builder builder, SkyAtmosphere sky) {
 		if (sky == null) {
-			for (int i = 0; i < 7; i++) {
+			for (int i = 0; i < 9; i++) {
 				builder.putVec4(0, 0, 0, 0);
 			}
 			return;
@@ -94,6 +136,11 @@ public record SkyAtmosphere(Vector3f zenith, Vector3f horizon, Vector4f blendSto
 		builder.putVec4(sky.sun);
 		builder.putVec4(sky.moon);
 		builder.putVec4(sky.fog);
+		builder.putVec4(sky.volumeAir);
+		// The shader works relative to the camera: density = saturate(scale × (cameraY + y) + bias).
+		double cameraY = net.minecraft.client.Minecraft.getInstance().gameRenderer.mainCamera().position().y;
+		builder.putVec4(sky.volumeHeight.x, (float) (sky.volumeHeight.y + sky.volumeHeight.x * cameraY),
+				sky.volumeHeight.z, sky.volumeHeight.w);
 	}
 
 	private static Vector3f linear(Rgba color) {

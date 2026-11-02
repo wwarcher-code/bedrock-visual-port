@@ -102,6 +102,26 @@ public final class Underwater {
 				caustics == null ? 1 : caustics.power());
 		float[] sigma = WaterPass.extinction();
 		builder.putVec4(sigma[0], sigma[1], sigma[2], surfaceAbove);
+		float[] scattering = WaterPass.scattering();
+		builder.putVec4(scattering[0], scattering[1], scattering[2], WATER_PHASE_G);
+		builder.putVec4(cameraSkyAccess(), 0, 0, 0);
+	}
+
+	/** TUNE: the water medium's Henyey-Greenstein g (HenyeyGreensteinG.y), a runtime value not found. */
+	private static final float WATER_PHASE_G = 0.75f;
+
+	/**
+	 * How much sky the camera's surroundings see, 0 to 1, from the sky light where the camera is: Bedrock lights
+	 * its fog with sky ambient through per-froxel sky visibility samples; this stands in with the camera's.
+	 */
+	private static float cameraSkyAccess() {
+		Minecraft minecraft = Minecraft.getInstance();
+		if (minecraft.level == null) {
+			return 1f;
+		}
+		BlockPos pos = minecraft.gameRenderer.mainCamera().blockPosition();
+		float level = minecraft.level.getBrightness(net.minecraft.world.level.LightLayer.SKY, pos) / 15f;
+		return level * level;
 	}
 
 	private static String currentBiomeWater() {

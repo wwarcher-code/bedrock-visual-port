@@ -14,6 +14,8 @@ layout(std140) uniform AtmosphereData {
     vec4 AtmosphereSun;         // rgb: colour, linear; w: illuminance
     vec4 AtmosphereMoon;
     vec4 AtmosphereFog;         // distance fog: start, 1 / (end - start) (fractions of z), z: distance in blocks, w: on
+    vec4 VolumeAir;             // volumetric fog air medium: albedo rgb, extinction per block at full density
+    vec4 VolumeHeight;          // density = saturate(x × (y relative to camera) + y); z: phase g; w: on
 };
 
 // How much of the sky covers terrain at this distance (Bedrock's FogAndDistanceControl): 0 to 1 between the

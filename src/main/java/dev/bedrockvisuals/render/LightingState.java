@@ -99,7 +99,8 @@ public record LightingState(
 				new Vector3f(BLOCK_LIGHT).mul(BLOCK_LIGHT_SCALE),
 				level.dimensionType().skybox() == DimensionType.Skybox.OVERWORLD
 						? SkyAtmosphere.sample(atmosphere, lighting, time, sunDirection, new Vector3f(sunDirection).negate(),
-								distanceFog(pack.get().fog(biome.fog())))
+								distanceFog(pack.get().fog(biome.fog())),
+								pack.get().fog(biome.fog()).volumetric().get("air"))
 						: null);
 	}
 

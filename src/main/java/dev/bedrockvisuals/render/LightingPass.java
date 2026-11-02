@@ -32,8 +32,8 @@ import org.lwjgl.system.MemoryStack;
  * stars (SkyAtmosphere), or Java's whole sky left as it is.
  */
 public final class LightingPass {
-	/** std140 size of the LightingData block (include/common.glsl): two mat4s and fifteen vec4s. */
-	private static final int DATA_SIZE = 2 * 64 + 15 * 16;
+	/** std140 size of the LightingData block (include/common.glsl): two mat4s and seventeen vec4s. */
+	private static final int DATA_SIZE = 2 * 64 + 17 * 16;
 	/**
 	 * Bedrock's shadow normal offset (shadow_configuration.pc.json normal_offset_strength): lookups move out along
 	 * the normal by this many blocks times (1 - N·L).

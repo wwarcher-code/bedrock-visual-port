@@ -56,6 +56,11 @@ public final class WaterPass {
 	private static final float[] ABSORPTION = {0.34f, 0.056f, 0.0092f};
 	private static final float[] SCATTERING = {0.0008f, 0.0019f, 0.0049f};
 
+	/** Scattering per block, linear RGB. */
+	static float[] scattering() {
+		return SCATTERING.clone();
+	}
+
 	/** Extinction per block (absorption + scattering), linear RGB. */
 	static float[] extinction() {
 		return new float[] {ABSORPTION[0] + SCATTERING[0], ABSORPTION[1] + SCATTERING[1], ABSORPTION[2] + SCATTERING[2]};

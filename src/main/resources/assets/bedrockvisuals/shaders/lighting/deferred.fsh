@@ -80,6 +80,72 @@ float cloudShadow(vec3 position, vec3 towardsLight) {
     return filled > 0.5 ? 1.0 - CloudShadowField.w : 1.0;
 }
 
+// Bedrock's volumetric fog (PopulateVolume + VolumeScattering), marched along the view instead of through a
+// froxel grid: per step, the medium (water below the surface while the camera is under water, else air with
+// its height density), in-scattered sky ambient (1/4π) and sun or moon light through the shadow map and the
+// cloud shadows (Henyey-Greenstein), integrated front to back. Out to 250 blocks (volumetric_fog
+// far_plane), and faded out where the distance fog takes over, as Bedrock does.
+const int VOLUME_STEPS = 48;
+const float VOLUME_FAR = 250.0;
+
+float phaseHG(float g, float cosine) {
+    return (1.0 - g * g) * 0.07957747 / pow(max(1.0 + g * (2.0 * cosine + g), 1e-4), 1.5);
+}
+
+float volumeShadow(vec3 p, vec3 towardsLight) {
+    if (ShadowParams.x < 0.5) {
+        return 1.0;
+    }
+    vec4 clip = ShadowViewProjection * vec4(p, 1.0);
+    vec2 uv = clip.xy * 0.5 + 0.5;
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) || clip.z <= 0.0 || clip.z >= 1.0) {
+        return 1.0;
+    }
+    return clip.z >= texture(ShadowMap, uv).r - 0.0003 ? 1.0 : 0.0;
+}
+
+// rgb: in-scattered light (this renderer's units, before exposure); transmittance in the out parameter.
+vec3 volumetricFog(vec3 dir, float distance, out vec3 transmittance) {
+    transmittance = vec3(1.0);
+    bool water = UnderwaterParams.x > 0.5;
+    if (AtmosphereZenith.w < 0.5 || (VolumeHeight.w < 0.5 && !water)) {
+        return vec3(0.0);
+    }
+    float end = min(distance, VOLUME_FAR);
+    float stepLength = end / float(VOLUME_STEPS);
+    float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    bool moonCasts = ShadowParams.w > 0.5;
+    vec3 l = normalize(moonCasts ? MoonDirection.xyz : SunDirection.xyz);
+    vec3 light = moonCasts ? MoonColor.rgb : SunColor.rgb;
+    float cosine = dot(l, -dir);
+    vec3 ambient = SkyColor.rgb * VolumeCamera.x * 0.07957747;
+    vec3 inScattered = vec3(0.0);
+    for (int i = 0; i < VOLUME_STEPS; i++) {
+        float t = (float(i) + jitter) * stepLength;
+        vec3 p = dir * t;
+        vec3 extinction;
+        vec3 scattering;
+        float g;
+        if (water && p.y < UnderwaterMedium.w) {
+            extinction = UnderwaterMedium.rgb;
+            scattering = UnderwaterScattering.rgb;
+            g = UnderwaterScattering.w;
+        } else {
+            float density = clamp(VolumeHeight.x * p.y + VolumeHeight.y, 0.0, 1.0) * VolumeHeight.w;
+            extinction = vec3(VolumeAir.w * density);
+            scattering = extinction * VolumeAir.rgb;
+            g = VolumeHeight.z;
+        }
+        scattering *= 1.0 - bedrockFogAmount(t);
+        float visibility = volumeShadow(p, l) * cloudShadow(p, l);
+        vec3 source = scattering * (ambient + light * phaseHG(g, cosine) * visibility);
+        vec3 stepTransmittance = exp(-extinction * stepLength);
+        inScattered += transmittance * source * (1.0 - stepTransmittance) / max(extinction, vec3(1e-6));
+        transmittance *= stepTransmittance;
+    }
+    return inScattered;
+}
+
 // Bedrock's caustics multiplier (DeferredMixedResolutionCaustics): on direct light while the camera is under
 // water. The sheet repeats every 1/scale blocks across world XZ.
 float causticsMultiplier(vec3 position, vec3 n) {
@@ -111,8 +177,10 @@ void main() {
             // premultiplied blend.
             vec3 sky = bedrockSkyRadiance(ray, normalize(SunDirection.xyz), normalize(MoonDirection.xyz))
                     * AtmosphereHorizon.w;
-            // Under water the sky is seen through the water above (path capped at the surface).
-            sky *= underwaterTransmittance(ray, 1e6);
+            // Volumetric fog in front of the sky, out to its far plane (under water, through the water above).
+            vec3 fogTransmittance;
+            vec3 fogLight = volumetricFog(ray, VOLUME_FAR, fogTransmittance);
+            sky = sky * fogTransmittance + fogLight;
             meterLuminance = vec4(-dot(sky, LUMA), 0.0, 0.0, 1.0);
             fragColor = vec4(toDisplay(sky), 0.0);
             return;
@@ -208,8 +276,11 @@ void main() {
         color = mix(color, bedrockSkyRadiance(normalize(position), sunDir, moonDir) * AtmosphereHorizon.w, fog);
     }
 
-    // Under water, Bedrock's WaterExtinction multiplies the scene by the water's transmittance along the view.
-    color *= underwaterTransmittance(normalize(position), length(position));
+    vec3 viewRay = normalize(position);
+    vec3 fogTransmittance;
+    vec3 fogLight = volumetricFog(viewRay, length(position), fogTransmittance);
+    // Under water, the march's water medium is Bedrock's WaterExtinction along the view, up to the surface.
+    color = color * fogTransmittance + fogLight;
 
     meterLuminance = vec4(dot(color, LUMA), 0.0, 0.0, 1.0);
     fragColor = vec4(toDisplay(color), 1.0);
