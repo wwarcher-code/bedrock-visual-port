@@ -25,14 +25,26 @@ of minutes.
    capture uses the same camera. Run it before each capture, after a pull, or after you've moved.
 3. Press **F9** and stand still for about ten seconds. The mod hides the HUD, clears the weather,
    and takes screenshots at noon, afternoon, low sun and midnight, each with deferred lighting, vanilla,
-   the shadow test and the material view, plus albedo, normal and light at noon. Then it restores the time,
-   view and HUD, and opens the folder.
+   the shadow test and the material view, plus albedo, normal and light at noon. It finishes with a noon
+   shot from inside the pool looking up (caustics, the water's extinction, Snell's window), then puts you
+   back, restores the time, view and HUD, and opens the folder.
 4. Send Claude **`contact-sheet.png`** from the folder that opened, and paste the clipboard (Ctrl+V): it
    holds the diagnostics report (build commit, mod versions, GPU, pass status, Bedrock data, biome,
    lighting per time and recent errors). The individual screenshots are in the same folder if Claude asks
    for one at full size.
 
 Captures are kept under `run\bedrock-visuals-captures\<date and time>\`.
+
+## Things to look at in the game
+
+The capture can't show everything that moves. After F9, look at these by eye:
+
+- **Cloud shadows** drifting across the ground at noon, and the clouds themselves at low sun.
+- **Light shafts** through the tree and the overhang at low sun (volumetric fog).
+- **Under water**: swim in the pool or an ocean; caustics play on everything while your head is under.
+- **Rain**: `/weather rain` greys the sky and clouds and switches the sun's direct light off.
+- **Reflections** on the iron and gold blocks now show the scene, not only the sky.
+- **Bloom** around glowstone and the sea lantern at midnight.
 
 ## Bedrock reference shots
 
