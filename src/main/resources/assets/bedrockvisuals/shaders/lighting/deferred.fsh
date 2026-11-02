@@ -12,6 +12,7 @@ uniform sampler2D Depth;
 uniform sampler2D ShadowMap;
 uniform sampler2D CloudShadowMap;  // filled cloud cells (CloudShadows.java)
 uniform sampler2D CausticsMap;     // Bedrock's renderer/caustics.png: frames of 32x32 stacked vertically
+uniform sampler2D PreviousScene;   // the previous frame's HDR scene (BloomPass.java), for reflections
 
 #include <bedrockvisuals:common.glsl>
 #include <bedrockvisuals:sky.glsl>
@@ -148,6 +149,43 @@ vec3 volumetricFog(vec3 dir, float distance, out vec3 transmittance) {
     return inScattered;
 }
 
+// Bedrock's screen-space reflections (ScreenSpaceReflections; reflection_configuration.pc.json: on below
+// roughness 0.4, fading from 0.3), for every smooth surface, not only water. The mirror ray is marched through
+// the G-buffer's depth; a hit takes the previous frame's HDR colour there. rgb: colour, a: confidence.
+const int SSR_STEPS = 48;
+vec4 terrainReflection(vec3 origin, vec3 direction) {
+    float stepLength = 0.2;
+    float travelled = 0.0;
+    for (int i = 0; i < SSR_STEPS; i++) {
+        travelled += stepLength;
+        stepLength *= 1.12;
+        vec3 p = origin + direction * travelled;
+        vec4 clip = ViewProjection * vec4(p, 1.0);
+        if (clip.w <= 0.0) {
+            return vec4(0.0);
+        }
+        vec3 ndc = clip.xyz / clip.w;
+        vec2 uv = ndc.xy * 0.5 + 0.5;
+        if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
+            return vec4(0.0);
+        }
+        float sceneDepth = texture(Depth, uv).r;
+        if (sceneDepth <= 0.0) {
+            continue;
+        }
+        vec4 scene = InverseViewProjection * vec4(ndc.xy, sceneDepth, 1.0);
+        float sceneDistance = length(scene.xyz / scene.w);
+        float rayDistance = length(p);
+        if (rayDistance > sceneDistance && rayDistance - sceneDistance < max(stepLength * 2.0, 0.5)) {
+            // Fade near the screen's edges (fading_distance), where the reflected scene runs out.
+            vec2 edge = min(uv, 1.0 - uv);
+            float fade = smoothstep(0.0, 0.1, min(edge.x, edge.y));
+            return vec4(texture(PreviousScene, uv).rgb, fade);
+        }
+    }
+    return vec4(0.0);
+}
+
 // Bedrock's caustics multiplier (DeferredMixedResolutionCaustics): on direct light while the camera is under
 // water. The sheet repeats every 1/scale blocks across world XZ.
 float causticsMultiplier(vec3 position, vec3 n) {
@@ -269,7 +307,13 @@ void main() {
             : mix(SkyColor.rgb, SkyHorizonColor.rgb, horizonShare);
     vec3 grazingF0 = max(vec3(1.0 - roughness), f0);
     vec3 skyFresnel = f0 + (grazingF0 - f0) * pow(1.0 - nDotV, 5.0);
-    color += skyInMirror * skyFresnel * (1.0 - 0.7 * roughness) * skyLight * skyLight;
+    vec3 reflected = skyInMirror * skyLight * skyLight;
+    float ssrWeight = 1.0 - smoothstep(0.3, 0.4, roughness);
+    if (ssrWeight > 0.0) {
+        vec4 traced = terrainReflection(position + n * 0.02, mirror);
+        reflected = mix(reflected, traced.rgb, traced.a * ssrWeight);
+    }
+    color += reflected * skyFresnel * (1.0 - 0.7 * roughness);
     color += diffuseColor * AmbientColor.rgb;
     // BlockLightColor carries its exposure (LightingState.blockLightStrength): faint by day, strong at night.
     color += diffuseColor * BlockLightColor.rgb * blockLightColor(blockLight);

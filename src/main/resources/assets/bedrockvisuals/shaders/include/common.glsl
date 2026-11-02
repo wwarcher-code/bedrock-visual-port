@@ -25,6 +25,7 @@ layout(std140) uniform LightingData {
     vec4 UnderwaterMedium;      // rgb: water extinction per block, w: water surface height above the camera
     vec4 UnderwaterScattering;  // rgb: water scattering per block, w: water phase g
     vec4 VolumeCamera;          // x: the camera's sky access (0 to 1, for the fog's ambient light)
+    mat4 ViewProjection;        // camera-relative world space to clip space (InverseViewProjection's inverse)
 };
 
 // Bedrock's water extinction along a view ray from the camera (Underwater.java): the path through water is

@@ -16,6 +16,7 @@ import com.mojang.renderpearl.api.pipeline.RenderPipeline;
 import com.mojang.renderpearl.api.pipeline.UniformType;
 import com.mojang.renderpearl.api.textures.FilterMode;
 import com.mojang.renderpearl.api.textures.GpuSampler;
+import com.mojang.renderpearl.api.textures.GpuTextureView;
 import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.Identifier;
@@ -32,8 +33,8 @@ import org.lwjgl.system.MemoryStack;
  * stars (SkyAtmosphere), or Java's whole sky left as it is.
  */
 public final class LightingPass {
-	/** std140 size of the LightingData block (include/common.glsl): two mat4s and seventeen vec4s. */
-	private static final int DATA_SIZE = 2 * 64 + 17 * 16;
+	/** std140 size of the LightingData block (include/common.glsl): three mat4s and seventeen vec4s. */
+	private static final int DATA_SIZE = 3 * 64 + 17 * 16;
 	/**
 	 * Bedrock's shadow normal offset (shadow_configuration.pc.json normal_offset_strength): lookups move out along
 	 * the normal by this many blocks times (1 - N·L).
@@ -49,6 +50,7 @@ public final class LightingPass {
 			.withUniform("ShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("CloudShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("CausticsMap", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("PreviousScene", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("AtmosphereData", UniformType.UNIFORM_BUFFER)
@@ -114,6 +116,7 @@ public final class LightingPass {
 					AutoExposure.exposure());
 			CloudShadows.write(builder, light.atmosphere() != null);
 			Underwater.write(builder);
+			builder.putMat4f(new Matrix4f(projection).mul(modelView));
 			encoder.writeToBuffer(data.slice(), builder.get());
 			Std140Builder gradingBuilder = Std140Builder.onStack(stack, ColorGrading.DATA_SIZE);
 			ColorGrading.write(gradingBuilder, ColorGrading.current());
@@ -144,6 +147,10 @@ public final class LightingPass {
 					RenderSystem.getSamplerCache().getRepeat(FilterMode.NEAREST));
 			pass.setUniform("CausticsMap", Underwater.caustics() != null ? Underwater.caustics() : gbuffer.depthView(),
 					nearest);
+			// Screen-space reflections read the previous frame's HDR scene (this frame's is being drawn).
+			GpuTextureView previous = BloomPass.previousHdr();
+			pass.setUniform("PreviousScene", previous != null ? previous : gbuffer.depthView(),
+					RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
 			pass.setUniform("LightingData", data);
 			pass.setUniform("GradingData", grading);
 			pass.setUniform("AtmosphereData", atmosphere);
@@ -151,6 +158,7 @@ public final class LightingPass {
 		}
 		LuminanceMeter.measure();
 		BloomPass.render(main);
+		BloomPass.keepForNextFrame();
 	}
 
 	/** This frame's LightingData buffer, shared with the water shader; null before the first frame. */

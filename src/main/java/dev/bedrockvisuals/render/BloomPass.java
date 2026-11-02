@@ -70,6 +70,9 @@ public final class BloomPass {
 	private static final GpuTextureView[] downViews = new GpuTextureView[LEVELS + 1];
 	private static final GpuTexture[] up = new GpuTexture[LEVELS + 1];
 	private static final GpuTextureView[] upViews = new GpuTextureView[LEVELS + 1];
+	private static GpuTexture previous;
+	private static GpuTextureView previousView;
+	private static boolean previousValid;
 	private static GpuBuffer data;
 	private static int width;
 	private static int height;
@@ -97,8 +100,13 @@ public final class BloomPass {
 			close();
 			GpuDevice device = RenderSystem.getDevice();
 			hdr = device.createTexture(() -> "Bedrock Visuals HDR scene",
-					GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, HDR_FORMAT, w, h, 1, 1);
+					GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_SRC,
+					HDR_FORMAT, w, h, 1, 1);
 			hdrView = device.createTextureView(hdr);
+			previous = device.createTexture(() -> "Bedrock Visuals previous HDR scene",
+					GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING, HDR_FORMAT, w, h, 1, 1);
+			previousView = device.createTextureView(previous);
+			previousValid = false;
 			int lw = w;
 			int lh = h;
 			for (int i = 0; i <= LEVELS; i++) {
@@ -186,6 +194,20 @@ public final class BloomPass {
 		}
 	}
 
+	/** Copies this frame's HDR scene for the next frame's screen-space reflections. */
+	static void keepForNextFrame() {
+		if (hdr == null) {
+			return;
+		}
+		RenderSystem.getDevice().createCommandEncoder().copyTextureToTexture(hdr, previous, 0, 0, 0, 0, 0, width, height);
+		previousValid = true;
+	}
+
+	/** The previous frame's HDR scene, or null before there is one. */
+	static GpuTextureView previousHdr() {
+		return previousValid ? previousView : null;
+	}
+
 	public static String status() {
 		return failed ? "FAILED (see log)" : "intensity " + INTENSITY + ", threshold " + THRESHOLD;
 	}
@@ -200,8 +222,11 @@ public final class BloomPass {
 				upViews[i].close();
 				up[i].close();
 			}
+			previousView.close();
+			previous.close();
 			hdr = null;
 			hdrView = null;
+			previousValid = false;
 		}
 	}
 }
