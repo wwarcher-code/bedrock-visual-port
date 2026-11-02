@@ -113,6 +113,19 @@ Thresholded at `BloomParams.y × average luminance` (a 5-tap downsample that kee
 by dual-filter down and up sampling, and added to the HDR image as `+ BloomParams.x × bloom` before the
 tone map. *Runtime:* both parameters.
 
+## Reflections (`DeferredIndirectSpecular`)
+
+- **Sky reflection:** a pre-convolved sky cubemap (`SpecularIBLRecords`, mip chosen by roughness), faded by
+  the sky light level: `saturate((15 s - fadeStart) / max(fadeEnd - fadeStart, 1))³ × IBLParameters.x`,
+  from `IBLSkyFadeParameters`.
+- **Screen-space reflections:** a separate buffer from the `ScreenSpaceReflections` passes (hierarchical depth
+  ray march, then gap filling), blended over the sky reflection by its confidence. Per Mojang's docs SSR is
+  mirror-only, fading from roughness 0.3 to none at 0.4.
+- **Block light** adds an indirect specular term (`BlockLightIndirectSpecularIntensity`).
+- **Texel snapping:** with `QuantizationParameters.w` on, the reflection's start point is snapped to the texel
+  centre like the lighting, so each texel reflects one value. Together with per-texel roughness and normals,
+  this makes reflections pixelated.
+
 ## Colour pipeline (`ColorPostProcessing`)
 
 1. The lighting passes write pre-exposed colour (`× 0.18 / avg`); this pass divides that back out.
@@ -165,5 +178,5 @@ Order: the scene beneath is attenuated by `WaterExtinction`, then `DeferredWater
 
 ## Still to analyse
 
-The sky probe (directional sky light), `NdLFloor`, the SSR and indirect specular passes, volumetric fog
-and local exposure; the built-in caustics texture; and every *runtime* value, from the game executable.
+The sky probe (directional sky light), `NdLFloor`, the SSR ray march itself, volumetric fog and local
+exposure; the built-in caustics texture; and every *runtime* value, from the game executable.
