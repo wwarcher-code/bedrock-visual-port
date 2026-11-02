@@ -120,9 +120,14 @@ public final class TestCapture {
 			sheet.add(row);
 			STEPS.add(() -> {
 				command("time set " + time);
-				// Like a cut in Bedrock, jump the exposure to the new scene instead of adapting over a second.
-				AutoExposure.snap();
 				wait = TICKS_AFTER_TIME_CHANGE;
+			});
+			// The exposure adapts over about a second; rather than wait for it, jump it to the latest
+			// measurement (taken well after the new time reached the client), then let a few frames render
+			// with it before shooting.
+			STEPS.add(() -> {
+				AutoExposure.settle();
+				wait = TICKS_AFTER_VIEW_CHANGE;
 			});
 			STEPS.add(() -> report.lightingAt(timeLabel + " (" + time + ")"));
 			for (View view : VIEWS) {

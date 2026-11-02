@@ -48,6 +48,8 @@ public final class AutoExposure {
 	private static float adaptedLog = Float.NaN;
 	private static long lastMeasurement;
 	private static boolean snapNext;
+	/** The latest measurement's target, log2 (Bedrock units). */
+	private static float lastTargetLog = Float.NaN;
 
 	private AutoExposure() {
 	}
@@ -75,9 +77,16 @@ public final class AutoExposure {
 		return 0.18f / averageLuminance * KEY * UNIT_SCALE;
 	}
 
-	/** The next measurement replaces the adapted value instead of easing towards it (time jumps, captures). */
+	/** The next measurement replaces the adapted value instead of easing towards it. */
 	public static void snap() {
 		snapNext = true;
+	}
+
+	/** Jumps the adapted value to the latest measurement's target now (test captures). */
+	public static void settle() {
+		if (!Float.isNaN(lastTargetLog)) {
+			adaptedLog = lastTargetLog;
+		}
 	}
 
 	/**
@@ -117,6 +126,7 @@ public final class AutoExposure {
 		float seconds = lastMeasurement == 0 ? 0 : (now - lastMeasurement) / 1e9f;
 		lastMeasurement = now;
 		float targetLog = (float) (Math.log(target) / Math.log(2));
+		lastTargetLog = targetLog;
 		if (Float.isNaN(adaptedLog) || snapNext) {
 			adaptedLog = targetLog;
 			snapNext = false;
