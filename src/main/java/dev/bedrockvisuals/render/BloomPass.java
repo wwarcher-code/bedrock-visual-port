@@ -123,9 +123,19 @@ public final class BloomPass {
 		return hdrView;
 	}
 
-	/** After the lighting pass: blur the HDR scene's bright parts and add them to the main image. */
-	static void render(RenderTarget main) {
-		if (failed || hdrView == null || LightingPass.lightingData() == null) {
+	/** The lighting pass's HDR target, or null before the first frame. */
+	static GpuTextureView hdrView() {
+		return hdrView;
+	}
+
+	/**
+	 * After the lighting pass and local exposure: blur the HDR scene's bright parts and add them to the main
+	 * image.
+	 *
+	 * @param scene the HDR scene after local exposure
+	 */
+	static void render(RenderTarget main, GpuTextureView scene) {
+		if (failed || scene == null || LightingPass.lightingData() == null) {
 			return;
 		}
 		try {
@@ -141,7 +151,7 @@ public final class BloomPass {
 			}
 			GpuSampler linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
 			draw(encoder, "threshold", downViews[0], THRESHOLD_PIPELINE, pass -> {
-				pass.setUniform("Source", hdrView, linear);
+				pass.setUniform("Source", scene, linear);
 				pass.setUniform("BloomData", data);
 			});
 			for (int i = 1; i <= LEVELS; i++) {
@@ -163,7 +173,7 @@ public final class BloomPass {
 			try (RenderPass pass = encoder.createRenderPass(descriptor)) {
 				pass.setPipeline(RenderSystem.getCompiledPipeline(BLEND_PIPELINE));
 				pass.setUniform("Source", bloom, linear);
-				pass.setUniform("Scene", hdrView, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+				pass.setUniform("Scene", scene, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
 				pass.setUniform("LightingData", LightingPass.lightingData());
 				pass.setUniform("GradingData", LightingPass.gradingData());
 				pass.setUniform("BloomData", data);

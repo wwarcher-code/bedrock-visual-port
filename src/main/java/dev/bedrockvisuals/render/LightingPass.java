@@ -167,7 +167,7 @@ public final class LightingPass {
 			pass.draw(3, 1, 0, 0);
 		}
 		LuminanceMeter.measure();
-		BloomPass.render(main);
+		BloomPass.render(main, LocalExposure.render(main, BloomPass.hdrView()));
 		BloomPass.keepForNextFrame();
 	}
 

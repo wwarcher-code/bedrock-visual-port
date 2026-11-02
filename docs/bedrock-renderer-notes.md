@@ -419,6 +419,33 @@ The renderer uses the table from the install and the same mip curve. It blurs th
 directions in place of the probe's mips (a cone up to 60° at the roughest mip), and doesn't have the metal
 block-light term yet (`BlockLightIndirectSpecularIntensity` wasn't captured).
 
+## Local exposure (verified in LocalExposure and BilateralGrid)
+
+Luminance is `dot(rgb, Rec.709)` in Bedrock's units, clamped to `LuminanceRangeParams` (2⁻¹⁰ to 2²⁰), as
+log2.
+
+- **BuildBilateralGrid** (compute, atomics). For each pixel, `t = (log2 L + 10) / 30`. The cell is
+  `floor(GridDimensions.xy × (p + 0.5) / resolution)`. Slice `s = GridDimensions.z × t`, its index clamped to
+  `slices - 2`. It adds `(1 - f, (1 - f) t)` to slice `floor(s)` and `(f, f t)` to the next, in 1/256 fixed point.
+- **FilterBilateralGrid**. Within each slice, a Gaussian over the cells within `R = BilateralFilterParams.x`
+  (the window clamped to the grid), weight `exp(-d² / (R²/2))`, normalized. There's no blur across slices.
+- **GaussianDownsample** (`DownsampledLogLuminance`). The log luminance of the scene, Gaussian-blurred:
+  radius `GaussianBlurParams.x`, step `.y`, in scene pixels, same weight.
+- **ApplyLocalExposure**. With `A` the log average, `D` the blur and `B = min + range × g.y / g.x` the grid
+  sampled trilinearly at (uv, t):
+  `base = g.x < 0.001 ? D : mix(B, D, z)` and `out = scene × 2^((A - L) + y (L - base) + x (base - A))`.
+  `LocalExposureParams` is (0.75, 1, 0.4), so this is `scene × 2^(0.25 (A - base))`: detail kept, and each
+  region's level a quarter of the way to the average.
+- The average is the histogram's (the brightest 20%), so most of the ground sits below it and is lifted:
+  about half a stop on the test scene's grass. That's what the exposure key of 1.46, fitted before this,
+  stood in for; the key is now 1 again.
+- Order: after lighting, before bloom.
+
+The grid's size, the filter radius and the blur's radius and step are set at run time and weren't captured.
+The renderer uses TUNE values: 32-pixel cells, 32 slices, radius 2, blur radius 32 and step 8. It gathers
+the grid in fragment passes from a quarter-resolution log luminance, not with atomics. Java draws the water
+and clouds after this pass, so they aren't locally exposed yet.
+
 ## Shadow sampling (verified in the deferred direct-lighting shader)
 
 The engine's PC configuration (`renderer/platform_config/pc/shadow_configuration.pc.json`, ultra) sets:

@@ -8,6 +8,7 @@ import dev.bedrockvisuals.bedrock.TimeOfDay;
 import dev.bedrockvisuals.render.AutoExposure;
 import dev.bedrockvisuals.render.ColorGrading;
 import dev.bedrockvisuals.render.BloomPass;
+import dev.bedrockvisuals.render.LocalExposure;
 import dev.bedrockvisuals.render.Weather;
 import dev.bedrockvisuals.render.CloudPass;
 import dev.bedrockvisuals.render.Underwater;
@@ -74,6 +75,7 @@ final class DiagnosticsReport {
 		line("materials " + MaterialAtlas.status());
 		line("water " + WaterPass.status() + "; " + Underwater.status() + "; columns " + WaterColumns.status());
 		line("bloom " + BloomPass.status());
+		line("local exposure " + LocalExposure.status());
 		line("weather " + Weather.status());
 		line("clouds " + CloudPass.status() + "; cloud shadows " + CloudShadows.status());
 		line("Bedrock packs " + BedrockInputs.pack().map(pack -> pack.summary()).orElse("NOT LOADED"));

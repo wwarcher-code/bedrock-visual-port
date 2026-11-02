@@ -33,11 +33,11 @@ public final class AutoExposure {
 	static final float MIN_AVERAGE = 0.125f * (float) Math.pow(2, -3);
 	static final float MAX_AVERAGE = 0.125f * (float) Math.pow(2, 4);
 	/**
-	 * TUNE: with Bedrock's captured light terms, its screenshots land half a stop brighter than 0.18 / average
-	 * (one factor fitted to the test scene's grass and wall at noon and low sun). The cause wasn't captured: most
-	 * likely the sky reflection's share on rough surfaces and the local exposure pass.
+	 * No key: Bedrock exposes by 0.18 / average. A fitted 1.46 used to stand in for its local exposure, which
+	 * lifts regions below the average (metered over the brightest 20%, so near the sky's level) by a quarter of
+	 * the gap: about half a stop for the test scene's grass. {@link LocalExposure} now does that.
 	 */
-	static final float KEY = 1.46f;
+	static final float KEY = 1f;
 	/** Pixels darker than this go in the histogram's ignored bin 0 (LuminanceHistogram's threshold). */
 	static final float MIN_PIXEL_LUMINANCE = 0.00095f;
 	/**
