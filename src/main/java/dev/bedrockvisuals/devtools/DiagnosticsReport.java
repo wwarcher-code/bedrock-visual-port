@@ -87,6 +87,7 @@ final class DiagnosticsReport {
 				+ vector(light.ambient()));
 		line("exposure " + format(AutoExposure.exposure()) + " (metered average luminance "
 				+ format(AutoExposure.averageLuminance()) + " in Bedrock's units, meter " + AutoExposure.meterStatus() + ")");
+		line("meter " + AutoExposure.meterBreakdown());
 		line("shadow map " + (ShadowPass.isValid() ? "drawn from the " + (ShadowPass.fromMoon() ? "moon" : "sun")
 				: "not drawn (light too low or failed)"));
 		ColorGradingSettings grading = ColorGrading.current();

@@ -20,7 +20,7 @@ public final class AutoExposure {
 	 * illuminance 68, near its JSON's 100). By day Bedrock's scenes are far brighter than the average clamp's 2.0,
 	 * so its exposure sits at the clamp and only adapts as the scene darkens (dusk, night, caves).
 	 */
-	static final float UNIT_SCALE = 68f;
+	static final float UNIT_SCALE = 67.6f;
 	// average_luminance.json
 	static final float MIN_LOG_LUMINANCE = -3f;
 	static final float LOG_LUMINANCE_RANGE = 20f;
@@ -90,6 +90,7 @@ public final class AutoExposure {
 		int rows = (height + STRIDE - 1) / STRIDE;
 		float[] luminance = new float[columns * rows];
 		float[] weight = new float[columns * rows];
+		boolean[] sky = new boolean[columns * rows];
 		int i = 0;
 		for (int y = 0; y < height; y += STRIDE) {
 			for (int x = 0; x < width; x += STRIDE) {
@@ -97,7 +98,10 @@ public final class AutoExposure {
 				if (index + 1 >= data.limit()) {
 					break;
 				}
-				luminance[i] = Float.float16ToFloat(data.getShort(index)) * UNIT_SCALE;
+				// The lighting pass writes sky pixels negative, so diagnostics can tell sky from terrain.
+				float value = Float.float16ToFloat(data.getShort(index));
+				sky[i] = value < 0;
+				luminance[i] = Math.abs(value) * UNIT_SCALE;
 				float u = (x + 0.5f) / width - 0.5f;
 				float v = (y + 0.5f) / height - 0.5f;
 				weight[i] = (float) Math.exp(-CENTER_WEIGHT * (u * u + v * v));
@@ -105,6 +109,10 @@ public final class AutoExposure {
 			}
 		}
 		float target = histogramAverage(luminance, weight, i);
+		lastLuminance = luminance;
+		lastWeight = weight;
+		lastSky = sky;
+		lastCount = i;
 		long now = System.nanoTime();
 		float seconds = lastMeasurement == 0 ? 0 : (now - lastMeasurement) / 1e9f;
 		lastMeasurement = now;
@@ -154,6 +162,57 @@ public final class AutoExposure {
 		double meanBin = sum / Math.max(counted, 1e-9);
 		double log = (meanBin - 1) / 254 * LOG_LUMINANCE_RANGE + MIN_LOG_LUMINANCE;
 		return (float) Math.pow(2, log);
+	}
+
+	// The last measurement's samples, kept for diagnostics (computed on request: sorting them every
+	// measurement would cost frame time).
+	private static float[] lastLuminance;
+	private static float[] lastWeight;
+	private static boolean[] lastSky;
+	private static int lastCount;
+
+	/** What the last measurement's brightest 20% was made of, for diagnostics. */
+	public static String meterBreakdown() {
+		float[] luminance = lastLuminance;
+		if (luminance == null) {
+			return "no measurement yet";
+		}
+		return breakdown(luminance, lastWeight, lastSky, lastCount);
+	}
+
+	/** Sky's share of the brightest 20% (by weight), and the log-mean luminance of its sky and terrain parts. */
+	static String breakdown(float[] luminance, float[] weight, boolean[] sky, int count) {
+		Integer[] order = new Integer[count];
+		for (int i = 0; i < count; i++) {
+			order[i] = i;
+		}
+		java.util.Arrays.sort(order, (a, b) -> Float.compare(luminance[b], luminance[a]));
+		double total = 0;
+		for (int i = 0; i < count; i++) {
+			total += weight[i];
+		}
+		double budget = (1 - LOW_QUANTILE) * total;
+		double skyWeight = 0;
+		double skyLog = 0;
+		double terrainWeight = 0;
+		double terrainLog = 0;
+		for (int k = 0; k < count && budget > 0; k++) {
+			int i = order[k];
+			double w = Math.min(weight[i], budget);
+			budget -= w;
+			double log = Math.log(Math.max(luminance[i], 1e-6)) / Math.log(2);
+			if (sky[i]) {
+				skyWeight += w;
+				skyLog += w * log;
+			} else {
+				terrainWeight += w;
+				terrainLog += w * log;
+			}
+		}
+		double top = skyWeight + terrainWeight;
+		return String.format(java.util.Locale.ROOT, "brightest 20%%: %.0f%% sky (mean %.3g), %.0f%% terrain (mean %.3g)",
+				100 * skyWeight / Math.max(top, 1e-9), skyWeight > 0 ? Math.pow(2, skyLog / skyWeight) : 0,
+				100 * terrainWeight / Math.max(top, 1e-9), terrainWeight > 0 ? Math.pow(2, terrainLog / terrainWeight) : 0);
 	}
 
 	/** Log-space approach towards the target: brightening at the light rate, darkening at the dark rate. */

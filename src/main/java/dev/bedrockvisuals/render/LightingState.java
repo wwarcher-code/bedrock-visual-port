@@ -43,13 +43,13 @@ public record LightingState(
 	/** Bedrock's full moon (0.4) barely lights anything; the night is the ambient floor and the sky. */
 	private static final float MOON_SCALE = 0.0001f;
 	/** How strongly the sky's zenith color fills faces that see the sky. */
-	private static final float SKY_FILL = 1.308f;
+	private static final float SKY_FILL = 1.324f;
 	/** Bedrock's ambient illuminance (0.02 in vanilla) as a floor everywhere. */
-	private static final float AMBIENT_SCALE = 0.0428f;
+	private static final float AMBIENT_SCALE = 0.070f;
 	/** Block light's strength, the same day and night: exposure makes torches glow at night and fade by day. */
-	private static final float BLOCK_LIGHT_SCALE = 0.0596f;
+	private static final float BLOCK_LIGHT_SCALE = 0.0593f;
 	/** The sky's radiance for the exposure meter, relative to its fill colours (deferred.fsh). */
-	static final float METER_SKY_SCALE = 0.0606f;
+	static final float METER_SKY_SCALE = 0.0278f;
 	/** Block light's strength; its colour by level is Bedrock's curve, in the shader (common.glsl). */
 	private static final Vector3f BLOCK_LIGHT = new Vector3f(1.0f, 1.0f, 1.0f);
 

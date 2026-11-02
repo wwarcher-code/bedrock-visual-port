@@ -15,7 +15,7 @@ uniform sampler2D ShadowMap;
 
 // Share of light reaching the ground that bounces back onto faces turned towards it: a neutral ground albedo
 // of 0.12 times a bounce strength, fitted with LightingState's factors to Bedrock screenshots.
-const float GROUND_BOUNCE = 0.240;
+const float GROUND_BOUNCE = 0.238;
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
@@ -74,7 +74,8 @@ void main() {
         vec4 near = InverseViewProjection * vec4(texCoord * 2.0 - 1.0, 1.0, 1.0);
         vec3 ray = normalize(near.xyz / near.w);
         vec3 skyRadiance = DebugParams.y * mix(SkyHorizonColor.rgb, SkyColor.rgb, clamp(ray.y, 0.0, 1.0));
-        meterLuminance = vec4(dot(skyRadiance, LUMA), 0.0, 0.0, 1.0);
+        // Negative marks sky for the meter's diagnostics; the histogram uses the magnitude (AutoExposure).
+        meterLuminance = vec4(-dot(skyRadiance, LUMA), 0.0, 0.0, 1.0);
         fragColor = vec4(0.0);
         return;
     }
