@@ -36,6 +36,10 @@ public final class ShadowPass {
 	public static final float DEPTH_RANGE = 256;
 	/** Below this height above the horizon the light grazes the terrain too flatly to shadow usefully. */
 	private static final float MIN_ELEVATION = 0.03f;
+	/** How far the light moves before the shadow map turns to follow it (ShadowProjection.steppedDirection). */
+	static final float DIRECTION_STEP = (float) Math.toRadians(0.25);
+	/** The direction the shadow map is drawn from; null until the first map, or after sun and moon swap. */
+	private static Vector3f heldDirection;
 	/** Reversed depth: 0 is the far side, away from the sun. */
 	private static final double CLEAR_DEPTH = 0.0;
 
@@ -99,10 +103,15 @@ public final class ShadowPass {
 			return;
 		}
 		boolean moon = light.sunDirection().y < MIN_ELEVATION;
-		Vector3f towardsLight = moon ? light.moonDirection() : light.sunDirection();
-		if (towardsLight.y < MIN_ELEVATION) {
+		Vector3f current = moon ? light.moonDirection() : light.sunDirection();
+		if (current.y < MIN_ELEVATION) {
 			return;
 		}
+		if (moon != fromMoon) {
+			heldDirection = null;
+		}
+		heldDirection = ShadowProjection.steppedDirection(current, heldDirection, DIRECTION_STEP);
+		Vector3f towardsLight = heldDirection;
 		try {
 			draw(chunks, sampler, blockAtlas, towardsLight);
 		} catch (RuntimeException e) {

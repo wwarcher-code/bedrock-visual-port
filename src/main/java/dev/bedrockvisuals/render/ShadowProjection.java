@@ -42,6 +42,23 @@ public final class ShadowProjection {
 				offsetRight / halfExtent, offsetUp / halfExtent, 0.5f, 1);
 	}
 
+	/**
+	 * The direction the shadow map is drawn from: {@code held} until the light has moved more than
+	 * {@code stepRadians} away from it, then the light's current direction. The sun moves a little every frame;
+	 * redrawing the map from each new angle rotates its texel grid under the terrain, so shadow edges creep and
+	 * jump back every frame. Stepping keeps the map still between updates, and at 0.25° the jump at each update
+	 * is under a 1/16-block texel for anything up to about 14 blocks tall.
+	 *
+	 * @param held the direction in use, or null to take the current one
+	 */
+	public static Vector3f steppedDirection(Vector3f current, Vector3f held, float stepRadians) {
+		Vector3f now = new Vector3f(current).normalize();
+		if (held == null || now.angle(held) > stepRadians) {
+			return now;
+		}
+		return held;
+	}
+
 	/** The camera's position within one texel along an axis, so the texel grid stays fixed in the world. */
 	private static double snapOffset(double cameraAlongAxis, double texel) {
 		return cameraAlongAxis - Math.floor(cameraAlongAxis / texel) * texel;

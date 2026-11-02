@@ -55,4 +55,17 @@ class ShadowProjectionTest {
 			assertEquals(firstTexelOffset, texelOffset, 1e-2f);
 		}
 	}
+
+	@Test
+	void theShadowDirectionHoldsUntilTheLightMovesAStep() {
+		float step = (float) Math.toRadians(0.25);
+		org.joml.Vector3f held = ShadowProjection.steppedDirection(new org.joml.Vector3f(0, 1, 0), null, step);
+		// A tenth of a degree later: the map keeps its direction (the same instance).
+		org.joml.Vector3f slightly = new org.joml.Vector3f((float) Math.sin(Math.toRadians(0.1)), (float) Math.cos(Math.toRadians(0.1)), 0);
+		org.junit.jupiter.api.Assertions.assertSame(held, ShadowProjection.steppedDirection(slightly, held, step));
+		// Half a degree later: it turns to the light.
+		org.joml.Vector3f further = new org.joml.Vector3f((float) Math.sin(Math.toRadians(0.5)), (float) Math.cos(Math.toRadians(0.5)), 0);
+		org.joml.Vector3f turned = ShadowProjection.steppedDirection(further, held, step);
+		org.junit.jupiter.api.Assertions.assertEquals(0, turned.angle(further), 1e-5);
+	}
 }
