@@ -20,7 +20,7 @@ layout(std140) uniform LightingData {
     vec4 CameraGridOffset;      // xyz: the camera's world position modulo 16 (texel grid); w: exposure (AutoExposure)
     vec4 CloudShadowField;      // xy: the camera's position in the cloud field (blocks), z: cloud layer middle above
                                 // the camera, w: cloud shadow strength (0 = off) (CloudShadows.java)
-    vec4 CloudShadowSize;       // xy: the field's size in cells, z: cell size in blocks
+    vec4 CloudShadowSize;       // xy: the field's size in cells, z: cell size in blocks, w: 1 when the cells are there
     vec4 UnderwaterParams;      // x: camera under water, y: caustics frame (-1 = off), z: caustics scale, w: power
     vec4 UnderwaterMedium;      // rgb: water extinction per block, w: water surface height above the camera
     vec4 UnderwaterScattering;  // rgb: water scattering per block, w: water phase g

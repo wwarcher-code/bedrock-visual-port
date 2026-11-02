@@ -97,6 +97,31 @@ public final class CloudShadows {
 		uploadedCells = cells;
 	}
 
+	private static GpuTextureView empty;
+
+	/**
+	 * The cloud cells, or before Java's clouds have loaded a 1x1 empty texture (CloudShadowSize.w is then 0, and
+	 * the shaders don't read it, but a declared sampler must be bound).
+	 */
+	static GpuTextureView viewOrEmpty() {
+		if (view != null) {
+			return view;
+		}
+		if (empty == null) {
+			GpuDevice device = RenderSystem.getDevice();
+			GpuTexture texture = device.createTexture(() -> "Bedrock Visuals no cloud cells",
+					GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA8_UNORM, 1, 1, 1, 1);
+			ByteBuffer data = MemoryUtil.memCalloc(4);
+			try {
+				device.createCommandEncoder().writeToTexture(texture, data, 0, 0, 0, 0, 1, 1);
+			} finally {
+				MemoryUtil.memFree(data);
+			}
+			empty = device.createTextureView(texture);
+		}
+		return empty;
+	}
+
 	/** The cloud cells as a texture, or null before Java's clouds have loaded. */
 	static GpuTextureView view() {
 		return view;
@@ -105,13 +130,14 @@ public final class CloudShadows {
 	/**
 	 * Two vec4s for LightingData: the camera's position in the cloud field (x, z, in blocks), the middle of the
 	 * cloud layer relative to the camera, and the shadow strength (0 when off); then the field's size in
-	 * cells and the cell size.
+	 * cells, the cell size, and 1 when the cell texture is there (the clouds use it whether or not shadows are
+	 * on).
 	 */
 	static void write(Std140Builder builder, boolean enabled) {
 		boolean on = enabled && visible && view != null;
 		builder.putVec4((float) fieldX, (float) fieldZ, (float) (baseHeight + CLOUD_THICKNESS / 2 - cameraY),
 				on ? CONTRIBUTION : 0f);
-		builder.putVec4(width, height, CELL_BLOCKS, 0);
+		builder.putVec4(width, height, CELL_BLOCKS, visible && view != null ? 1 : 0);
 	}
 
 	public static String status() {

@@ -1,6 +1,8 @@
 package dev.bedrockvisuals.render;
 
+import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.renderpearl.api.commands.RenderPass;
+import com.mojang.renderpearl.api.textures.FilterMode;
 import com.mojang.renderpearl.api.pipeline.BindGroupLayout;
 import com.mojang.renderpearl.api.pipeline.ColorTargetState;
 import com.mojang.renderpearl.api.pipeline.RenderPipeline;
@@ -25,6 +27,7 @@ public final class CloudPass {
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("AtmosphereData", UniformType.UNIFORM_BUFFER)
+			.withUniform("CloudCells", UniformType.COMBINED_IMAGE_SAMPLER)
 			.build();
 	private static final Identifier SHADER = Identifier.fromNamespaceAndPath("bedrockvisuals", "clouds/clouds");
 
@@ -60,6 +63,9 @@ public final class CloudPass {
 		pass.setUniform("LightingData", LightingPass.lightingData());
 		pass.setUniform("GradingData", LightingPass.gradingData());
 		pass.setUniform("AtmosphereData", LightingPass.atmosphereData());
+		// Which cells are filled (CloudShadows), for paths through neighbouring cells.
+		pass.setUniform("CloudCells", CloudShadows.viewOrEmpty(),
+				RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
 	}
 
 	public static RenderPipeline variantOf(RenderPipeline vanilla) {
