@@ -77,10 +77,34 @@ vec3 hable(vec3 c) {
     return curve / white;
 }
 
-// Bedrock's six operators, numbered as ColorGradingSettings.ToneMapping. Reinhard's extended forms use a white
-// point of 4. "Generic" is Mojang's hand-tuned curve with no published formula. It is approximated as ACES on
-// luminance, which keeps hue, after a slight desaturation: both fitted to Bedrock screenshots of the test
-// scene (LightingState.java).
+// Bedrock's generic tone mapper (Timothy Lottes' curve, GDC 2016) with the engine's default parameters, from
+// Minecraft.Windows.exe: contrast 1, mid-in 0.3 to mid-out 0.18, HDR max 500 to 1, crosstalk 25, crosstalk
+// saturation 8. The engine solves b and c so the curve passes through both points; on the brightest channel,
+// y = p^a / (p^a b + c), and each channel's ratio to it is pulled towards white as y rises.
+const float GENERIC_CONTRAST = 1.0;
+const float GENERIC_MID_IN = 0.3;
+const float GENERIC_MID_OUT = 0.18;
+const float GENERIC_HDR_MAX = 500.0;
+const float GENERIC_CROSSTALK = 25.0;
+const float GENERIC_CROSSTALK_SATURATION = 8.0;
+
+vec3 genericTonemap(vec3 c) {
+    float pm = pow(GENERIC_MID_IN, GENERIC_CONTRAST);
+    float ph = pow(GENERIC_HDR_MAX, GENERIC_CONTRAST);
+    float b = (ph * GENERIC_MID_OUT - pm) / ((ph - pm) * GENERIC_MID_OUT);
+    float cc = ph * (1.0 - b);
+    float peak = max(max(c.r, max(c.g, c.b)), 1e-6);
+    vec3 ratio = max(c, 0.0) / peak;
+    float z = pow(peak, GENERIC_CONTRAST);
+    float y = z / (z * b + cc);
+    ratio = pow(max(ratio, vec3(1e-9)), vec3(1.0 / GENERIC_CROSSTALK_SATURATION));
+    ratio = mix(ratio, vec3(1.0), pow(y, GENERIC_CROSSTALK));
+    ratio = pow(ratio, vec3(GENERIC_CROSSTALK_SATURATION));
+    return clamp(ratio * y, 0.0, 1.0);
+}
+
+// Bedrock's six operators, numbered as ColorGradingSettings.ToneMapping, as its ColorPostProcessing shader
+// computes them (Reinhard's extended forms with a white point of 4 until the white point is wired up).
 vec3 tonemap(vec3 c) {
     int operator = int(ToneMapping.x + 0.5);
     const float WHITE = 4.0;
@@ -101,9 +125,7 @@ vec3 tonemap(vec3 c) {
     if (operator == 4) {
         return aces(c);
     }
-    const float GENERIC_SATURATION = 0.907;
-    c = max(mix(vec3(luminance), c, GENERIC_SATURATION), 0.0);
-    return clamp(c * (aces(vec3(luminance)).x / max(luminance, 1e-5)), 0.0, 1.0);
+    return genericTonemap(c);
 }
 
 float ggx(float nDotH, float roughness) {

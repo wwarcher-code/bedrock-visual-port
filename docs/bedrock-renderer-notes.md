@@ -202,8 +202,11 @@ How `tone_mapping.json` reaches the shader (from the per-frame setter, which use
 `0.125 × 2^min_luminance` to `0.125 × 2^max_luminance` (EV100 to luminance: 0.0156 to 2.0 for vanilla); the
 white point is `0.18 × 2^f_stop` (19 stops above middle grey), floored at `min_white_point`.
 
-The generic tone mapper's inputs (contrast, mid-in, mid-out, HDR max, crosstalk) are not in these files.
-The engine computes `b` and `c` from them as in Lottes' curve (`b = (Ph m - Pm) / ((Ph - Pm) m)`,
+The generic tone mapper's inputs are not in these files: they are compiled-in defaults of the same settings
+struct (found as its default block in `.rdata`, right after `f_stop` 19 and `min_white_point` 1): contrast
+1, mid-in 0.3, mid-out 0.18, HDR max 500, crosstalk 25 (`GenericTonemapperContrastAndScaleAndOffsetAndCrosstalk.w`)
+and crosstalk saturation 8 (`GenericTonemapperCrosstalkParams.x`). With these, `b = 0.997265`, `c = 1.3675`:
+0.3 maps to 0.18 and 500 to 1. The engine computes `b` and `c` from them as in Lottes' curve (`b = (Ph m - Pm) / ((Ph - Pm) m)`,
 `c = Ph (1 - b)`, with `Pm = midIn^a`, `Ph = hdrMax^a`, `m = midOut`) and sends `(a, b, c, crosstalk)`.
 
 ## Still to analyse

@@ -15,7 +15,7 @@ uniform sampler2D ShadowMap;
 
 // Share of light reaching the ground that bounces back onto faces turned towards it: a neutral ground albedo
 // of 0.12 times a bounce strength, fitted with LightingState's factors to Bedrock screenshots.
-const float GROUND_BOUNCE = 0.175;
+const float GROUND_BOUNCE = 0.259;
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;

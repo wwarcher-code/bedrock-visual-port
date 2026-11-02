@@ -170,9 +170,9 @@ Pillow on all 3,328 TGA files in the 1.26.60 samples.
 The lighting pass ends as Bedrock documents it: the biome's color grading on the HDR color (temperature,
 then saturation, contrast about the scene's average luminance, gain and offset, with optional shadow and
 highlight bands), then the biome's tone-mapping operator, then its gamma as the final encoding. All six
-operators are implemented. Two pieces are approximations: "generic", vanilla's operator, is Mojang's
-unpublished hand-tuned curve, approximated as hue-preserving ACES with its saturation fitted to Bedrock
-screenshots; and the average luminance is fixed at
+operators are implemented. "Generic", vanilla's operator, is Timothy Lottes' curve with the engine's
+compiled-in parameters (from `Minecraft.Windows.exe`; see `docs\bedrock-renderer-notes.md`). One piece is
+still an approximation: the average luminance is fixed at
 middle grey until the renderer measures it.
 
 ## Checking shaders
