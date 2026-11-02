@@ -24,7 +24,8 @@ layout(std140) uniform LightingData {
     vec4 UnderwaterParams;      // x: camera under water, y: caustics frame (-1 = off), z: caustics scale, w: power
     vec4 UnderwaterMedium;      // rgb: water extinction per block, w: water surface height above the camera
     vec4 UnderwaterScattering;  // rgb: water scattering per block, w: water phase g
-    vec4 VolumeCamera;          // x: the camera's sky access (0 to 1, for the fog's ambient light)
+    vec4 VolumeCamera;          // x: the camera's sky access (0 to 1, for the fog's ambient light); yzw: cloud
+                                // colour under the current weather, linear (Weather.java)
     mat4 ViewProjection;        // camera-relative world space to clip space (InverseViewProjection's inverse)
 };
 

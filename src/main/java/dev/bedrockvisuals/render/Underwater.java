@@ -104,7 +104,12 @@ public final class Underwater {
 		builder.putVec4(sigma[0], sigma[1], sigma[2], surfaceAbove);
 		float[] scattering = WaterPass.scattering();
 		builder.putVec4(scattering[0], scattering[1], scattering[2], WATER_PHASE_G);
-		builder.putVec4(cameraSkyAccess(), 0, 0, 0);
+		float[] cloud = Weather.cloud();
+		builder.putVec4(cameraSkyAccess(), toLinear(cloud[0]), toLinear(cloud[1]), toLinear(cloud[2]));
+	}
+
+	private static float toLinear(float srgb) {
+		return srgb <= 0.04045f ? srgb / 12.92f : (float) Math.pow((srgb + 0.055f) / 1.055f, 2.4f);
 	}
 
 	/** TUNE: the water medium's Henyey-Greenstein g (HenyeyGreensteinG.y), a runtime value not found. */

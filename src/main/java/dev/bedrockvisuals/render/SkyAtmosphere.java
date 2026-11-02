@@ -89,8 +89,8 @@ public record SkyAtmosphere(Vector3f zenith, Vector3f horizon, Vector4f blendSto
 		Rgba sunColor = lighting.sun().color().sample(time);
 		Rgba moonColor = lighting.moon().color().sample(time);
 		return new SkyAtmosphere(
-				linear(atmosphere.skyZenithColor().sample(time)),
-				linear(atmosphere.skyHorizonColor().sample(time)),
+				linear(Weather.sky(atmosphere.skyZenithColor().sample(time))),
+				linear(Weather.sky(atmosphere.skyHorizonColor().sample(time))),
 				new Vector4f(atmosphere.horizonBlendMin().sample(time), atmosphere.horizonBlendStart().sample(time),
 						atmosphere.horizonBlendMieStart().sample(time), atmosphere.horizonBlendMax().sample(time)),
 				new Vector4f(atmosphere.rayleighStrength().sample(time), atmosphere.sunMieStrength().sample(time),

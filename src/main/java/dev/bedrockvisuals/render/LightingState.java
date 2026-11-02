@@ -80,12 +80,13 @@ public record LightingState(
 				.unwrapKey().map(key -> key.identifier().toString()).orElse("minecraft:plains"));
 		LightingSettings lighting = pack.get().lighting(biome.lighting());
 		AtmosphereSettings atmosphere = pack.get().atmosphere(biome.atmosphere());
-		Rgba zenith = atmosphere.skyZenithColor().sample(time);
-		Rgba horizon = atmosphere.skyHorizonColor().sample(time);
+		Rgba zenith = Weather.sky(atmosphere.skyZenithColor().sample(time));
+		Rgba horizon = Weather.sky(atmosphere.skyHorizonColor().sample(time));
 
 		Vector3f sunDirection = orbit(time, lighting.orbitalOffsetDegrees().sample(time));
-		float sunLevel = lighting.sun().illuminance().sample(time) * SUN_SCALE;
-		float moonLevel = lighting.moon().illuminance().sample(time) * MOON_SCALE;
+		// Rain fades direct light out (atmospheric_weather.json directional_light_strength).
+		float sunLevel = lighting.sun().illuminance().sample(time) * SUN_SCALE * Weather.directLight();
+		float moonLevel = lighting.moon().illuminance().sample(time) * MOON_SCALE * Weather.directLight();
 		float skyIntensity = lighting.skyIntensity().sample(time);
 		return new LightingState(
 				sunDirection,

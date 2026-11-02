@@ -56,9 +56,9 @@ vec4 cloudColor() {
     bool moonLights = ShadowParams.w > 0.5;
     vec3 l = normalize(moonLights ? MoonDirection.xyz : SunDirection.xyz);
     vec3 light = moonLights ? MoonColor.rgb : SunColor.rgb;
-    // Bedrock's cloud colour is white; Java's CloudColor also darkens with the time of day, which the lighting
-    // here already does. TODO: rain and thunder clouds (Bedrock's atmospheric_weather.json cloud colours).
-    vec3 albedo = vec3(1.0);
+    // Bedrock's cloud colour: white, greyed by rain and thunder (atmospheric_weather.json, Weather.java). Java's
+    // CloudColor also darkens with the time of day, which the lighting here already does, so it isn't used.
+    vec3 albedo = VolumeCamera.yzw;
 
     // How far the view travels inside the cell from this face, and the light's path from the middle of that.
     float viewPath = exitDistance(clamp(cellPosition, vec3(0.0), CellSize), view);
