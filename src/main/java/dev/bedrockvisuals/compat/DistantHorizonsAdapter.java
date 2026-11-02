@@ -137,6 +137,8 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 		}
 	}
 
+	private volatile boolean cloudsReported;
+
 	/** Uses DH's API override, which sits on top of the player's own setting and isn't saved. */
 	@Override
 	public void hideOwnClouds(boolean hide) {
@@ -144,6 +146,10 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 			var clouds = DhApi.Delayed.configs.graphics().genericRendering().cloudRenderingEnabled();
 			if (hide) {
 				boolean overridden = clouds.setValue(false);
+				if (cloudsReported) {
+					return;
+				}
+				cloudsReported = true;
 				BedrockVisualsClient.LOGGER.info("[clouds] Distant Horizons' clouds {}", overridden
 						? "hidden for this session"
 						: "could not be hidden (its setting doesn't take API overrides): turn off cloud rendering in"
