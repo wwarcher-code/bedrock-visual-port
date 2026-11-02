@@ -55,10 +55,11 @@ public final class DeferredRenderer {
 	/** Called just before Minecraft opens its main render pass. */
 	public static void beforeMainPass(ChunkSectionsToRender chunks, RenderTarget main, GpuSampler sampler,
 			TextureAtlas blockAtlas) {
+		// Before the flags reset: whether the last frame drew Bedrock's sky decides who draws the clouds.
+		CloudPass.updateDistantClouds();
 		replacedTerrain = false;
 		replacedSky = false;
 		frames++;
-		CloudPass.updateDistantClouds();
 		Underwater.update();
 		WaterPass.prepare(blockAtlas, main, false);
 		LightingState light = enabled && !lightingFailed ? LightingState.current() : null;
