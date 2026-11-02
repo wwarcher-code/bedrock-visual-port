@@ -10,13 +10,17 @@ import java.nio.ByteOrder;
  * weighted, averages the brightest 20% of it, adapts towards that over time, and exposes the frame so the
  * average lands on middle grey: {@code exposure = 0.18 / average × key}.
  *
- * <p>This renderer's light values are in their own units, Bedrock's times {@link #UNIT_SCALE}, fitted with the
- * rest of the lighting to Bedrock screenshots (LightingState). Luminances are converted before the histogram,
- * so every threshold, range and clamp is Bedrock's own.
+ * <p>This renderer's light values are in their own units; times {@link #UNIT_SCALE} they're Bedrock's (fitted
+ * with the rest of the lighting to Bedrock screenshots, LightingState). Luminances are converted before the
+ * histogram, so every threshold, range and clamp is Bedrock's own, and the exposure converted back.
  */
 public final class AutoExposure {
-	/** This renderer's luminance per unit of Bedrock's. */
-	static final float UNIT_SCALE = 10.45f;
+	/**
+	 * Bedrock's luminance per unit of this renderer's (fitted; this renderer's noon sun level of 1 is Bedrock's
+	 * illuminance 68, near its JSON's 100). By day Bedrock's scenes are far brighter than the average clamp's 2.0,
+	 * so its exposure sits at the clamp and only adapts as the scene darkens (dusk, night, caves).
+	 */
+	static final float UNIT_SCALE = 68f;
 	// average_luminance.json
 	static final float MIN_LOG_LUMINANCE = -3f;
 	static final float LOG_LUMINANCE_RANGE = 20f;
@@ -66,8 +70,9 @@ public final class AutoExposure {
 		return LuminanceMeter.status();
 	}
 
+	/** Bedrock's exposure for an average luminance, converted to this renderer's units. */
 	static float exposureFor(float averageLuminance) {
-		return 0.18f / averageLuminance * KEY;
+		return 0.18f / averageLuminance * KEY * UNIT_SCALE;
 	}
 
 	/** The next measurement replaces the adapted value instead of easing towards it (time jumps, captures). */
@@ -92,7 +97,7 @@ public final class AutoExposure {
 				if (index + 1 >= data.limit()) {
 					break;
 				}
-				luminance[i] = Float.float16ToFloat(data.getShort(index)) / UNIT_SCALE;
+				luminance[i] = Float.float16ToFloat(data.getShort(index)) * UNIT_SCALE;
 				float u = (x + 0.5f) / width - 0.5f;
 				float v = (y + 0.5f) / height - 0.5f;
 				weight[i] = (float) Math.exp(-CENTER_WEIGHT * (u * u + v * v));
