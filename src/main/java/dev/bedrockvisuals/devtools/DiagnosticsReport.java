@@ -60,7 +60,8 @@ final class DiagnosticsReport {
 				+ minecraft.options.fov().get());
 		section("Renderer");
 		line("deferred lighting " + (DeferredRenderer.isEnabled() ? "on" : "off")
-				+ (DeferredRenderer.lightingFailed() ? " (FAILED, see log)" : ""));
+				+ (DeferredRenderer.lightingFailed() ? " (FAILED, see log)" : "") + "; since the last report: "
+				+ DeferredRenderer.frameSummary());
 		line("G-buffer " + (GBufferPass.isDisabled() ? "FAILED, see log" : "ok"));
 		line("shadows " + (ShadowPass.isDisabled() ? "FAILED, see log" : ShadowPass.isValid() ? "ok" : "no map this frame"));
 		line("materials " + MaterialAtlas.status());

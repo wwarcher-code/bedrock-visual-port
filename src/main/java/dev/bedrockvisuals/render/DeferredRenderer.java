@@ -30,6 +30,11 @@ public final class DeferredRenderer {
 	 */
 	private static boolean replacedSky;
 	private static boolean lightingFailed;
+	private static long frames;
+	private static long framesLit;
+	private static long framesWithoutTerrain;
+	private static long lastNote;
+	private static String lastReason = "";
 	private static boolean reported;
 
 	private DeferredRenderer() {
@@ -52,22 +57,35 @@ public final class DeferredRenderer {
 			TextureAtlas blockAtlas) {
 		replacedTerrain = false;
 		replacedSky = false;
+		frames++;
 		WaterPass.prepare(blockAtlas, main, false);
 		LightingState light = enabled && !lightingFailed ? LightingState.current() : null;
 		if (light != null) {
 			ShadowPass.render(chunks, sampler, blockAtlas.getTextureView(), light);
 		}
 		GBufferPass.render(chunks, main, sampler, blockAtlas.getTextureView(), MaterialAtlas.view(blockAtlas));
-		if (light == null || !GBufferPass.hasTerrain()) {
+		if (light == null) {
 			return;
+		}
+		boolean terrain = GBufferPass.hasTerrain();
+		// With no terrain this frame the G-buffer is still cleared (all sky), so the pass still draws the sky:
+		// otherwise Java's sky would come back for a frame. Only a failed G-buffer stops it.
+		if (GBufferPass.isDisabled() || (!terrain && light.atmosphere() == null)) {
+			note(GBufferPass.isDisabled() ? "the G-buffer failed" : "no terrain in the G-buffer");
+			return;
+		}
+		if (!terrain) {
+			framesWithoutTerrain++;
+			note("no terrain in the G-buffer (sky drawn alone)");
 		}
 		GBuffer gbuffer = GBufferPass.gbuffer();
 		try {
 			LightingPass.render(main, gbuffer, GBufferPass.projection(), GBufferPass.modelView(), light);
 			RenderSystem.getDevice().createCommandEncoder().copyTextureToTexture(gbuffer.depth(),
 					main.getDepthTexture(), 0, 0, 0, 0, 0, main.width, main.height);
-			replacedTerrain = true;
+			replacedTerrain = terrain;
 			replacedSky = light.atmosphere() != null;
+			framesLit++;
 			WaterPass.prepare(blockAtlas, main, true);
 			if (!reported) {
 				reported = true;
@@ -77,6 +95,26 @@ public final class DeferredRenderer {
 			lightingFailed = true;
 			BedrockVisualsClient.LOGGER.error("[lighting] deferred lighting failed; vanilla terrain until restart", e);
 		}
+	}
+
+	/** Logs why a frame wasn't fully lit, at most once every few seconds so a run of them doesn't flood the log. */
+	private static void note(String reason) {
+		long now = System.nanoTime();
+		if (now - lastNote > 5_000_000_000L || !reason.equals(lastReason)) {
+			lastNote = now;
+			lastReason = reason;
+			BedrockVisualsClient.LOGGER.info("[lighting] frame {}: {}", frames, reason);
+		}
+	}
+
+	/** Frame counts since the last call, for diagnostics; resets them. */
+	public static String frameSummary() {
+		String summary = framesLit + " of " + frames + " frames lit"
+				+ (framesWithoutTerrain > 0 ? ", " + framesWithoutTerrain + " with no terrain in the G-buffer" : "");
+		frames = 0;
+		framesLit = 0;
+		framesWithoutTerrain = 0;
+		return summary;
 	}
 
 	public static boolean isEnabled() {
