@@ -162,6 +162,16 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
         path = min(length(v_Position) * max(ratio - 1.0, 0.0), BOTTOMLESS);
     }
     s.transmittance = exp(-(Absorption.rgb + Scattering.rgb) * path);
+    if (UnderwaterParams.x > 0.5) {
+        // Seen from under water (DeferredWater's underwater branch): what lies beyond is in air, and the
+        // lighting pass already attenuated it along the path to this surface. Outside Snell's window
+        // (1.33² (1 - cos²) > 1) the surface reflects totally.
+        s.transmittance = vec3(1.0);
+        float cosine = clamp(dot(s.n, s.v), 0.0, 1.0);
+        if (1.7689 * (1.0 - cosine * cosine) > 1.0) {
+            s.fresnel = 1.0;
+        }
+    }
     // OIT blends one opacity for all channels. Using the least-transmitted channel keeps the color solved
     // for below (waterColor) non-negative; the per-channel tint goes into that color.
     float leastTransmitted = min(s.transmittance.r, min(s.transmittance.g, s.transmittance.b));
@@ -234,6 +244,18 @@ vec4 screenSpaceReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
 // look: reflection + glint + (1 - F) * (bottom * transmittance + scattered light). The parts combine on screen
 // (after tone mapping), since the scene beneath and the reflections come from the finished image.
 vec3 waterColor(WaterSurface s) {
+    if (UnderwaterParams.x > 0.5) {
+        vec2 size = vec2(textureSize(u_GBufferDepth, 0));
+        vec2 self = toScreen(v_Position, size, false).xy;
+        bool flipY = abs(self.y - gl_FragCoord.y) > abs(size.y - self.y - gl_FragCoord.y);
+        vec3 behind = texelFetch(u_SceneColor, ivec2(gl_FragCoord.xy), 0).rgb;
+        // The reflection is of the water below: screen-space where the mirror ray finds it, else dark water.
+        vec4 traced = screenSpaceReflection(v_Position + s.n * 0.02, reflect(-s.v, s.n), size, flipY);
+        vec3 toSurface = exp(-UnderwaterMedium.rgb * length(v_Position));
+        vec3 reflection = traced.rgb * traced.a * toSurface;
+        vec3 target = clamp(s.fresnel * reflection + (1.0 - s.fresnel) * behind, 0.0, 1.0);
+        return clamp((target - (1.0 - s.opacity) * behind) / max(s.opacity, 1e-3), 0.0, 1.0);
+    }
     vec2 levels = clamp((v_LightCoord * 256.0 - 8.0) / 240.0, 0.0, 1.0);
     float sky = levels.y * levels.y;
     vec3 sunDir = normalize(SunDirection.xyz);

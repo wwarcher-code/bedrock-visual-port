@@ -21,7 +21,22 @@ layout(std140) uniform LightingData {
     vec4 CloudShadowField;      // xy: the camera's position in the cloud field (blocks), z: cloud layer middle above
                                 // the camera, w: cloud shadow strength (0 = off) (CloudShadows.java)
     vec4 CloudShadowSize;       // xy: the field's size in cells, z: cell size in blocks
+    vec4 UnderwaterParams;      // x: camera under water, y: caustics frame (-1 = off), z: caustics scale, w: power
+    vec4 UnderwaterMedium;      // rgb: water extinction per block, w: water surface height above the camera
 };
+
+// Bedrock's water extinction along a view ray from the camera (Underwater.java): the path through water is
+// capped where the ray leaves the water through its surface above the camera.
+vec3 underwaterTransmittance(vec3 ray, float distance) {
+    if (UnderwaterParams.x < 0.5) {
+        return vec3(1.0);
+    }
+    float path = distance;
+    if (ray.y > 1e-4) {
+        path = min(path, UnderwaterMedium.w / ray.y);
+    }
+    return exp(-UnderwaterMedium.rgb * path);
+}
 
 // Bedrock's color grading and tone mapping for the player's biome (ColorGrading.java).
 layout(std140) uniform GradingData {

@@ -59,6 +59,7 @@ public final class DeferredRenderer {
 		replacedSky = false;
 		frames++;
 		CloudPass.updateDistantClouds();
+		Underwater.update();
 		WaterPass.prepare(blockAtlas, main, false);
 		LightingState light = enabled && !lightingFailed ? LightingState.current() : null;
 		if (light != null) {

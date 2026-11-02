@@ -176,6 +176,28 @@ Order: the scene beneath is attenuated by `WaterExtinction`, then `DeferredWater
   average about the same as the pattern sharpens. The texture is the engine's built-in 64-frame sheet (not
   in Mojang's samples); frame length, scale and power come from the water preset (vanilla: 0.09 s, 0.5, 1).
 
+## Under water (verified)
+
+- **Caustics are a per-frame switch.** `DeferredMixedResolutionCaustics` writes the multiplier for every
+  pixel (after `ClearCausticsMultiplier` resets it to 1). The direct-lighting pass multiplies the light's
+  illuminance by it. The forward entity shaders compute the same multiplier inline, gated only by
+  `CausticsParameters.x && .w`, with no water test. So caustics are on for every surface while the
+  camera is under water, and off otherwise.
+  - The pattern is `renderer/caustics.png` in the install: 32×2048, 64 frames of 32×32.
+  - It's sampled at world XZ × `scale` (0.5, so one tile every 2 blocks, 16 texels a block).
+  - It's multiplied by `2 × saturate(N·up)`, raised to `power`, then times `power + 1`.
+- **WaterExtinction** multiplies the scene by `exp(-σ × (d_scene - d_water))` per channel, where `d_water` is
+  the water depth texture's distance and both distances are capped at the fog distance. From under water,
+  the path starts at the camera. The pass adds no in-scattering; that comes from the volumetric fog's water
+  medium.
+- **DeferredWater from below.** Refraction index 1.33. Outside Snell's window
+  (`1.7689 (1 - (N·V)²) > 1`), total internal reflection makes the surface a mirror.
+
+The renderer turns caustics on while the camera's fluid is water (`Camera.getFluidInCamera()`). It
+multiplies the scene, including the sky seen through the surface, by the water's transmittance along the
+view, capping the path where the ray leaves through the surface above the camera. Seen from below, the
+water surface passes the air beyond inside Snell's window and mirrors the water below outside it.
+
 ## Engine configuration files
 
 The *runtime* values mostly come from JSON files in the install (`Content\data`, found by name in

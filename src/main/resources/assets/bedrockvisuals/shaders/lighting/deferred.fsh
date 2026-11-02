@@ -11,6 +11,7 @@ uniform sampler2D Light;
 uniform sampler2D Depth;
 uniform sampler2D ShadowMap;
 uniform sampler2D CloudShadowMap;  // filled cloud cells (CloudShadows.java)
+uniform sampler2D CausticsMap;     // Bedrock's renderer/caustics.png: frames of 32x32 stacked vertically
 
 #include <bedrockvisuals:common.glsl>
 #include <bedrockvisuals:sky.glsl>
@@ -79,6 +80,21 @@ float cloudShadow(vec3 position, vec3 towardsLight) {
     return filled > 0.5 ? 1.0 - CloudShadowField.w : 1.0;
 }
 
+// Bedrock's caustics multiplier (DeferredMixedResolutionCaustics): on direct light while the camera is under
+// water. The sheet repeats every 1/scale blocks across world XZ.
+float causticsMultiplier(vec3 position, vec3 n) {
+    if (UnderwaterParams.y < 0.0) {
+        return 1.0;
+    }
+    vec2 world = (position.xz + CameraGridOffset.xz) * UnderwaterParams.z;
+    vec2 size = vec2(textureSize(CausticsMap, 0));
+    float frames = max(floor(size.y / size.x), 1.0);
+    vec2 uv = vec2(fract(world.x), (UnderwaterParams.y + fract(world.y)) / frames);
+    float pattern = texture(CausticsMap, uv).r * 2.0 * clamp(n.y, 0.0, 1.0);
+    float power = UnderwaterParams.w;
+    return pow(max(pattern, 1e-6), power) * (power + 1.0);
+}
+
 void main() {
     float depth = texture(Depth, texCoord).r;
     if (depth <= 0.0) {
@@ -95,6 +111,8 @@ void main() {
             // premultiplied blend.
             vec3 sky = bedrockSkyRadiance(ray, normalize(SunDirection.xyz), normalize(MoonDirection.xyz))
                     * AtmosphereHorizon.w;
+            // Under water the sky is seen through the water above (path capped at the surface).
+            sky *= underwaterTransmittance(ray, 1e6);
             meterLuminance = vec4(-dot(sky, LUMA), 0.0, 0.0, 1.0);
             fragColor = vec4(toDisplay(sky), 0.0);
             return;
@@ -153,6 +171,7 @@ void main() {
 
     vec3 color = directLight(n, v, sunDir, SunColor.rgb * sunVisibility, diffuseColor, f0, roughness);
     color += directLight(n, v, moonDir, MoonColor.rgb * moonVisibility, diffuseColor, f0, roughness);
+    color *= causticsMultiplier(position, n);
 
     // Sky fill from the hemisphere a face sees: upward faces see all of the sky, walls half of it and the
     // ground below, which bounces back some sun, moon and sky. The fill takes the zenith's color even on walls:
@@ -188,6 +207,9 @@ void main() {
     if (fog > 0.0) {
         color = mix(color, bedrockSkyRadiance(normalize(position), sunDir, moonDir) * AtmosphereHorizon.w, fog);
     }
+
+    // Under water, Bedrock's WaterExtinction multiplies the scene by the water's transmittance along the view.
+    color *= underwaterTransmittance(normalize(position), length(position));
 
     meterLuminance = vec4(dot(color, LUMA), 0.0, 0.0, 1.0);
     fragColor = vec4(toDisplay(color), 1.0);

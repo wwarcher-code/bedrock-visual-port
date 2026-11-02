@@ -32,8 +32,8 @@ import org.lwjgl.system.MemoryStack;
  * stars (SkyAtmosphere), or Java's whole sky left as it is.
  */
 public final class LightingPass {
-	/** std140 size of the LightingData block (include/common.glsl): two mat4s and thirteen vec4s. */
-	private static final int DATA_SIZE = 2 * 64 + 13 * 16;
+	/** std140 size of the LightingData block (include/common.glsl): two mat4s and fifteen vec4s. */
+	private static final int DATA_SIZE = 2 * 64 + 15 * 16;
 	/**
 	 * Bedrock's shadow normal offset (shadow_configuration.pc.json normal_offset_strength): lookups move out along
 	 * the normal by this many blocks times (1 - N·L).
@@ -48,6 +48,7 @@ public final class LightingPass {
 			.withUniform("Depth", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("ShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("CloudShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("CausticsMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("AtmosphereData", UniformType.UNIFORM_BUFFER)
@@ -110,6 +111,7 @@ public final class LightingPass {
 					(float) Math.floorMod((long) Math.floor(camera.z), 16L) + (float) (camera.z - Math.floor(camera.z)),
 					AutoExposure.exposure());
 			CloudShadows.write(builder, light.atmosphere() != null);
+			Underwater.write(builder);
 			encoder.writeToBuffer(data.slice(), builder.get());
 			Std140Builder gradingBuilder = Std140Builder.onStack(stack, ColorGrading.DATA_SIZE);
 			ColorGrading.write(gradingBuilder, ColorGrading.current());
@@ -137,6 +139,8 @@ public final class LightingPass {
 			// Without cloud cells yet the shader skips the lookup (strength 0), but the sampler must be bound.
 			pass.setUniform("CloudShadowMap", CloudShadows.view() != null ? CloudShadows.view() : gbuffer.depthView(),
 					RenderSystem.getSamplerCache().getRepeat(FilterMode.NEAREST));
+			pass.setUniform("CausticsMap", Underwater.caustics() != null ? Underwater.caustics() : gbuffer.depthView(),
+					nearest);
 			pass.setUniform("LightingData", data);
 			pass.setUniform("GradingData", grading);
 			pass.setUniform("AtmosphereData", atmosphere);

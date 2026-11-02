@@ -31,6 +31,20 @@ public final class BedrockInstall {
 	}
 
 	/**
+	 * The install's data folder (Content\data), which holds the engine's own renderer files
+	 * (renderer/caustics.png, the platform configurations); empty when Bedrock isn't installed.
+	 */
+	public static java.util.Optional<Path> dataFolder() {
+		for (Path root : FileSystems.getDefault().getRootDirectories()) {
+			Path data = root.resolve(INSTALL_SUFFIX).getParent();
+			if (Files.isDirectory(data.resolve("renderer"))) {
+				return java.util.Optional.of(data);
+			}
+		}
+		return java.util.Optional.empty();
+	}
+
+	/**
 	 * @param packsFile config file listing pack folders, lowest priority first; lines starting with # are
 	 *                  comments
 	 * @return the pack folders, lowest priority first; empty when none were found
