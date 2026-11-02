@@ -4,7 +4,7 @@ How Vibrant Visuals (Bedrock 1.26.60) computes things, learned by disassembling 
 installed game's `data\renderer\materials` (RenderDragon `.material.bin`, format version 26, Direct3D SM6.5
 DXIL) for this private project. These notes describe behaviour in our own words; no Mojang code or
 disassembly is kept in the repository. Values marked *runtime* are uniforms the engine computes on the CPU,
-so the shaders don't contain them; those need measuring from screenshots.
+so the shaders don't contain them; they're to be found in the game executable next.
 
 ## Pipeline (materials involved)
 
@@ -74,11 +74,45 @@ image to the screen.
   get no sun or moon at all (no light leaking into caves through gaps in the shadow map).
 - The texel snapping applies when `QuantizationParameters.y` is above 0.
 
+## Indirect (ambient) light
+
+`DiscreteIndirectCombinedLightingPass` (without GPU block lighting) computes the ambient irradiance as
+`max(block + sky, AmbientLightParams.rgb × AmbientLightParams.w)`, reduced for emissive pixels:
+
+- **Block:** the vertex light colour from the G-buffer (shared-scale encoding, range 6) times
+  `BlockBaseAmbientLightColorIntensity.w`.
+- **Sky:** `s × mix(s⁴, s², CameraLightIntensity.y)` times `SkyAmbientLightColorIntensity.rgb × .w`, with `s` the
+  sky light level. This is one colour, independent of the surface normal; directional sky light comes from
+  the sky probe (`SkyAmbientSamples`), to analyse.
+
+*Runtime:* `SkyAmbientLightColorIntensity`, `AmbientLightParams`, `BlockBaseAmbientLightColorIntensity`,
+`CameraLightIntensity`.
+
 ## Exposure
 
 The water shading ends by multiplying by `0.18 / PreviousFrameAverageLuminance + 0.0001` when
 `PreExposureEnabled`: auto exposure keys the previous frame's average luminance (from `LuminanceHistogram`)
 to middle grey 0.18.
+
+## Colour pipeline (`ColorPostProcessing`)
+
+1. The lighting passes write pre-exposed colour (`× 0.18 / avg`); this pass divides that back out.
+2. Average luminance `avg`: the histogram's value clamped to `LuminanceMinMax` (0.18 when auto exposure is off).
+3. Exposure key, by `ExposureCompensation.x`: mode 1 is `1.03 - 2 / (log10(avg + 1) + 2)`; mode 2 or more
+   reads a curve texture at the normalised log luminance between the min and max; otherwise the constant
+   `ExposureCompensation.y`.
+4. Colour grading (temperature, then per-band saturation, contrast, gain, offset around the average
+   luminance) on the HDR colour.
+5. Exposure: `× 0.18 / avg × key`.
+6. Tone map, by `TonemapParams0.x`, with the white point `W = max(whitePoint, minWhitePoint) × exposure`:
+   0 Reinhard `c / (1 + c)`; 1 extended Reinhard per channel `c (1 + c / W²) / (1 + c)`; 2 the same on
+   luminance, scaling the colour; 3 Hable (A 0.15, B 0.5, C 0.1, D 0.2, E 0.02, F 0.3) on `2c`, normalised
+   by its value at `W²`; 4 ACES (Hill's fit, with its input and output matrices); 5 generic: Lottes'
+   peak-channel curve (`p^a / (p^a × b + c)` on the brightest channel, the per-channel ratios raised to
+   `1/crosstalk`, pulled towards white by the mapped peak to the power `w`, then raised back) with
+   *runtime* parameters `GenericTonemapperContrastAndScaleAndOffsetAndCrosstalk` and
+   `GenericTonemapperCrosstalkParams` (vanilla's JSON only names the operator).
+7. Gamma grading after the tone map, per luminance band (shadow, midtone, highlight), default 2.2.
 
 ## Water
 
@@ -108,5 +142,6 @@ Order: the scene beneath is attenuated by `WaterExtinction`, then `DeferredWater
 
 ## Still to analyse
 
-Directional and indirect lighting passes (sky light, ambient, `NdLFloor`, the sky-light heuristic), the SSR
-passes, caustics, volumetric fog, the luminance histogram, local exposure, bloom and colour post-processing.
+The sky probe (directional sky light), `NdLFloor`, the SSR and indirect specular passes, caustics,
+volumetric fog, the luminance histogram, local exposure and bloom; and every *runtime* value, from the game
+executable.
