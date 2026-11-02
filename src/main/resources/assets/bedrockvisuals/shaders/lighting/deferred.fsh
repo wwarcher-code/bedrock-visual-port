@@ -24,6 +24,8 @@ layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
 // Pre-exposure luminance, for the auto exposure's histogram (LuminanceMeter.java).
 layout(location = 1) out vec4 meterLuminance;
+// The HDR colour before exposure, for bloom (BloomPass.java); alpha 0 where Java's own sky is kept.
+layout(location = 2) out vec4 hdrColor;
 
 
 vec3 directLight(vec3 n, vec3 v, vec3 l, vec3 radiance, vec3 diffuseColor, vec3 f0, float roughness) {
@@ -182,6 +184,7 @@ void main() {
             vec3 fogLight = volumetricFog(ray, VOLUME_FAR, fogTransmittance);
             sky = sky * fogTransmittance + fogLight;
             meterLuminance = vec4(-dot(sky, LUMA), 0.0, 0.0, 1.0);
+            hdrColor = vec4(sky, 1.0);
             fragColor = vec4(toDisplay(sky), 0.0);
             return;
         }
@@ -190,6 +193,7 @@ void main() {
         vec3 skyRadiance = DebugParams.y * mix(SkyHorizonColor.rgb, SkyColor.rgb, clamp(ray.y, 0.0, 1.0));
         // Negative marks sky for the meter's diagnostics; the histogram uses the magnitude (AutoExposure).
         meterLuminance = vec4(-dot(skyRadiance, LUMA), 0.0, 0.0, 1.0);
+        hdrColor = vec4(0.0);
         fragColor = vec4(0.0);
         return;
     }
@@ -229,6 +233,7 @@ void main() {
     if (DebugParams.x > 0.5) {
         fragColor = vec4(mapped < 0.0 ? vec3(1.0, 0.0, 0.0) : vec3(mapped), 1.0);
         meterLuminance = vec4(0.18, 0.0, 0.0, 1.0);
+        hdrColor = vec4(0.0);
         return;
     }
     float sunVisibility = moonCasts ? skyFallback : casterVisibility;
@@ -283,5 +288,6 @@ void main() {
     color = color * fogTransmittance + fogLight;
 
     meterLuminance = vec4(dot(color, LUMA), 0.0, 0.0, 1.0);
+    hdrColor = vec4(color, 1.0);
     fragColor = vec4(toDisplay(color), 1.0);
 }

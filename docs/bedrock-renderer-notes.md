@@ -109,9 +109,19 @@ luminance to middle grey 0.18.
 
 ## Bloom
 
-Thresholded at `BloomParams.y × average luminance` (a 5-tap downsample that keeps samples above it), blurred
-by dual-filter down and up sampling, and added to the HDR image as `+ BloomParams.x × bloom` before the
-tone map. *Runtime:* both parameters.
+Verified in the Bloom material's four passes:
+
+- **ThresholdedDownSample.** Half resolution: `0.5 × centre + 0.125 × four diagonal taps 3 source texels
+  out`. Each tap is zeroed if its luminance is below `BloomParams.y × average luminance`.
+- **DFDownSample.** The same kernel, without the threshold, repeated down the chain.
+- **DFUpSample.** `0.166 ×` four diagonal taps 1 texel out, plus `0.083 ×` four 2 texels out, from the
+  level below only, with no mixing with the same-level downsample.
+- **BloomBlend.** One more upsample, added to the HDR scene as `scene + BloomParams.x × bloom`.
+
+`BloomParams.x` is the configuration's `intensity`, 0.02. The threshold factor `BloomParams.y` and the
+number of levels are runtime values. The renderer uses a threshold of exposed luminance 1 and 5 levels below
+half resolution (TUNE), blooming the lighting pass's new HDR output. It adds the difference bloom makes after
+exposure and tone mapping to the main image.
 
 ## Reflections (`DeferredIndirectSpecular`)
 

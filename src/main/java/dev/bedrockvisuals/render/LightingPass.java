@@ -65,6 +65,8 @@ public final class LightingPass {
 					ColorTargetState.DEFAULT.format(), ColorTargetState.WRITE_ALL))
 			.withColorTargetState(1, new ColorTargetState(Optional.empty(), LuminanceMeter.FORMAT,
 					ColorTargetState.WRITE_ALL))
+			.withColorTargetState(2, new ColorTargetState(Optional.empty(), BloomPass.HDR_FORMAT,
+					ColorTargetState.WRITE_ALL))
 			.withDepthStencilState(Optional.empty())
 			.withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
 			.build();
@@ -125,6 +127,7 @@ public final class LightingPass {
 		RenderPassDescriptor descriptor = RenderPassDescriptor.builder(() -> "Bedrock Visuals deferred lighting")
 				.withColorAttachment(main.getColorTextureView(), Optional.empty())
 				.withColorAttachment(LuminanceMeter.target(main.width, main.height), Optional.of(new Vector4f(0)))
+				.withColorAttachment(BloomPass.hdrTarget(main.width, main.height), Optional.of(new Vector4f(0)))
 				.build();
 		try (RenderPass pass = encoder.createRenderPass(descriptor)) {
 			pass.setPipeline(RenderSystem.getCompiledPipeline(PIPELINE));
@@ -147,6 +150,7 @@ public final class LightingPass {
 			pass.draw(3, 1, 0, 0);
 		}
 		LuminanceMeter.measure();
+		BloomPass.render(main);
 	}
 
 	/** This frame's LightingData buffer, shared with the water shader; null before the first frame. */
