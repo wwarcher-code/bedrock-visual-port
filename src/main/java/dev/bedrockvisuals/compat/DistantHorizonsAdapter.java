@@ -143,7 +143,11 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 		try {
 			var clouds = DhApi.Delayed.configs.graphics().genericRendering().cloudRenderingEnabled();
 			if (hide) {
-				clouds.setValue(false);
+				boolean overridden = clouds.setValue(false);
+				BedrockVisualsClient.LOGGER.info("[clouds] Distant Horizons' clouds {}", overridden
+						? "hidden for this session"
+						: "could not be hidden (its setting doesn't take API overrides): turn off cloud rendering in"
+								+ " Distant Horizons' settings to see the Bedrock-lit clouds");
 			} else {
 				clouds.clearValue();
 			}

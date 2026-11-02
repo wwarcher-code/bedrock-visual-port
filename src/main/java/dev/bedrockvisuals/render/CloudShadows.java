@@ -115,6 +115,6 @@ public final class CloudShadows {
 	}
 
 	public static String status() {
-		return !visible ? "off (clouds off)" : view == null ? "waiting for clouds" : width + "x" + height + " cells, strength " + CONTRIBUTION;
+		return !visible ? "off (Java's Clouds setting is off, or Distant Horizons draws the clouds instead)" : view == null ? "waiting for clouds" : width + "x" + height + " cells, strength " + CONTRIBUTION;
 	}
 }

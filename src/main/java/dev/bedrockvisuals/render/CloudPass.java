@@ -94,6 +94,7 @@ public final class CloudPass {
 
 	/** A one-line summary for diagnostics. */
 	public static String status() {
-		return failed ? "FAILED (see log)" : reported ? "ok" : "not drawn yet";
+		return failed ? "FAILED (see log)" : reported ? "ok"
+				: "not drawn yet (Java's Clouds setting must be Fast or Fancy, with Distant Horizons' clouds off)";
 	}
 }
