@@ -31,7 +31,12 @@ import org.lwjgl.system.MemoryStack;
  * hidden from it doesn't cast shadows into view.
  */
 public final class ShadowPass {
-	public static final int RESOLUTION = 2048;
+	/**
+	 * Texels across the map. At 4096 over 192 blocks a texel is 0.047 blocks, finer than the 1/16-block grid the
+	 * lighting snaps its lookups to, so where an edge falls within a shadow texel can't move it a whole grid step
+	 * the wrong way when the map turns to follow the sun (at 2048 it could, about a third of the time).
+	 */
+	public static final int RESOLUTION = 4096;
 	public static final float HALF_EXTENT = 96;
 	public static final float DEPTH_RANGE = 256;
 	/** Below this height above the horizon the light grazes the terrain too flatly to shadow usefully. */

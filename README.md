@@ -115,7 +115,7 @@ and falls back to vanilla terrain.
 ## Shadows (step 5)
 
 Before the G-buffer pass, Sodium's solid and cutout terrain is drawn a third time, from the sun (the moon
-at night), into a 2048x2048 depth map covering 96 blocks around the camera. The lighting pass tests each
+at night), into a 4096x4096 depth map covering 96 blocks around the camera (a texel finer than the 1/16-block grid). The lighting pass tests each
 pixel against it with 3x3 filtering; beyond the map, and near its edge, it fades back to the sky-light
 approximation. Cut-out blocks such as leaves cast shadows of their actual shape.
 
