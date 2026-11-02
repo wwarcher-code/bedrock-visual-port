@@ -17,12 +17,14 @@ import org.lwjgl.system.MemoryUtil;
  * as a small texture and tracks where the field has drifted to, and the lighting pass projects each point
  * along the light onto the cloud layer to see whether a cell covers it.
  *
- * <p>Bedrock's cloud shadow strength is its {@code EmissiveMultiplierAndDesaturationAndCloudPCFAndContribution.w},
- * 0.5 in the material's defaults (the engine may set it at runtime).
+ * <p>Bedrock's cloud shadow strength is {@code cloud_shadow_contribution} in its shadow configuration
+ * (renderer/platform_config/pc/shadow_configuration.pc.json, 0.4 at every quality), sent as
+ * {@code EmissiveMultiplierAndDesaturationAndCloudPCFAndContribution.w}; the lighting shader keeps
+ * {@code max(visibility, 1 - contribution)}.
  */
 public final class CloudShadows {
-	/** The share of direct light a cloud blocks (Bedrock's material default). */
-	static final float CONTRIBUTION = 0.5f;
+	/** The share of direct light a cloud blocks (cloud_shadow_contribution). */
+	static final float CONTRIBUTION = 0.4f;
 	private static final float CELL_BLOCKS = 12f;
 	private static final float CLOUD_THICKNESS = 4f;
 

@@ -34,8 +34,11 @@ import org.lwjgl.system.MemoryStack;
 public final class LightingPass {
 	/** std140 size of the LightingData block (include/common.glsl): two mat4s and thirteen vec4s. */
 	private static final int DATA_SIZE = 2 * 64 + 13 * 16;
-	/** Shadow lookups move this many shadow texels out along the normal, against self-shadowing acne. */
-	private static final float NORMAL_OFFSET_TEXELS = 1.5f;
+	/**
+	 * Bedrock's shadow normal offset (shadow_configuration.pc.json normal_offset_strength): lookups move out along
+	 * the normal by this many blocks times (1 - N·L).
+	 */
+	private static final float NORMAL_OFFSET_STRENGTH = 0.065f;
 
 	private static final BindGroupLayout LAYOUT = BindGroupLayout.builder()
 			.withUniform("Albedo", UniformType.COMBINED_IMAGE_SAMPLER)
@@ -95,9 +98,8 @@ public final class LightingPass {
 			putVec4(builder, light.sky(), 0);
 			putVec4(builder, light.ambient(), 0);
 			putVec4(builder, light.blockLight(), 0);
-			float texelBlocks = 2 * ShadowPass.HALF_EXTENT / ShadowPass.RESOLUTION;
 			builder.putMat4f(ShadowPass.viewProjection())
-					.putVec4(ShadowPass.isValid() ? 1 : 0, 1f / ShadowPass.RESOLUTION, NORMAL_OFFSET_TEXELS * texelBlocks,
+					.putVec4(ShadowPass.isValid() ? 1 : 0, 1f / ShadowPass.RESOLUTION, NORMAL_OFFSET_STRENGTH,
 							ShadowPass.fromMoon() ? 1 : 0)
 					.putVec4(GBufferDebugView.showsShadows() ? 1 : 0, LightingState.METER_SKY_SCALE, 0, 0);
 			putVec4(builder, light.skyHorizon(), 0);

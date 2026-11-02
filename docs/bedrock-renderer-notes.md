@@ -322,6 +322,32 @@ The renderer applies this to Java's cloud mesh (12×12×4 cells at the same heig
 one cell, because Java's mesh has no neighbour mask. Distant Horizons' own clouds are hidden for the session
 while these are on (through its API override, so its saved setting is untouched).
 
+## Shadow sampling (verified in the deferred direct-lighting shader)
+
+The engine's PC configuration (`renderer/platform_config/pc/shadow_configuration.pc.json`, ultra) sets:
+
+- 4 cascades of 2048², covering 1/6, 1/3, 1/2 and all of 128 blocks, with depth biases 0.000275 to 0.003 and
+  slope biases 1e-5 to 6e-5;
+- `light_quantization_steps` 1800 (900 for the outer cascades), so the light moves in 0.2° steps;
+- `normal_offset_strength` 0.065;
+- `cloud_shadow_contribution` 0.4, with a cloud PCF width of 16 and 7200 quantization steps;
+- `max_shadow_distance` 128.
+
+In the shader:
+
+- Each lookup starts from the texel-quantized position, pushed out along the normal by
+  `saturate(1 - N·L) × normal offset strength`.
+- For each cascade the point falls in, the shader compares against `depth - bias - tan(acos(max(N·L, NdLFloor))) × slope bias`.
+- The PCF kernel is `clamp(round(pcf width), 1, 9)`², but **with texel quantization on it is forced to 1**: one
+  hard comparison of a single texel. That is what gives Vibrant Visuals its crisp, grid-locked shadow edges.
+- The result is the minimum over the cascades, the first-person player shadow and the cloud shadow.
+- Cloud shadows are a separate layer of the shadow map (the clouds drawn from the light), compared the same
+  way. A shadowed point keeps `max(visibility, 1 - contribution)`.
+- Over the last `min(range × 0.1, 8)` blocks of the shadow range, shadows smoothstep out to fully lit.
+
+The renderer matches the single hard tap, the normal offset, the 0.2° steps and the cloud contribution. It
+still uses one 4096² map over 96 blocks rather than the four cascades.
+
 ## Cloud shadows
 
 Vibrant Visuals' clouds shadow the terrain (`CloudShadowProj`, `CloudShadowsVisible`, and the cloud shadow

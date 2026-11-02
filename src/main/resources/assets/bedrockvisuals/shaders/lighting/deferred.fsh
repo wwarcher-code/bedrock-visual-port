@@ -45,9 +45,9 @@ float shadowVisibility(vec3 position, vec3 n, vec3 towardsLight, out float edgeF
     if (ShadowParams.x < 0.5) {
         return -1.0;
     }
-    // Push the lookup out along the normal, more on faces that graze the light, against self-shadowing.
-    float grazing = 1.0 - max(dot(n, towardsLight), 0.0);
-    vec4 clip = ShadowViewProjection * vec4(position + n * ShadowParams.z * (1.0 + 2.0 * grazing), 1.0);
+    // Bedrock's normal offset: out along the normal by normal_offset_strength x (1 - N.L) blocks.
+    float grazing = clamp(1.0 - dot(n, towardsLight), 0.0, 1.0);
+    vec4 clip = ShadowViewProjection * vec4(position + n * ShadowParams.z * grazing, 1.0);
     vec2 uv = clip.xy * 0.5 + 0.5;
     if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) || clip.z <= 0.0 || clip.z >= 1.0) {
         return -1.0;
@@ -63,7 +63,7 @@ float shadowVisibility(vec3 position, vec3 n, vec3 towardsLight, out float edgeF
 }
 
 // How much of the light the clouds let through at this point: the point is projected along the light onto the
-// middle of the cloud layer, and a filled cell there blocks Bedrock's cloud shadow strength.
+// middle of the cloud layer; under a filled cell it keeps 1 - cloud_shadow_contribution of the light.
 float cloudShadow(vec3 position, vec3 towardsLight) {
     if (CloudShadowField.w <= 0.0 || towardsLight.y <= 0.01) {
         return 1.0;
@@ -75,7 +75,8 @@ float cloudShadow(vec3 position, vec3 towardsLight) {
     vec2 onLayer = position.xz + towardsLight.xz * (rise / towardsLight.y);
     vec2 field = (CloudShadowField.xy + onLayer) / CloudShadowSize.z;
     float filled = texture(CloudShadowMap, (floor(field) + 0.5) / CloudShadowSize.xy).r;
-    return 1.0 - CloudShadowField.w * filled;
+    // Bedrock: a shadowed point keeps at least 1 - contribution of the light.
+    return filled > 0.5 ? 1.0 - CloudShadowField.w : 1.0;
 }
 
 void main() {
@@ -146,8 +147,9 @@ void main() {
     }
     float sunVisibility = moonCasts ? skyFallback : casterVisibility;
     float moonVisibility = moonCasts ? casterVisibility : skyFallback;
-    sunVisibility *= cloudShadow(position, sunDir);
-    moonVisibility *= cloudShadow(position, moonDir);
+    vec3 snapped = snapToTexel(position, n);
+    sunVisibility = min(sunVisibility, cloudShadow(snapped, sunDir));
+    moonVisibility = min(moonVisibility, cloudShadow(snapped, moonDir));
 
     vec3 color = directLight(n, v, sunDir, SunColor.rgb * sunVisibility, diffuseColor, f0, roughness);
     color += directLight(n, v, moonDir, MoonColor.rgb * moonVisibility, diffuseColor, f0, roughness);

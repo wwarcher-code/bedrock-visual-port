@@ -42,7 +42,7 @@ public final class ShadowPass {
 	/** Below this height above the horizon the light grazes the terrain too flatly to shadow usefully. */
 	private static final float MIN_ELEVATION = 0.03f;
 	/** How far the light moves before the shadow map turns to follow it (ShadowProjection.steppedDirection). */
-	static final float DIRECTION_STEP = (float) Math.toRadians(0.25);
+	static final float DIRECTION_STEP = (float) Math.toRadians(360.0 / 1800.0);
 	/** The direction the shadow map is drawn from; null until the first map, or after sun and moon swap. */
 	private static Vector3f heldDirection;
 	/** Reversed depth: 0 is the far side, away from the sun. */
