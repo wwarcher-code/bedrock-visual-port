@@ -30,7 +30,7 @@ import net.minecraft.util.Util;
 /**
  * F9 (or /bv capture) runs a whole test round: hides the HUD, clears the weather, and at each test time of
  * day screenshots the deferred lighting, vanilla, the shadow test and the material buffer (plus albedo,
- * normal and light once). It then restores the time and views, stitches a labelled contact sheet, writes a
+ * normal and light once), then looks up from inside the test scene's pool at noon. It then restores the time and views, stitches a labelled contact sheet, writes a
  * diagnostics report, copies the report to the clipboard and opens the folder.
  *
  * <p>Setting the time uses /time, so the world needs cheats on. Stand still while it runs (about ten
@@ -141,8 +141,35 @@ public final class TestCapture {
 				sheet.add(extras);
 			}
 		}
+		addUnderwaterShots();
 		STEPS.add(TestCapture::restore);
 		STEPS.add(TestCapture::finishWhenSaved);
+	}
+
+	/**
+	 * At noon, from inside the test scene's pool, looking up through the surface (caustics, the water's
+	 * extinction and Snell's window), then back to where the player stood.
+	 */
+	private static void addUnderwaterShots() {
+		Minecraft minecraft = Minecraft.getInstance();
+		var player = minecraft.player;
+		String back = String.format(java.util.Locale.ROOT, "tp @s %.3f %.3f %.3f %.2f %.2f", player.getX(), player.getY(),
+				player.getZ(), player.getYRot(), player.getXRot());
+		List<ContactSheet.Cell> row = new ArrayList<>();
+		sheet.add(row);
+		STEPS.add(() -> {
+			command("time set 6000");
+			command("tp @s " + TestScene.UNDERWATER_VIEW);
+			wait = TICKS_AFTER_TIME_CHANGE + 10;
+		});
+		STEPS.add(() -> {
+			AutoExposure.settle();
+			wait = TICKS_AFTER_VIEW_CHANGE;
+		});
+		STEPS.add(() -> report.lightingAt("underwater, noon (6000)"));
+		addShot(row, "underwater", View.OFF);
+		addShot(row, "underwater", null);
+		STEPS.add(() -> command(back));
 	}
 
 	/** A null view means vanilla terrain (deferred lighting off). */

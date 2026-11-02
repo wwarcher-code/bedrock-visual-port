@@ -24,6 +24,13 @@ public final class TestScene {
 	static final int DISTANCE = 9;
 	/** The camera's pitch, in degrees below the horizon. */
 	static final int PITCH = 15;
+	/** The pool's sand floor, relative to the player's feet; water fills the three blocks above it. */
+	static final int POOL_FLOOR = -4;
+	/**
+	 * Where the underwater capture stands, relative to the scene's camera: in the pool, feet on its floor,
+	 * eyes under water.
+	 */
+	static final String UNDERWATER_VIEW = "~-4.5 ~-3 ~-5.5 180 -25";
 
 	private TestScene() {
 	}
@@ -41,8 +48,10 @@ public final class TestScene {
 			commands.add(set(edition, i - 5, 0, 1, SAMPLES[i]));
 		}
 		// Water pool, front left, between the camera and the samples: anywhere behind the row, the row hides it
-		// from standing eye height.
-		commands.add(fill(edition, -6, -1, -5, -3, -1, -2, "water"));
+		// from standing eye height. Three blocks deep on sand, so the capture can look from under water
+		// (caustics, Snell's window).
+		commands.add(fill(edition, -6, POOL_FLOOR, -5, -3, POOL_FLOOR, -2, "sand"));
+		commands.add(fill(edition, -6, POOL_FLOOR + 1, -5, -3, -1, -2, "water"));
 		// Pillar with a torch beside it.
 		commands.add(fill(edition, -2, 0, 6, -2, 5, 6, "stone_bricks"));
 		commands.add(set(edition, -1, 0, 5, "torch"));
