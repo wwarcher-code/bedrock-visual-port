@@ -90,9 +90,28 @@ image to the screen.
 
 ## Exposure
 
-The water shading ends by multiplying by `0.18 / PreviousFrameAverageLuminance + 0.0001` when
-`PreExposureEnabled`: auto exposure keys the previous frame's average luminance (from `LuminanceHistogram`)
-to middle grey 0.18.
+The lighting passes end by multiplying by `0.18 / PreviousFrameAverageLuminance + 0.0001` when
+`PreExposureEnabled` (pre-exposure, undone in `ColorPostProcessing`); auto exposure keys the average
+luminance to middle grey 0.18.
+
+`LuminanceHistogram` measures the average:
+
+- **Histogram:** each pixel's luminance (Rec. 709 weights, pre-exposure removed) goes into one of 254 bins
+  of `log2` luminance between `MinLogLuminance` and `+ LogLuminanceRange`; below 0.00095 it lands in bin 0,
+  which is ignored. Each pixel counts `exp(-CenterWeight × r²)`, r its distance from the screen centre in UV.
+- **Average:** the weighted mean bin over the part of the histogram between the `QuantileBounds` fractions
+  of the total (the darkest and brightest pixels are dropped), converted back to luminance.
+- **Adaptation:** in log space, `L += (target - L) × (1 - exp(-Adaptation.y × AdaptiveParameters.x × rate))`,
+  with `rate` = `AdaptiveParameters.y` when brightening and `.z` when darkening (`Adaptation.y` is the frame
+  time).
+
+*Runtime:* every parameter above.
+
+## Bloom
+
+Thresholded at `BloomParams.y × average luminance` (a 5-tap downsample that keeps samples above it), blurred
+by dual-filter down and up sampling, and added to the HDR image as `+ BloomParams.x × bloom` before the
+tone map. *Runtime:* both parameters.
 
 ## Colour pipeline (`ColorPostProcessing`)
 
@@ -139,9 +158,12 @@ Order: the scene beneath is attenuated by `WaterExtinction`, then `DeferredWater
   0.3 (fading out by 0.4), so the per-texel roughness and normals make the reflections break up on the
   texel grid.
 - **Reflections:** from the separate SSR and indirect specular passes (to analyse), not the water shader.
+- **Caustics:** a multiplier on light reaching surfaces under water:
+  `(2 × tex(world XZ × scale, frame) × saturate(N·up))^power × (power + 1)`, the `(power + 1)` keeping the
+  average about the same as the pattern sharpens. The texture is the engine's built-in 64-frame sheet (not
+  in Mojang's samples); frame length, scale and power come from the water preset (vanilla: 0.09 s, 0.5, 1).
 
 ## Still to analyse
 
-The sky probe (directional sky light), `NdLFloor`, the SSR and indirect specular passes, caustics,
-volumetric fog, the luminance histogram, local exposure and bloom; and every *runtime* value, from the game
-executable.
+The sky probe (directional sky light), `NdLFloor`, the SSR and indirect specular passes, volumetric fog
+and local exposure; the built-in caustics texture; and every *runtime* value, from the game executable.
