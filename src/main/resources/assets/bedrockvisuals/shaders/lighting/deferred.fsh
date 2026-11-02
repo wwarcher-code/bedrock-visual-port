@@ -12,6 +12,7 @@ uniform sampler2D Depth;
 uniform sampler2D ShadowMap;
 
 #include <bedrockvisuals:common.glsl>
+#include <bedrockvisuals:sky.glsl>
 
 // Share of light reaching the ground that bounces back onto faces turned towards it: a neutral ground albedo
 // of 0.12 times a bounce strength, fitted with LightingState's factors to Bedrock screenshots.
@@ -68,11 +69,21 @@ float shadowVisibility(vec3 position, vec3 n, vec3 towardsLight, out float edgeF
 void main() {
     float depth = texture(Depth, texCoord).r;
     if (depth <= 0.0) {
-        // No terrain (reversed depth: 0 is the cleared far plane): leave the sky drawn earlier (alpha 0 under
-        // blending), but meter it, as Bedrock's histogram counts the sky too: its colours, horizon to zenith by
-        // the view's elevation, scaled to radiance.
+        // No terrain (reversed depth: 0 is the cleared far plane): sky.
         vec4 near = InverseViewProjection * vec4(texCoord * 2.0 - 1.0, 1.0, 1.0);
         vec3 ray = normalize(near.xyz / near.w);
+        if (AtmosphereZenith.w > 0.5) {
+            // Bedrock's sky, exposed like everything else. Java's sky gradient was skipped and its sun, moon
+            // and stars drawn over black (SkyRendererMixin), so the sky adds onto them: alpha 0 under the
+            // premultiplied blend.
+            vec3 sky = bedrockSkyRadiance(ray, normalize(SunDirection.xyz), normalize(MoonDirection.xyz))
+                    * AtmosphereHorizon.w;
+            meterLuminance = vec4(-dot(sky, LUMA), 0.0, 0.0, 1.0);
+            fragColor = vec4(toDisplay(sky), 0.0);
+            return;
+        }
+        // Java's sky stays (alpha 0 adds nothing), but it's metered, as Bedrock's histogram counts the sky
+        // too: its colours, horizon to zenith by the view's elevation, scaled to radiance.
         vec3 skyRadiance = DebugParams.y * mix(SkyHorizonColor.rgb, SkyColor.rgb, clamp(ray.y, 0.0, 1.0));
         // Negative marks sky for the meter's diagnostics; the histogram uses the magnitude (AutoExposure).
         meterLuminance = vec4(-dot(skyRadiance, LUMA), 0.0, 0.0, 1.0);

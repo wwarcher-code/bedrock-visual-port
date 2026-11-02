@@ -1,5 +1,6 @@
 package dev.bedrockvisuals.render;
 
+import dev.bedrockvisuals.bedrock.AtmosphereSettings;
 import dev.bedrockvisuals.bedrock.BedrockInputs;
 import dev.bedrockvisuals.bedrock.BedrockPack;
 import dev.bedrockvisuals.bedrock.ClientBiome;
@@ -9,6 +10,7 @@ import dev.bedrockvisuals.bedrock.TimeOfDay;
 import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.world.level.dimension.DimensionType;
 import org.joml.Vector3f;
 
 /**
@@ -26,7 +28,8 @@ public record LightingState(
 		Vector3f sky,
 		Vector3f skyHorizon,
 		Vector3f ambient,
-		Vector3f blockLight) {
+		Vector3f blockLight,
+		SkyAtmosphere atmosphere) {
 
 	/** TUNE: Bedrock's noon sun illuminance maps to 1. */
 	private static final float SUN_SCALE = 1f / 100f;
@@ -49,7 +52,9 @@ public record LightingState(
 	/** Block light's strength, the same day and night: exposure makes torches glow at night and fade by day. */
 	private static final float BLOCK_LIGHT_SCALE = 0.0593f;
 	/**
-	 * The sky's radiance for the exposure meter, relative to its fill colours (deferred.fsh). Calibrated on a
+	 * The sky's radiance for the exposure meter when Java's sky is drawn (no Bedrock atmosphere: outside the
+	 * Overworld or without a pack), relative to its fill colours (deferred.fsh). With Bedrock's sky the meter
+	 * reads that sky's own radiance. Calibrated on a
 	 * real frame of the test scene at midnight (meter diagnostics: the brightest 20% was 20% sky at 0.42 and
 	 * terrain at 0.55, settling at exposure 24 where the fit wants 18): 1.5x the fit's 0.0278 lifts the sky to
 	 * about 0.63, which then fills the brightest 20% and settles near exposure 18.7. By day the exposure sits at
@@ -71,8 +76,9 @@ public record LightingState(
 		ClientBiome biome = pack.get().biome(level.getBiome(Minecraft.getInstance().player.blockPosition())
 				.unwrapKey().map(key -> key.identifier().toString()).orElse("minecraft:plains"));
 		LightingSettings lighting = pack.get().lighting(biome.lighting());
-		Rgba zenith = pack.get().atmosphere(biome.atmosphere()).skyZenithColor().sample(time);
-		Rgba horizon = pack.get().atmosphere(biome.atmosphere()).skyHorizonColor().sample(time);
+		AtmosphereSettings atmosphere = pack.get().atmosphere(biome.atmosphere());
+		Rgba zenith = atmosphere.skyZenithColor().sample(time);
+		Rgba horizon = atmosphere.skyHorizonColor().sample(time);
 
 		Vector3f sunDirection = orbit(time, lighting.orbitalOffsetDegrees().sample(time));
 		float sunLevel = lighting.sun().illuminance().sample(time) * SUN_SCALE;
@@ -87,7 +93,9 @@ public record LightingState(
 				linear(zenith).mul(SKY_FILL * skyIntensity),
 				linear(horizon).mul(SKY_FILL * skyIntensity),
 				linear(lighting.ambientColor()).mul(lighting.ambientIlluminance() * AMBIENT_SCALE),
-				new Vector3f(BLOCK_LIGHT).mul(BLOCK_LIGHT_SCALE));
+				new Vector3f(BLOCK_LIGHT).mul(BLOCK_LIGHT_SCALE),
+				level.dimensionType().skybox() == DimensionType.Skybox.OVERWORLD
+						? SkyAtmosphere.sample(atmosphere, lighting, time) : null);
 	}
 
 	private static LightingState fallback(float time) {
@@ -96,7 +104,7 @@ public record LightingState(
 		Vector3f sky = new Vector3f(0.15f, 0.2f, 0.3f).mul(day + 0.1f);
 		return new LightingState(sunDirection, new Vector3f(day), new Vector3f(sunDirection).negate(),
 				new Vector3f(0.12f * Math.max(-sunDirection.y, 0)), sky, new Vector3f(sky).mul(1.5f),
-				new Vector3f(0.05f), new Vector3f(BLOCK_LIGHT));
+				new Vector3f(0.05f), new Vector3f(BLOCK_LIGHT), null);
 	}
 
 	/**

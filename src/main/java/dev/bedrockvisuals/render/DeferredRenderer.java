@@ -24,6 +24,11 @@ public final class DeferredRenderer {
 	private static boolean enabled = true;
 	/** True when this frame's terrain was lit by the lighting pass, so the main pass must skip it. */
 	private static boolean replacedTerrain;
+	/**
+	 * True when the last frame's lighting pass drew Bedrock's sky. Java's sky pass runs before the lighting
+	 * pass, so it follows the last frame: if the lighting stops, Java's full sky is back a frame later.
+	 */
+	private static boolean replacedSky;
 	private static boolean lightingFailed;
 	private static boolean reported;
 
@@ -46,6 +51,7 @@ public final class DeferredRenderer {
 	public static void beforeMainPass(ChunkSectionsToRender chunks, RenderTarget main, GpuSampler sampler,
 			TextureAtlas blockAtlas) {
 		replacedTerrain = false;
+		replacedSky = false;
 		WaterPass.prepare(blockAtlas, main, false);
 		LightingState light = enabled && !lightingFailed ? LightingState.current() : null;
 		if (light != null) {
@@ -61,6 +67,7 @@ public final class DeferredRenderer {
 			RenderSystem.getDevice().createCommandEncoder().copyTextureToTexture(gbuffer.depth(),
 					main.getDepthTexture(), 0, 0, 0, 0, 0, main.width, main.height);
 			replacedTerrain = true;
+			replacedSky = light.atmosphere() != null;
 			WaterPass.prepare(blockAtlas, main, true);
 			if (!reported) {
 				reported = true;
@@ -82,6 +89,14 @@ public final class DeferredRenderer {
 
 	public static boolean lightingFailed() {
 		return lightingFailed;
+	}
+
+	/**
+	 * Whether Java's sky pass should leave out its sky gradient, sunset fan and dark disc (and clear to black),
+	 * keeping only the sun, moon and stars for the lighting pass to add Bedrock's sky onto.
+	 */
+	public static boolean replacesSky() {
+		return replacedSky && enabled && !lightingFailed;
 	}
 
 	/** Whether Minecraft's main pass should skip drawing Sodium's opaque terrain this frame. */

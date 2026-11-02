@@ -253,8 +253,20 @@ grass dims only about twofold there, and its walls in shade stay as blue as the 
 
 A uniform ambient of the sun's colour times its illuminance was also tried. The fit gave it zero weight.
 
-So the renderer keeps the zenith-colour sky light. The function is still the model to use for the sky
-itself and for fog.
+So the renderer keeps the zenith-colour sky light.
+
+**The sky itself is this function.** `SurfaceRadianceUpscalePass` (the pass that composites the lit surfaces)
+treats pixels at the far plane as sky. It skips their lighting, and its distance fog, at full strength there,
+replaces them with the radiance above, times the pre-exposure. So Vibrant Visuals' sky is the atmosphere
+function, exposed and tone mapped like the terrain, with the sun, moon and stars drawn on top.
+
+As a check, the function with the JSON's curves, colours converted to linear and the daytime exposure clamp
+predicts the reference noon shot's sky closely: (125,165,226) against (138,166,224) high up, and
+(177,194,223) against (182,193,224) at the horizon.
+
+The renderer draws it the same way: the lighting pass shades sky pixels with it, Java's sky gradient and
+sunset fan are skipped, and Java's sun, moon and stars stay. Rain and other weather don't change it yet;
+`atmospheric_weather.json` holds Bedrock's weather variants.
 
 ## Still to analyse
 

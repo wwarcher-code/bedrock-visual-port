@@ -8,6 +8,7 @@ import com.mojang.renderpearl.api.commands.CommandEncoder;
 import com.mojang.renderpearl.api.commands.RenderPass;
 import com.mojang.renderpearl.api.commands.RenderPassDescriptor;
 import com.mojang.renderpearl.api.pipeline.BindGroupLayout;
+import com.mojang.renderpearl.api.pipeline.BlendFactor;
 import com.mojang.renderpearl.api.pipeline.BlendFunction;
 import com.mojang.renderpearl.api.pipeline.ColorTargetState;
 import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
@@ -27,7 +28,8 @@ import org.lwjgl.system.MemoryStack;
 
 /**
  * Lights the G-buffer into the main target with one full-screen triangle. Pixels the G-buffer has no
- * terrain for (depth still at the cleared far plane) are discarded, so the sky drawn earlier shows through.
+ * terrain for (depth still at the cleared far plane) are sky: Bedrock's sky added onto Java's sun, moon and
+ * stars (SkyAtmosphere), or Java's whole sky left as it is.
  */
 public final class LightingPass {
 	/** std140 size of the LightingData block (include/common.glsl): two mat4s and eleven vec4s. */
@@ -44,15 +46,17 @@ public final class LightingPass {
 			.withUniform("ShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
+			.withUniform("AtmosphereData", UniformType.UNIFORM_BUFFER)
 			.build();
+	/** Premultiplied alpha: terrain (alpha 1) replaces the main image, sky (alpha 0) adds onto it. */
+	private static final BlendFunction PREMULTIPLIED = new BlendFunction(BlendFactor.ONE, BlendFactor.ONE_MINUS_SRC_ALPHA);
 
 	private static final RenderPipeline PIPELINE = RenderPipeline.builder()
 			.withLocation(Identifier.fromNamespaceAndPath("bedrockvisuals", "pipeline/deferred_lighting"))
 			.withVertexShader(Identifier.withDefaultNamespace("core/screenquad"))
 			.withFragmentShader(Identifier.fromNamespaceAndPath("bedrockvisuals", "lighting/deferred"))
 			.withBindGroupLayout(LAYOUT)
-			// Terrain replaces the main image; sky pixels output alpha 0 and leave the sky drawn earlier.
-			.withColorTargetState(0, new ColorTargetState(Optional.of(BlendFunction.TRANSLUCENT),
+			.withColorTargetState(0, new ColorTargetState(Optional.of(PREMULTIPLIED),
 					ColorTargetState.DEFAULT.format(), ColorTargetState.WRITE_ALL))
 			.withColorTargetState(1, new ColorTargetState(Optional.empty(), LuminanceMeter.FORMAT,
 					ColorTargetState.WRITE_ALL))
@@ -62,6 +66,7 @@ public final class LightingPass {
 
 	private static GpuBuffer data;
 	private static GpuBuffer grading;
+	private static GpuBuffer atmosphere;
 
 	private LightingPass() {
 	}
@@ -74,6 +79,8 @@ public final class LightingPass {
 					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, DATA_SIZE);
 			grading = RenderSystem.getDevice().createBuffer(() -> "Bedrock Visuals grading data",
 					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, ColorGrading.DATA_SIZE);
+			atmosphere = RenderSystem.getDevice().createBuffer(() -> "Bedrock Visuals atmosphere data",
+					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, SkyAtmosphere.DATA_SIZE);
 		}
 		CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
 		Matrix4f inverseViewProjection = new Matrix4f(projection).mul(modelView).invert();
@@ -103,6 +110,9 @@ public final class LightingPass {
 			Std140Builder gradingBuilder = Std140Builder.onStack(stack, ColorGrading.DATA_SIZE);
 			ColorGrading.write(gradingBuilder, ColorGrading.current());
 			encoder.writeToBuffer(grading.slice(), gradingBuilder.get());
+			Std140Builder atmosphereBuilder = Std140Builder.onStack(stack, SkyAtmosphere.DATA_SIZE);
+			SkyAtmosphere.write(atmosphereBuilder, light.atmosphere());
+			encoder.writeToBuffer(atmosphere.slice(), atmosphereBuilder.get());
 		}
 
 		GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
@@ -122,6 +132,7 @@ public final class LightingPass {
 					nearest);
 			pass.setUniform("LightingData", data);
 			pass.setUniform("GradingData", grading);
+			pass.setUniform("AtmosphereData", atmosphere);
 			pass.draw(3, 1, 0, 0);
 		}
 		LuminanceMeter.measure();
