@@ -51,6 +51,7 @@ public final class LightingPass {
 			.withUniform("CloudShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("CausticsMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("WaterColumnMap", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("BrdfLut", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("PreviousScene", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
@@ -107,7 +108,8 @@ public final class LightingPass {
 			builder.putMat4f(ShadowPass.viewProjection())
 					.putVec4(ShadowPass.isValid() ? 1 : 0, 1f / ShadowPass.RESOLUTION, NORMAL_OFFSET_STRENGTH,
 							ShadowPass.fromMoon() ? 1 : 0)
-					.putVec4(GBufferDebugView.showsShadows() ? 1 : 0, LightingState.METER_SKY_SCALE, 0, 0);
+					.putVec4(GBufferDebugView.showsShadows() ? 1 : 0, LightingState.METER_SKY_SCALE,
+							BrdfLut.view() != null ? 1 : 0, 0);
 			putVec4(builder, light.skyHorizon(), 0);
 			// Modulo 16 keeps float precision far from the origin and still lines up with the 1/16 texel grid.
 			Vec3 camera = Minecraft.getInstance().gameRenderer.mainCamera().position();
@@ -152,6 +154,9 @@ public final class LightingPass {
 			// Without a map yet the shader skips the lookup (WaterColumnOrigin.w 0).
 			pass.setUniform("WaterColumnMap", WaterColumns.view() != null ? WaterColumns.view() : gbuffer.depthView(),
 					nearest);
+			// Without Bedrock's table the shader uses Schlick's approximation (DebugParams.z 0).
+			pass.setUniform("BrdfLut", BrdfLut.view() != null ? BrdfLut.view() : gbuffer.depthView(),
+					RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
 			// Screen-space reflections read the previous frame's HDR scene (this frame's is being drawn).
 			GpuTextureView previous = BloomPass.previousHdr();
 			pass.setUniform("PreviousScene", previous != null ? previous : gbuffer.depthView(),

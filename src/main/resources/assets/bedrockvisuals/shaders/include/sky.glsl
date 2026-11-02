@@ -63,20 +63,27 @@ vec3 bedrockSkyRadiance(vec3 d, vec3 sunDir, vec3 moonDir) {
     return (base * rayleigh + mieFade * AtmosphereHorizon.rgb * mie) * 0.07957747;
 }
 
-// The sky seen along d, in this renderer's units (before exposure). A rough reflection sees a blurred sky
-// (Bedrock samples a pre-convolved probe mip by roughness); four directions spread around d by the roughness
-// stand in for that.
+// The sky seen along d, in this renderer's units (before exposure), as a reflection of the given roughness
+// sees it. Bedrock samples its pre-convolved sky probe at mip (IBLParameters.y - 1) × (1 - (1 - r)⁴) of 9
+// (DeferredIndirectSpecular), so the blur grows quickly with roughness and a rough surface sees the whole
+// sky's average. Here a ring of 8 directions around d, up to 60° out at the roughest mip, stands in for the
+// convolution.
 vec3 bedrockSkyReflection(vec3 d, float roughness, vec3 sunDir, vec3 moonDir) {
+    float smooth4 = pow(clamp(1.0 - roughness, 0.0, 1.0), 4.0);
+    float mip = 1.0 - smooth4;
     vec3 sky = bedrockSkyRadiance(d, sunDir, moonDir);
-    if (roughness > 0.05) {
+    if (mip > 0.02) {
         vec3 side = normalize(abs(d.y) < 0.9 ? cross(d, vec3(0.0, 1.0, 0.0)) : cross(d, vec3(1.0, 0.0, 0.0)));
         vec3 up = cross(side, d);
-        float spread = roughness * 0.7;
-        vec3 blurred = bedrockSkyRadiance(normalize(d + side * spread), sunDir, moonDir)
-                + bedrockSkyRadiance(normalize(d - side * spread), sunDir, moonDir)
-                + bedrockSkyRadiance(normalize(d + up * spread), sunDir, moonDir)
-                + bedrockSkyRadiance(normalize(d - up * spread), sunDir, moonDir);
-        sky = mix(sky, blurred * 0.25, clamp(roughness * 1.5, 0.0, 1.0));
+        float angle = mip * 1.0471976;
+        float c = cos(angle);
+        float s = sin(angle);
+        vec3 ring = vec3(0.0);
+        for (int i = 0; i < 8; i++) {
+            float a = float(i) * 0.78539816;
+            ring += bedrockSkyRadiance(normalize(d * c + (side * cos(a) + up * sin(a)) * s), sunDir, moonDir);
+        }
+        sky = mix(sky, (sky + ring) / 9.0, clamp(mip * 2.0, 0.0, 1.0));
     }
     return sky * AtmosphereHorizon.w;
 }

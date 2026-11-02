@@ -28,6 +28,7 @@ public final class CloudPass {
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("AtmosphereData", UniformType.UNIFORM_BUFFER)
 			.withUniform("CloudCells", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("BrdfLut", UniformType.COMBINED_IMAGE_SAMPLER)
 			.build();
 	private static final Identifier SHADER = Identifier.fromNamespaceAndPath("bedrockvisuals", "clouds/clouds");
 
@@ -66,6 +67,9 @@ public final class CloudPass {
 		// Which cells are filled (CloudShadows), for paths through neighbouring cells.
 		pass.setUniform("CloudCells", CloudShadows.viewOrEmpty(),
 				RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+		// Bedrock's BRDF table for the reflected sky; without it (DebugParams.z 0) the shader approximates it.
+		pass.setUniform("BrdfLut", BrdfLut.view() != null ? BrdfLut.view() : CloudShadows.viewOrEmpty(),
+				RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
 	}
 
 	public static RenderPipeline variantOf(RenderPipeline vanilla) {

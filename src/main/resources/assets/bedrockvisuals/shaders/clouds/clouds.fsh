@@ -40,6 +40,7 @@ const float CLOUD_OPACITY = 0.9;
 // Bedrock caps the paths at 16 blocks.
 const float MAX_PATH = 16.0;
 
+uniform sampler2D BrdfLut;    // Bedrock's renderer/brdf_lut.png (BrdfLut.java)
 uniform sampler2D CloudCells; // which cells of the field are filled (CloudShadows.java)
 
 bool cellFilled(ivec2 cell) {
@@ -148,10 +149,17 @@ vec4 cloudColor() {
             * (1.0 - smoothstep(0.0, 1.0, clamp(viewPath / CLOUD_LIGHTING.x, 0.0, 1.0)));
     color += (front + back) / PI * albedo * light;
 
-    // Reflected sky, at Bedrock's dielectric F0.
+    // Reflected sky: Bedrock's probe at its roughest mip times its BRDF table at roughness 1 and F0 0.04.
     if (AtmosphereZenith.w > 0.5) {
-        float nDotV = max(dot(n, -view), 0.0);
-        float fresnel = 0.04 + 0.96 * pow(1.0 - nDotV, 5.0);
+        float nDotV = clamp(dot(n, -view), 0.0, 1.0);
+        float fresnel;
+        if (DebugParams.z > 0.5) {
+            vec2 ab = texture(BrdfLut, vec2(nDotV, 0.0)).rg;
+            fresnel = 0.04 * ab.x + ab.y;
+        } else {
+            // The table's roughness-1 row, roughly.
+            fresnel = 0.04 * mix(0.57, 0.31, nDotV) + 0.016 * (1.0 - nDotV);
+        }
         color += CLOUD_LIGHTING.z * fresnel * bedrockSkyReflection(reflect(view, n), 1.0, normalize(SunDirection.xyz),
                 normalize(MoonDirection.xyz));
     }

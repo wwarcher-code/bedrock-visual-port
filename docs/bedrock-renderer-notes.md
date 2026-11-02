@@ -385,13 +385,39 @@ shadow-casting light's direction and colour × illuminance `E`, and the cloud co
   Volumetric scattering applies on top.
 - The alpha is the vertex colour's.
 
-`CloudLightingUniforms`, `CloudLightingToggles` and the wrap are runtime values. In the executable, the
-uniforms are a vec4 and the toggles three bytes in the renderer's settings object. The code that fills them
-wasn't found, so the renderer uses TUNE values: U = (4, 0.6, 0.5, 0.15), wrap 0.5.
+`CloudLightingUniforms`, `CloudLightingToggles` and the wrap are runtime values, read from GPU captures:
+U = (16, 0.5, 5, 0.0625), wrap 0.307, `CloudColor` alpha 0.9 (see "Runtime values from GPU captures").
 
-The renderer applies this to Java's cloud mesh (12×12×4 cells at the same height). Its paths stay inside the
-one cell, because Java's mesh has no neighbour mask. Distant Horizons' own clouds are hidden for the session
-while these are on (through its API override, so its saved setting is untouched).
+The renderer applies this to Java's cloud mesh (12×12×4 cells at the same height). Java's mesh has no
+neighbour mask, so the paths walk Java's cloud field instead (the cell texture the cloud shadows use),
+continuing through filled neighbours up to 16 blocks. Java builds the mesh from a circle of cells around the
+camera, and cells at its edge come and go as the clouds drift. So the sky blend and a fade-out finish 1.5 cells
+inside it, over the last quarter of the mesh's radius, much closer than Bedrock's 1152 blocks. Distant
+Horizons' own clouds are hidden for the session while these are on (through its API override, so its saved
+setting is untouched).
+
+**Still to do: far clouds.** Bedrock's cloud field reaches 3× the render distance. With Distant Horizons (and
+later Voxy) the terrain reaches far past Java's cloud range, so the clouds will need their own far
+geometry or a ray-marched layer driven by the same cloud field.
+
+## Indirect specular (verified in DeferredIndirectSpecular)
+
+- `F0 = mix(0.04, albedo, metalness)`; metalness is `saturate((ColorMetalnessSubsurface.a - 0.502) × 2.0079)`.
+- The probe (the sky probe cube) is sampled at the reflected view direction at mip
+  `(IBLParameters.y - 1) × (1 - (1 - r)⁴)` (`(1 - r)²` when `ConvolutionType` is 1), with `IBLParameters.y` 10.
+  It's blended between the last two probe captures by `IBLParameters.w`.
+- It's scaled by `saturate((sky light - IBLSkyFadeParameters.y) / max(.x - .y, 1))³ × IBLParameters.x × .z`.
+  With `.z` 0.5, that's the fade in over sky light 12 to 15.
+- For metals, when the probe's luminance is below the block-light specular
+  (`mix(ambient floor, block light × BlockBaseAmbientLightColorIntensity.w × BlockLightIndirectSpecularIntensity.x,
+  saturate(luminance)) × metalness`), the block-light term is used instead.
+- Screen-space reflections replace it by `SSR.a × SSRParameters.y`.
+- The result is times `F0 × A + B`, with `(A, B)` = BrdfLUT(`saturate(N·V)`, `1 - r`): `renderer/brdf_lut.png`,
+  256², with smooth at the bottom row.
+
+The renderer uses the table from the install and the same mip curve. It blurs the analytic sky over a ring of
+directions in place of the probe's mips (a cone up to 60° at the roughest mip), and doesn't have the metal
+block-light term yet (`BlockLightIndirectSpecularIntensity` wasn't captured).
 
 ## Shadow sampling (verified in the deferred direct-lighting shader)
 

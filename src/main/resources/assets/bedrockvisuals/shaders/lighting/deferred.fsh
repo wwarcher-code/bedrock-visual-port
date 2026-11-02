@@ -12,7 +12,8 @@ uniform sampler2D Depth;
 uniform sampler2D ShadowMap;
 uniform sampler2D CloudShadowMap;  // filled cloud cells (CloudShadows.java)
 uniform sampler2D WaterColumnMap; // each column's top water body (WaterColumns.java)
-uniform sampler2D CausticsMap;     // Bedrock's renderer/caustics.png: frames of 32x32 stacked vertically
+uniform sampler2D CausticsMap;
+uniform sampler2D BrdfLut;         // Bedrock's renderer/brdf_lut.png (BrdfLut.java)     // Bedrock's renderer/caustics.png: frames of 32x32 stacked vertically
 uniform sampler2D PreviousScene;   // the previous frame's HDR scene (BloomPass.java), for reflections
 
 #include <bedrockvisuals:common.glsl>
@@ -330,10 +331,18 @@ void main() {
     // The horizon color is the glow towards the sun at sunset; most of the horizon is closer to the zenith's
     // blue, so it gets at most 30% (at full weight, walls facing away from the sun turned pink).
     float horizonShare = 0.3 * (1.0 - clamp(mirror.y * 0.5 + 0.5, 0.0, 1.0));
-    vec3 skyInMirror = AtmosphereZenith.w > 0.5 ? bedrockSkyReflection(mirror, roughness, sunDir, moonDir)
+    vec3 skyInMirror = AtmosphereZenith.w > 0.5 ? bedrockSkyReflection(mirror, mers.b, sunDir, moonDir)
             : mix(SkyColor.rgb, SkyHorizonColor.rgb, horizonShare);
-    vec3 grazingF0 = max(vec3(1.0 - roughness), f0);
-    vec3 skyFresnel = f0 + (grazingF0 - f0) * pow(1.0 - nDotV, 5.0);
+    // Bedrock's split-sum term (DeferredIndirectSpecular): F0 × A + B, with (A, B) from its BRDF table at
+    // (saturate(N·V), 1 - roughness). Without the install, Schlick's approximation with roughness.
+    vec3 specularScale;
+    if (DebugParams.z > 0.5) {
+        vec2 ab = texture(BrdfLut, vec2(clamp(dot(n, v), 0.0, 1.0), 1.0 - mers.b)).rg;
+        specularScale = f0 * ab.x + ab.y;
+    } else {
+        vec3 grazingF0 = max(vec3(1.0 - roughness), f0);
+        specularScale = (f0 + (grazingF0 - f0) * pow(1.0 - nDotV, 5.0)) * (1.0 - 0.7 * roughness);
+    }
     // Bedrock's sky reflection: faded in over sky light 12 to 15 (cubed), at IBLParameters.z 0.5.
     float iblFade = pow(clamp((skyLight * 15.0 - 12.0) / 3.0, 0.0, 1.0), 3.0) * 0.5;
     vec3 reflected = skyInMirror * iblFade;
@@ -342,7 +351,7 @@ void main() {
         vec4 traced = terrainReflection(position + n * 0.02, mirror);
         reflected = mix(reflected, traced.rgb, traced.a * ssrWeight);
     }
-    color += reflected * skyFresnel * (1.0 - 0.7 * roughness);
+    color += reflected * specularScale;
     color += albedo * emissive * 2.0;
 
     // Distance fog: like Bedrock, the terrain fades into the sky behind it towards the render distance's edge.
