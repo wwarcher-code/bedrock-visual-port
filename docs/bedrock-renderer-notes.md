@@ -176,6 +176,31 @@ Order: the scene beneath is attenuated by `WaterExtinction`, then `DeferredWater
   average about the same as the pattern sharpens. The texture is the engine's built-in 64-frame sheet (not
   in Mojang's samples); frame length, scale and power come from the water preset (vanilla: 0.09 s, 0.5, 1).
 
+## Engine configuration files
+
+The *runtime* values mostly come from JSON files in the install (`Content\data`, found by name in
+`Minecraft.Windows.exe`), not the resource packs:
+
+- `renderer/average_luminance.json`: `min_log_luminance` -3, `log_luminance_range` 20 (so log2 luminance
+  -3 to 17), `low_percent` 80 and `high_percent` 100 (the average is taken over the brightest 20% of the
+  centre-weighted histogram only), `adaptive_time_coefficient` 1, `light_adaptation` 1, `dark_adaptation` 1.
+- `renderer/tone_mapping.json`: `exposure_compensation_type` "constant" with `exposure_compensation` 0
+  (a custom curve is defined but unused), `min_luminance` -3 and `max_luminance` 4 (the average luminance
+  clamp, log2), `f_stop` 19, `min_white_point` 1.
+- `renderer/deferred_renderer.json`: indirect multipliers for block light 0.05, sky light 0.25 and image-based
+  (sky) lighting 0.5; `emissive_brightness_multiplier` 1; IBL fades between light levels 15 and 12;
+  `volumetric_fog_min_ambient_value` 0.
+- `bloom_configuration.shared.json`: bloom on, `intensity` 0.02.
+- `deferred_lighting_configuration.shared.json`: local exposure and biome blending on,
+  `water_extinction_distance_shift` 0.
+- `reflection_probe_regen_configuration.shared.json`: the sky reflection probe is regenerated every 600
+  frames, 100 game ticks, 500 blocks moved, or when sky or block brightness change by 3 or 16.
+- `renderer/atmospheric_weather.json`: rain and thunder sky and cloud colours, sun strength 0 in weather.
+
+The generic tone mapper's inputs (contrast, mid-in, mid-out, HDR max, crosstalk) are not in these files.
+The engine computes `b` and `c` from them as in Lottes' curve (`b = (Ph m - Pm) / ((Ph - Pm) m)`,
+`c = Ph (1 - b)`, with `Pm = midIn^a`, `Ph = hdrMax^a`, `m = midOut`) and sends `(a, b, c, crosstalk)`.
+
 ## Still to analyse
 
 The sky probe (directional sky light), `NdLFloor`, the SSR ray march itself, volumetric fog and local
