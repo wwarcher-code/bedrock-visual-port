@@ -52,9 +52,9 @@ public final class LightingPass {
 			.withFragmentShader(Identifier.fromNamespaceAndPath("bedrockvisuals", "lighting/deferred"))
 			.withBindGroupLayout(LAYOUT)
 			// Terrain replaces the main image; sky pixels output alpha 0 and leave the sky drawn earlier.
-			.withColorTargetState(new ColorTargetState(Optional.of(BlendFunction.TRANSLUCENT),
+			.withColorTargetState(0, new ColorTargetState(Optional.of(BlendFunction.TRANSLUCENT),
 					ColorTargetState.DEFAULT.format(), ColorTargetState.WRITE_ALL))
-			.withColorTargetState(new ColorTargetState(Optional.empty(), LuminanceMeter.FORMAT,
+			.withColorTargetState(1, new ColorTargetState(Optional.empty(), LuminanceMeter.FORMAT,
 					ColorTargetState.WRITE_ALL))
 			.withDepthStencilState(Optional.empty())
 			.withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
