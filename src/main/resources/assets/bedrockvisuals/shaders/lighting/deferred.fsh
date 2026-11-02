@@ -377,5 +377,6 @@ void main() {
 
     meterLuminance = vec4(dot(color, LUMA), 0.0, 0.0, 1.0);
     hdrColor = vec4(color, 1.0);
-    fragColor = vec4(toDisplay(color), 1.0);
+    // The local exposure debug view: mid-grey, which the local exposure pass multiplies by its factor.
+    fragColor = DebugParams.w > 0.5 ? vec4(vec3(0.5), 1.0) : vec4(toDisplay(color), 1.0);
 }

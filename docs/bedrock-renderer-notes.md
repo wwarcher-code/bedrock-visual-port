@@ -524,6 +524,15 @@ Read from the captures' constant buffers at noon, low sun (/time set 11500) and 
   - `SSRTemporalAccumulationParams` (1, 0.5, 2, 0.03125).
 - **Local exposure:** `GridDimensions` (15, 7, 32), `BilateralFilterParams` 6, `GaussianBlurParams` (12, 1),
   and the blur written at 120×63, at 1920×1009.
+- **Tone map (ColorPostProcessing), the same at noon and midnight:**
+  - `ExposureCompensation` (0, 1, 1, 0): constant key 1.
+  - `LuminanceMinMaxAndWhitePointAndMinWhitePoint` (0.015625, 2, 94371.84, 1): the average is clamped to
+    2⁻⁶ to 2, as `tone_mapping.json`'s -3 and 4 EV give.
+  - `TonemapParams0` (5, 1, 1, 0): generic operator.
+  - `GenericTonemapperContrastAndScaleAndOffsetAndCrosstalk` (1, 0.997265, 1.3675232, 25) and
+    `GenericTonemapperCrosstalkParams` 8. That's the curve solved from mid 0.3 → 0.18 and max 500 → 1, as the
+    renderer derives it.
+  - The AverageLuminance texture is 16.138 at noon and 0.3771 at midnight, unclamped.
 - **Fog and IBL:**
   - `FogAndDistanceControl` (0.75, 4, 384): Vibrant Visuals starts the fog at 0.75, not the files' 0.92.
   - `IBLParameters` (1, 10, 0.5, w).

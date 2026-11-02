@@ -16,7 +16,8 @@ layout(std140) uniform LightingData {
     mat4 ShadowViewProjection;  // camera-relative world space to shadow clip space (ShadowProjection.java)
     vec4 ShadowParams;          // x: map valid, y: texel size in UV, z: normal offset in blocks, w: cast by the moon
     vec4 DebugParams;           // x: draw the shadow test instead of lit color; y: sky radiance scale for metering;
-                                // z: 1 when Bedrock's BRDF table is bound (BrdfLut.java)
+                                // z: 1 when Bedrock's BRDF table is bound (BrdfLut.java); w: 1 to show local
+                                // exposure's factor (GBufferDebugView)
     vec4 SkyHorizonColor;       // sky fill seen towards the horizon; SkyColor is the zenith's
     vec4 CameraGridOffset;      // xyz: the camera's world position modulo 16 (texel grid); w: exposure (AutoExposure)
     vec4 CloudShadowField;      // xy: the camera's position in the cloud field (blocks), z: cloud layer middle above

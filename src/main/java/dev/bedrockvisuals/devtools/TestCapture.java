@@ -46,7 +46,7 @@ public final class TestCapture {
 	/** Views captured at every time. */
 	private static final View[] VIEWS = {View.OFF, null, View.SHADOWS, View.MATERIAL};
 	/** Views captured once, at the first time. */
-	private static final View[] EXTRA_VIEWS = {View.ALBEDO, View.NORMAL, View.LIGHT};
+	private static final View[] EXTRA_VIEWS = {View.ALBEDO, View.NORMAL, View.LIGHT, View.LOCAL_EXPOSURE};
 	private static final int TICKS_AFTER_TIME_CHANGE = 15;
 	private static final int TICKS_AFTER_VIEW_CHANGE = 3;
 

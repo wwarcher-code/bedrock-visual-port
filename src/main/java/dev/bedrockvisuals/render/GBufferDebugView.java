@@ -20,7 +20,8 @@ public final class GBufferDebugView {
 		NORMAL("normal", GBuffer.Target.NORMAL),
 		MATERIAL("material", GBuffer.Target.MATERIAL),
 		LIGHT("light", GBuffer.Target.LIGHT),
-		SHADOWS("shadows", null);
+		SHADOWS("shadows", null),
+		LOCAL_EXPOSURE("local exposure", null);
 
 		public final String label;
 		final GBuffer.Target target;
@@ -62,6 +63,14 @@ public final class GBufferDebugView {
 	/** True when the lighting pass should draw its shadow test instead of lit color. */
 	public static boolean showsShadows() {
 		return showing == View.SHADOWS;
+	}
+
+	/**
+	 * True when lit pixels should show local exposure's factor: drawn mid-grey, then multiplied by the factor
+	 * (brighter is lifted, darker lowered).
+	 */
+	public static boolean showsLocalExposure() {
+		return showing == View.LOCAL_EXPOSURE;
 	}
 
 	/** Called after Minecraft's main pass. */
