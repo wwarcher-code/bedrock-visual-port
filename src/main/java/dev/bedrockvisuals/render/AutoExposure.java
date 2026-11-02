@@ -72,6 +72,15 @@ public final class AutoExposure {
 		return Math.clamp((float) Math.pow(2, adaptedLog), MIN_AVERAGE, MAX_AVERAGE);
 	}
 
+	/**
+	 * The adapted average without the tone mapping's clamp (Bedrock units), as LuminanceHistogram's
+	 * CalculateAverage stores it in the AverageLuminance texture: only the histogram's log range bounds it.
+	 * Local exposure reads this; the min/max clamp is for the exposure alone.
+	 */
+	public static float adaptedLuminance() {
+		return Float.isNaN(adaptedLog) ? 0.18f : (float) Math.pow(2, adaptedLog);
+	}
+
 	/** Whether the luminance meter is working, for diagnostics. */
 	public static String meterStatus() {
 		return LuminanceMeter.status();

@@ -77,7 +77,8 @@ final class DiagnosticsReport {
 		line("bloom " + BloomPass.status());
 		line("local exposure " + LocalExposure.status());
 		line("weather " + Weather.status());
-		line("clouds " + CloudPass.status() + "; cloud shadows " + CloudShadows.status());
+		line("clouds " + CloudPass.status() + "; cloud shadows " + CloudShadows.status() + "; Java's Clouds setting "
+				+ minecraft.options.cloudStatus().get());
 		line("Bedrock packs " + BedrockInputs.pack().map(pack -> pack.summary()).orElse("NOT LOADED"));
 		if (minecraft.player != null && minecraft.level != null) {
 			section("Player");
@@ -104,7 +105,8 @@ final class DiagnosticsReport {
 						+ ", distance fog " + (sky.fog().w > 0 ? "from " + format(sky.fog().x * sky.fog().z) + " blocks"
 								: "off (Distant Horizons' vanilla fog is off, or no air fog)"));
 		line("exposure " + format(AutoExposure.exposure()) + " (metered average luminance "
-				+ format(AutoExposure.averageLuminance()) + " in Bedrock's units, meter " + AutoExposure.meterStatus() + ")");
+				+ format(AutoExposure.averageLuminance()) + " in Bedrock's units after the tone map's clamp, "
+				+ format(AutoExposure.adaptedLuminance()) + " before it; meter " + AutoExposure.meterStatus() + ")");
 		line("meter " + AutoExposure.meterBreakdown());
 		line("shadow map " + (ShadowPass.isValid() ? "drawn from the " + (ShadowPass.fromMoon() ? "moon" : "sun")
 				: "not drawn (light too low or failed)"));

@@ -169,7 +169,8 @@ public final class LocalExposure {
 				data = RenderSystem.getDevice().createBuffer(() -> "Bedrock Visuals local exposure data",
 						GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, 48);
 			}
-			float average = Math.max(AutoExposure.averageLuminance(), 1e-6f);
+			// The unclamped adapted average, as Bedrock's AverageLuminance texture holds it.
+			float average = Math.max(AutoExposure.adaptedLuminance(), 1e-6f);
 			try (MemoryStack stack = MemoryStack.stackPush()) {
 				Std140Builder builder = Std140Builder.onStack(stack, 48);
 				builder.putVec4(BASE_KEPT, DETAIL_KEPT, BLUR_SHARE, (float) (Math.log(average) / Math.log(2)));

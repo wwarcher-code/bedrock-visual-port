@@ -4,6 +4,7 @@
 	"plugin": "dev.bedrockvisuals.mixin.BedrockVisualsMixinPlugin",
 	"compatibilityLevel": "JAVA_25",
 	"client": [
+		"distanthorizons.MinecraftClientWrapperMixin",
 		"minecraft.CloudRendererMixin",
 		"minecraft.CloudRendererPrepareMixin",
 		"minecraft.LevelRendererMixin",

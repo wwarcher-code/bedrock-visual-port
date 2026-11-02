@@ -11,7 +11,8 @@ import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
 /** Applies each hooked mod's mixins only when that mod is loaded; the subpackage names the mod. */
 public class BedrockVisualsMixinPlugin implements IMixinConfigPlugin {
 	private static final Map<String, String> MOD_BY_PACKAGE = Map.of(
-			".sodium.", "sodium");
+			".sodium.", "sodium",
+			".distanthorizons.", "distanthorizons");
 
 	@Override
 	public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {

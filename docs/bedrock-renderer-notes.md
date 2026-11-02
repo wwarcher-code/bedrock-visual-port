@@ -396,7 +396,8 @@ continuing through filled neighbours up to 16 blocks. Java builds the mesh from 
 camera, and cells at its edge come and go as the clouds drift. So the sky blend and a fade-out finish 1.5 cells
 inside it, over the last quarter of the mesh's radius, much closer than Bedrock's 1152 blocks. Distant
 Horizons' own clouds are hidden for the session while these are on (through its API override, so its saved
-setting is untouched).
+setting is untouched). Distant Horizons also sets Java's Clouds option to OFF whenever its renderer starts
+(its "override vanilla graphics settings" option, on by default), which a mixin prevents.
 
 **Still to do: far clouds.** Bedrock's cloud field reaches 3× the render distance. With Distant Horizons (and
 later Voxy) the terrain reaches far past Java's cloud range, so the clouds will need their own far
@@ -438,6 +439,9 @@ log2.
   `base = g.x < 0.001 ? D : mix(B, D, z)` and `out = scene × 2^((A - L) + y (L - base) + x (base - A))`.
   `LocalExposureParams` is (0.75, 1, 0.4), so this is `scene × 2^(0.25 (A - base))`: detail kept, and each
   region's level a quarter of the way to the average.
+- `A` is the AverageLuminance texture as LuminanceHistogram's CalculateAverage writes it: the adapted
+  histogram average, bounded only by the histogram's log range. The tone mapping's min/max luminance clamp
+  is applied to the exposure, not to this. At noon the clamped average is 2 while the histogram's is about 16.
 - The average is the histogram's (the brightest 20%), so most of the ground sits below it and is lifted:
   about half a stop on the test scene's grass. That's what the exposure key of 1.46, fitted before this,
   stood in for; the key is now 1 again.
