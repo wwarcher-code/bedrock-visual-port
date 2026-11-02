@@ -5,6 +5,7 @@
 	"compatibilityLevel": "JAVA_25",
 	"client": [
 		"minecraft.CloudRendererMixin",
+		"minecraft.CloudRendererPrepareMixin",
 		"minecraft.LevelRendererMixin",
 		"minecraft.SkyRendererMixin",
 		"sodium.DefaultChunkRendererMixin"

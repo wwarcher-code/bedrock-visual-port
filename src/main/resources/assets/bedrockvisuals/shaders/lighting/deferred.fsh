@@ -10,6 +10,7 @@ uniform sampler2D Material;
 uniform sampler2D Light;
 uniform sampler2D Depth;
 uniform sampler2D ShadowMap;
+uniform sampler2D CloudShadowMap;  // filled cloud cells (CloudShadows.java)
 
 #include <bedrockvisuals:common.glsl>
 #include <bedrockvisuals:sky.glsl>
@@ -56,14 +57,25 @@ float shadowVisibility(vec3 position, vec3 n, vec3 towardsLight, out float edgeF
     edgeFade = smoothstep(0.0, 0.05, min(edge.x, edge.y));
 
     const float BIAS = 0.0003; // about 0.15 blocks of the map's depth range
-    float lit = 0.0;
-    for (int x = -1; x <= 1; x++) {
-        for (int y = -1; y <= 1; y++) {
-            float stored = texture(ShadowMap, uv + vec2(x, y) * ShadowParams.y).r;
-            lit += clip.z >= stored - BIAS ? 1.0 : 0.0;
-        }
+    // One tap: with the lookup snapped to the texel grid, Bedrock's shadow edges are crisp per texel.
+    float stored = texture(ShadowMap, uv).r;
+    return clip.z >= stored - BIAS ? 1.0 : 0.0;
+}
+
+// How much of the light the clouds let through at this point: the point is projected along the light onto the
+// middle of the cloud layer, and a filled cell there blocks Bedrock's cloud shadow strength.
+float cloudShadow(vec3 position, vec3 towardsLight) {
+    if (CloudShadowField.w <= 0.0 || towardsLight.y <= 0.01) {
+        return 1.0;
     }
-    return lit / 9.0;
+    float rise = CloudShadowField.z - position.y;
+    if (rise <= 0.0) {
+        return 1.0; // above the clouds
+    }
+    vec2 onLayer = position.xz + towardsLight.xz * (rise / towardsLight.y);
+    vec2 field = (CloudShadowField.xy + onLayer) / CloudShadowSize.z;
+    float filled = texture(CloudShadowMap, (floor(field) + 0.5) / CloudShadowSize.xy).r;
+    return 1.0 - CloudShadowField.w * filled;
 }
 
 void main() {
@@ -134,6 +146,8 @@ void main() {
     }
     float sunVisibility = moonCasts ? skyFallback : casterVisibility;
     float moonVisibility = moonCasts ? casterVisibility : skyFallback;
+    sunVisibility *= cloudShadow(position, sunDir);
+    moonVisibility *= cloudShadow(position, moonDir);
 
     vec3 color = directLight(n, v, sunDir, SunColor.rgb * sunVisibility, diffuseColor, f0, roughness);
     color += directLight(n, v, moonDir, MoonColor.rgb * moonVisibility, diffuseColor, f0, roughness);

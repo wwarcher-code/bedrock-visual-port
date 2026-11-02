@@ -18,6 +18,9 @@ layout(std140) uniform LightingData {
     vec4 DebugParams;           // x: draw the shadow test instead of lit color; y: sky radiance scale for metering
     vec4 SkyHorizonColor;       // sky fill seen towards the horizon; SkyColor is the zenith's
     vec4 CameraGridOffset;      // xyz: the camera's world position modulo 16 (texel grid); w: exposure (AutoExposure)
+    vec4 CloudShadowField;      // xy: the camera's position in the cloud field (blocks), z: cloud layer middle above
+                                // the camera, w: cloud shadow strength (0 = off) (CloudShadows.java)
+    vec4 CloudShadowSize;       // xy: the field's size in cells, z: cell size in blocks
 };
 
 // Bedrock's color grading and tone mapping for the player's biome (ColorGrading.java).

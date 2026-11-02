@@ -32,8 +32,8 @@ import org.lwjgl.system.MemoryStack;
  * stars (SkyAtmosphere), or Java's whole sky left as it is.
  */
 public final class LightingPass {
-	/** std140 size of the LightingData block (include/common.glsl): two mat4s and eleven vec4s. */
-	private static final int DATA_SIZE = 2 * 64 + 11 * 16;
+	/** std140 size of the LightingData block (include/common.glsl): two mat4s and thirteen vec4s. */
+	private static final int DATA_SIZE = 2 * 64 + 13 * 16;
 	/** Shadow lookups move this many shadow texels out along the normal, against self-shadowing acne. */
 	private static final float NORMAL_OFFSET_TEXELS = 1.5f;
 
@@ -44,6 +44,7 @@ public final class LightingPass {
 			.withUniform("Light", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("Depth", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("ShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("CloudShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("AtmosphereData", UniformType.UNIFORM_BUFFER)
@@ -106,6 +107,7 @@ public final class LightingPass {
 					(float) Math.floorMod((long) Math.floor(camera.y), 16L) + (float) (camera.y - Math.floor(camera.y)),
 					(float) Math.floorMod((long) Math.floor(camera.z), 16L) + (float) (camera.z - Math.floor(camera.z)),
 					AutoExposure.exposure());
+			CloudShadows.write(builder, light.atmosphere() != null);
 			encoder.writeToBuffer(data.slice(), builder.get());
 			Std140Builder gradingBuilder = Std140Builder.onStack(stack, ColorGrading.DATA_SIZE);
 			ColorGrading.write(gradingBuilder, ColorGrading.current());
@@ -130,6 +132,9 @@ public final class LightingPass {
 			// Without a map this frame the shader ignores the binding, but every declared sampler must be bound.
 			pass.setUniform("ShadowMap", ShadowPass.depthView() != null ? ShadowPass.depthView() : gbuffer.depthView(),
 					nearest);
+			// Without cloud cells yet the shader skips the lookup (strength 0), but the sampler must be bound.
+			pass.setUniform("CloudShadowMap", CloudShadows.view() != null ? CloudShadows.view() : gbuffer.depthView(),
+					RenderSystem.getSamplerCache().getRepeat(FilterMode.NEAREST));
 			pass.setUniform("LightingData", data);
 			pass.setUniform("GradingData", grading);
 			pass.setUniform("AtmosphereData", atmosphere);

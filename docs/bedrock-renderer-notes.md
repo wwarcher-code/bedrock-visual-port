@@ -322,6 +322,17 @@ The renderer applies this to Java's cloud mesh (12×12×4 cells at the same heig
 one cell, because Java's mesh has no neighbour mask. Distant Horizons' own clouds are hidden for the session
 while these are on (through its API override, so its saved setting is untouched).
 
+## Cloud shadows
+
+Vibrant Visuals' clouds shadow the terrain (`CloudShadowProj`, `CloudShadowsVisible`, and the cloud shadow
+toggle in `DirectionalShadowModeAndCloudShadowToggleAndPointLightToggle`). The strength is
+`EmissiveMultiplierAndDesaturationAndCloudPCFAndContribution.w`, 0.5 in the material defaults, and `.z` is
+the cloud shadow PCF.
+
+The renderer projects each lit point along the light onto the middle of Java's cloud layer. It looks the cell
+up in Java's own cloud field, which drifts 0.03 blocks a tick along x, with a 3.96-block z offset. A filled
+cell blocks half the direct light.
+
 ## Still to analyse
 
 `NdLFloor`, the SSR ray march itself, volumetric fog and local
