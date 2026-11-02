@@ -107,7 +107,7 @@ What lights each pixel:
   by up to 1.44x, so evenings stay nearly as bright as noon.
 
 Bedrock's files give brightness curves but not how its renderer exposes them. The sky fill, bounce, ambient,
-moon, block light and exposure factors in `LightingState`, and the "generic" tone map's saturation, were
+moon, block light and exposure factors in `LightingState` were
 fitted to Vibrant Visuals screenshots of the test scene's grass and a shaded wall at four times of day (TESTING.md, "Bedrock reference shots"). The log shows `[lighting] first frame lit
 by the deferred lighting pass` once it runs; if the pass fails it logs `[lighting] deferred lighting failed`
 and falls back to vanilla terrain.
