@@ -209,7 +209,54 @@ and crosstalk saturation 8 (`GenericTonemapperCrosstalkParams.x`). With these, `
 0.3 maps to 0.18 and 500 to 1. The engine computes `b` and `c` from them as in Lottes' curve (`b = (Ph m - Pm) / ((Ph - Pm) m)`,
 `c = Ph (1 - b)`, with `Pm = midIn^a`, `Ph = hdrMax^a`, `m = midOut`) and sends `(a, b, c, crosstalk)`.
 
+## Atmosphere (sky colour and fog)
+
+`SkyProbeDeferredShading` (the pass that lights the sky reflection probe) and the fog both use one sky
+radiance function per view direction `d`. It takes the atmosphere settings as uniforms: `FogSkyBlend`
+(the horizon blend stops), `AtmosphericScattering` (x Rayleigh strength, y sun Mie strength, z moon Mie
+strength, w sun glare shape), `SkyZenithColor`, `SkyHorizonColor`, and `SunColor`/`MoonColor` (rgb colour,
+w illuminance):
+
+- **Horizon weights.** `b = (1 - smoothstep((d.y - (x - w)) / (y - (x - w))))³` blends the base colour from
+  the horizon colour at `d.y = x - w` to the zenith colour at `d.y = y`. `a = (1 - smoothstep((d.y - x + w) / (z - x)))³`
+  limits the Mie glow to near the horizon. The component order is assumed to follow the JSON's
+  `horizon_blend_stops` (x min, y start, z mie_start, w max); the setter wasn't traced.
+- **Rayleigh.** `base × 0.75 × rayleigh × ((1 + cos²θs) Is + (1 + cos²θm) Im)`, with θ the angle to the sun
+  or moon and I its illuminance.
+- **Mie.** For the sun, `x = saturate(max(cosθs, 0)^glare)` and
+  `sun mie strength × Is × x × sun colour × 0.0361 / (1.81 - 1.8x)^1.5` (a Henyey-Greenstein lobe with g = 0.9);
+  the same for the moon. It's multiplied by `a` and the horizon colour.
+- **Total.** `(rayleigh + mie) / 4π`. The probe can blend towards the underground fog colour, and when
+  pre-exposure is on it's scaled by 0.003314.
+
+In the fog, view vectors below `d.y = 0.1` can be clamped up to it (`ClampViewVectors`).
+
+**Terrain sky light doesn't come from it directly.** In `DiscreteIndirectCombinedLightingPass` the sky part of
+the ambient is one uniform colour, `SkyAmbientLightColorIntensity`, with no dependence on the surface normal.
+The deferred specular pass samples the probe only for reflections (`SpecularIBLRecords`, a mip per
+roughness), not for diffuse. `SkyAmbientSamples` is a 3D texture the water uses for sky visibility.
+
+In the executable, the uniform's colour is copied from a field of the directional light record, filled from a
+light component's colour under a component flag. Its intensity is the product of an accumulated scalar, a
+lighting setting and a value that is passed through a function first. These weren't traced further.
+
+**Fit against the reference screenshots.** The hemisphere integral of this radiance function was fitted to
+the four test-scene shots (grass and wall at noon, afternoon, low sun and midnight) in three forms:
+
+- as the uniform sky colour;
+- as the normal-dependent irradiance;
+- as only the colour, with the current brightness.
+
+All three fit worse than the current stand-in, the zenith colour times sky intensity (squared error about
+1810 to 2670, against 1620). The integral drops about tenfold between noon and the low-sun shot. Bedrock's
+grass dims only about twofold there, and its walls in shade stay as blue as the zenith colour.
+
+A uniform ambient of the sun's colour times its illuminance was also tried. The fit gave it zero weight.
+
+So the renderer keeps the zenith-colour sky light. The function is still the model to use for the sky
+itself and for fog.
+
 ## Still to analyse
 
-The sky probe (directional sky light), `NdLFloor`, the SSR ray march itself, volumetric fog and local
+`NdLFloor`, the SSR ray march itself, volumetric fog and local
 exposure; the built-in caustics texture; and every *runtime* value, from the game executable.
