@@ -420,6 +420,52 @@ The renderer projects each lit point along the light onto the middle of Java's c
 up in Java's own cloud field, which drifts 0.03 blocks a tick along x, with a 3.96-block z offset. A filled
 cell blocks half the direct light.
 
+## Runtime values from GPU captures (PIX, Bedrock 1.26.60, test scene, plains)
+
+Read from the captures' constant buffers at noon, low sun (/time set 11500) and midnight:
+
+- **Time of day is eased**, as in Java: `(2d + 0.5 - cos(πd)/2) / 3`. At tick 11500, SunDir is
+  (-0.939024, 0.343851, 0), with the sun 20° up, and the sun's illuminance 38.4944 is the curve's value
+  at the eased 0.1941.
+- **Sun and moon:** `SunColor`, `MoonColor` and the directional light are the lighting curves' colour as
+  sRGB/255 (not linearised) and their illuminance (100, 38.49, 0; the moon 0.4 at midnight).
+- **SkyAmbientLightColorIntensity:** (0.473333, 0.655911, 1) at every time, with intensity
+  `0.25 × (directional illuminance + 0.02)` (25.005, 9.6286, 0.105).
+- **Other lighting values:**
+  - `BlockBaseAmbientLightColorIntensity.w` 5.625.
+  - `AmbientLightParams` (1, 1, 1, 0.02).
+  - `CameraLightIntensity` (0.25, 0.9375).
+- **Exposure and local exposure:**
+  - `CenterWeight` 25.
+  - `LocalExposureParams` (0.75, 1, 0.4).
+  - `LuminanceRangeParams` (-10, 20, 2^-10, 2^20).
+- **Fog and IBL:**
+  - `FogAndDistanceControl` (0.75, 4, 384): Vibrant Visuals starts the fog at 0.75, not the files' 0.92.
+  - `IBLParameters` (1, 10, 0.5, w).
+- **Clouds:**
+  - `CloudLightingUniforms` (16, 0.5, 5, 0.0625).
+  - Diffuse wrap 0.307.
+  - `CloudColor` (1, 1, 1, 0.9) by day and (0.1, 0.1, 0.15, 0.9) at midnight.
+  - `DistanceControl` 1152.
+- **Volumetric fog (plains):**
+  - `AirAlbedoExtinction` (1, 1, 1, 0.001).
+  - `HeightFogScaleBias` (-1, 558.38).
+  - `HenyeyGreensteinG` (0.75 air, 0.6 water).
+  - `MinAmbientValue` 0.
+- **Water:**
+  - `WaterExtinctionCoefficients` (0.309041, 0.0610688, 0.0411471).
+  - `WaterAlbedoExtinction` (0.022877, 0.254416, 0.927091, 0.112349).
+- **Bloom:** `BloomParams` (0.02, 0): no threshold.
+- **Sun disc:** `SunMoonEmissiveMultiplier` 25 by day, 10 at night.
+
+The renderer now uses these terms directly, in Bedrock's units divided by 100:
+
+- Direct light is `albedo / π × illuminance × N·L`.
+- Indirect light is `max(block + sky × s × mix(s⁴, s², camera sky), ambient)`.
+
+That replaces the earlier fitted sky fill, ground bounce and scales. One factor remains fitted: the exposure
+key of 1.46.
+
 ## Still to analyse
 
 `NdLFloor`, the SSR ray march itself, volumetric fog and local

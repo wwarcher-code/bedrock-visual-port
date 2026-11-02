@@ -17,11 +17,13 @@ class LightingStateTest {
 
 	@Test
 	void sunFollowsMinecraftsDay() {
-		// Java ticks: 0 sunrise, 6000 noon, 12000 sunset, 18000 midnight. The sun rises in the east (+X).
-		assertDirection(1, 0, 0, LightingState.orbit(TimeOfDay.fromJavaDayTime(0), 0));
+		// Java ticks: 6000 noon, 18000 midnight; the eased path puts the sun 12° up at ticks 0 and 12000. East is +X.
+		assertDirection(0.97657f, 0.21519f, 0, LightingState.orbit(TimeOfDay.fromJavaDayTime(0), 0));
 		assertDirection(0, 1, 0, LightingState.orbit(TimeOfDay.fromJavaDayTime(6000), 0));
-		assertDirection(-1, 0, 0, LightingState.orbit(TimeOfDay.fromJavaDayTime(12000), 0));
+		assertDirection(-0.97657f, 0.21519f, 0, LightingState.orbit(TimeOfDay.fromJavaDayTime(12000), 0));
 		assertDirection(0, -1, 0, LightingState.orbit(TimeOfDay.fromJavaDayTime(18000), 0));
+		// Bedrock's SunDir at /time set 11500, read from a GPU capture.
+		assertDirection(-0.93903f, 0.34383f, 0, LightingState.orbit(TimeOfDay.fromJavaDayTime(11500), 0));
 	}
 
 	@Test

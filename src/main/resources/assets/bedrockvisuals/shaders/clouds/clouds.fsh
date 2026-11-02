@@ -30,11 +30,13 @@ layout(location = 2) flat in vec3 cloudNormal;
 layout(location = 0) out vec4 fragColor;
 #endif
 
-// TUNE: Bedrock's CloudLightingUniforms and diffuse wrap are runtime values that weren't found in the game:
+// Bedrock's CloudLightingUniforms and diffuse wrap, from GPU captures (the same at every time of day):
 // x: thickness (blocks) over which the scattered and back light fade, y: Henyey-Greenstein g, z: reflected sky,
 // w: extinction per block along the light's path.
-const vec4 CLOUD_LIGHTING = vec4(4.0, 0.6, 0.5, 0.15);
-const float DIFFUSE_WRAP = 0.5;
+const vec4 CLOUD_LIGHTING = vec4(16.0, 0.5, 5.0, 0.0625);
+const float DIFFUSE_WRAP = 0.307;
+// CloudColor.a in the captures.
+const float CLOUD_OPACITY = 0.9;
 // Bedrock caps the paths at 16 blocks.
 const float MAX_PATH = 16.0;
 
@@ -56,8 +58,8 @@ vec4 cloudColor() {
     bool moonLights = ShadowParams.w > 0.5;
     vec3 l = normalize(moonLights ? MoonDirection.xyz : SunDirection.xyz);
     vec3 light = moonLights ? MoonColor.rgb : SunColor.rgb;
-    // Bedrock's cloud colour: white, greyed by rain and thunder (atmospheric_weather.json, Weather.java). Java's
-    // CloudColor also darkens with the time of day, which the lighting here already does, so it isn't used.
+    // Bedrock's cloud colour: white by day, (0.1, 0.1, 0.15) at midnight in the captures, greyed by rain and
+    // thunder (Weather.java). Java's own CloudColor isn't used.
     vec3 albedo = VolumeCamera.yzw;
 
     // How far the view travels inside the cell from this face, and the light's path from the middle of that.
@@ -91,12 +93,12 @@ vec4 cloudColor() {
                 normalize(MoonDirection.xyz));
     }
 
-    // Towards the sky behind with distance, as Bedrock's clouds fade from 90% of their range; here over the
-    // second half of Java's cloud range, which then ends.
+    // Towards the sky behind with distance: Bedrock's saturate(distance / DistanceControl.x - 0.9), where
+    // DistanceControl.x is the cloud range (3 × the render distance; 1152 in the captures). Here Java's range.
     float range = max(FogCloudsEnd, 1.0);
     float distance = length(cloudPosition);
     if (AtmosphereZenith.w > 0.5) {
-        float fog = clamp(distance / (0.5 * range) - 0.9, 0.0, 1.0);
+        float fog = clamp(distance / range - 0.9, 0.0, 1.0);
         color = mix(color, bedrockSkyRadiance(view, normalize(SunDirection.xyz), normalize(MoonDirection.xyz))
                 * AtmosphereHorizon.w, fog);
     }
@@ -106,7 +108,7 @@ vec4 cloudColor() {
 // Bedrock's clouds keep their opacity and fade into the sky instead; Java's mesh ends at its cloud range, so
 // the last 10% fades out.
 float cloudAlpha() {
-    return CloudColor.a * (1.0 - smoothstep(0.9, 1.0, length(cloudPosition) / max(FogCloudsEnd, 1.0)));
+    return CLOUD_OPACITY * (1.0 - smoothstep(0.9, 1.0, length(cloudPosition) / max(FogCloudsEnd, 1.0)));
 }
 
 void main() {

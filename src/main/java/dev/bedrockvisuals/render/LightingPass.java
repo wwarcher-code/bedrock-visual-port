@@ -115,7 +115,7 @@ public final class LightingPass {
 					(float) Math.floorMod((long) Math.floor(camera.z), 16L) + (float) (camera.z - Math.floor(camera.z)),
 					AutoExposure.exposure());
 			CloudShadows.write(builder, light.atmosphere() != null);
-			Underwater.write(builder);
+			Underwater.write(builder, light.sunIlluminance());
 			builder.putMat4f(new Matrix4f(projection).mul(modelView));
 			encoder.writeToBuffer(data.slice(), builder.get());
 			Std140Builder gradingBuilder = Std140Builder.onStack(stack, ColorGrading.DATA_SIZE);

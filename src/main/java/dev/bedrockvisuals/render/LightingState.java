@@ -32,39 +32,39 @@ public record LightingState(
 		Vector3f skyHorizon,
 		Vector3f ambient,
 		Vector3f blockLight,
-		SkyAtmosphere atmosphere) {
+		SkyAtmosphere atmosphere,
+		float sunIlluminance) {
 
-	/** TUNE: Bedrock's noon sun illuminance maps to 1. */
-	private static final float SUN_SCALE = 1f / 100f;
 	/*
-	 * The factors below were fitted to Bedrock 1.26.60 itself: the test scene's grass (lit from above) and
-	 * its pillar's camera-facing wall (sky, ground bounce and torch only), measured in Vibrant Visuals
-	 * screenshots at noon, afternoon, low sun and midnight, against this renderer's model of the same pixels:
-	 * sun, sky fill, bounce, ambient, moon, block light, Bedrock's histogram auto exposure (AutoExposure,
-	 * metering the frame's sky and terrain), grading and its exact generic tone map. The fit lands within about
-	 * 10 sRGB levels per channel. Bedrock lights far more from the sky and its ambient floor than from the sun,
-	 * which is why its orange evening sun barely tints the ground, and walls in shade take the sky's blue.
-	 * Light values here are before exposure.
+	 * Bedrock's own lighting terms, from GPU captures of Bedrock 1.26.60 in the test scene (noon, low sun,
+	 * midnight) and its deferred shaders; see docs/bedrock-renderer-notes.md. Values here are Bedrock's divided
+	 * by 100 (the noon sun's illuminance becomes 1), before exposure.
 	 */
-	/** Bedrock's full moon (0.4) barely lights anything; the night is the ambient floor and the sky. */
-	private static final float MOON_SCALE = 0.0001f;
-	/** How strongly the sky's zenith color fills faces that see the sky. */
-	private static final float SKY_FILL = 1.324f;
-	/** Bedrock's ambient illuminance (0.02 in vanilla) as a floor everywhere. */
-	private static final float AMBIENT_SCALE = 0.070f;
-	/** Block light's strength, the same day and night: exposure makes torches glow at night and fade by day. */
-	private static final float BLOCK_LIGHT_SCALE = 0.0593f;
+	/** This renderer's units per Bedrock unit. */
+	static final float UNIT = 1f / 100f;
+	/**
+	 * SkyAmbientLightColorIntensity's colour, the same at every time of day in the captures (0.473333,
+	 * 0.655911, 1).
+	 */
+	private static final Vector3f SKY_AMBIENT_COLOR = new Vector3f(0.473333f, 0.655911f, 1f);
+	/**
+	 * Its intensity is sky_light_indirect_contribution_multiplier (deferred_renderer.json, 0.25) times the
+	 * directional light's illuminance plus the ambient illuminance: 25.005 at noon (sun 100), 9.6286 at low sun
+	 * (sun 38.4944), 0.105 at midnight (moon 0.4).
+	 */
+	private static final float SKY_INDIRECT = 0.25f;
+	/**
+	 * BlockBaseAmbientLightColorIntensity.w: 5.625 (block_light_indirect_contribution_multiplier 0.05 × 112.5),
+	 * times the block light colour by level (common.glsl).
+	 */
+	private static final float BLOCK_LIGHT_INTENSITY = 5.625f;
 	/**
 	 * The sky's radiance for the exposure meter when Java's sky is drawn (no Bedrock atmosphere: outside the
 	 * Overworld or without a pack), relative to its fill colours (deferred.fsh). With Bedrock's sky the meter
-	 * reads that sky's own radiance. Calibrated on a
-	 * real frame of the test scene at midnight (meter diagnostics: the brightest 20% was 20% sky at 0.42 and
-	 * terrain at 0.55, settling at exposure 24 where the fit wants 18): 1.5x the fit's 0.0278 lifts the sky to
-	 * about 0.63, which then fills the brightest 20% and settles near exposure 18.7. By day the exposure sits at
-	 * Bedrock's clamp either way.
+	 * reads that sky's own radiance.
 	 */
 	static final float METER_SKY_SCALE = 0.0417f;
-	/** Block light's strength; its colour by level is Bedrock's curve, in the shader (common.glsl). */
+	/** Block light's colour scale; its colour by level is Bedrock's curve, in the shader (common.glsl). */
 	private static final Vector3f BLOCK_LIGHT = new Vector3f(1.0f, 1.0f, 1.0f);
 
 	public static LightingState current() {
@@ -80,29 +80,33 @@ public record LightingState(
 				.unwrapKey().map(key -> key.identifier().toString()).orElse("minecraft:plains"));
 		LightingSettings lighting = pack.get().lighting(biome.lighting());
 		AtmosphereSettings atmosphere = pack.get().atmosphere(biome.atmosphere());
-		Rgba zenith = Weather.sky(atmosphere.skyZenithColor().sample(time));
 		Rgba horizon = Weather.sky(atmosphere.skyHorizonColor().sample(time));
 
 		Vector3f sunDirection = orbit(time, lighting.orbitalOffsetDegrees().sample(time));
+		float sunIlluminance = lighting.sun().illuminance().sample(time);
+		float moonIlluminance = lighting.moon().illuminance().sample(time);
+		float ambientIlluminance = lighting.ambientIlluminance();
 		// Rain fades direct light out (atmospheric_weather.json directional_light_strength).
-		float sunLevel = lighting.sun().illuminance().sample(time) * SUN_SCALE * Weather.directLight();
-		float moonLevel = lighting.moon().illuminance().sample(time) * MOON_SCALE * Weather.directLight();
+		float direct = Weather.directLight();
 		float skyIntensity = lighting.skyIntensity().sample(time);
+		float skyAmbient = SKY_INDIRECT * (sunIlluminance + moonIlluminance + ambientIlluminance) * skyIntensity;
 		return new LightingState(
 				sunDirection,
-				linear(lighting.sun().color().sample(time)).mul(sunLevel),
+				// Bedrock sends the sun and moon colours as sRGB/255, not linearised (the captures' SunColor is
+				// (1, 0.890196, 0.843137) for the keyframe 255, 227, 215).
+				srgb(lighting.sun().color().sample(time)).mul(sunIlluminance * UNIT * direct),
 				new Vector3f(sunDirection).negate(),
-				linear(lighting.moon().color().sample(time)).mul(moonLevel),
-				// The sky color curves already darken through the evening.
-				linear(zenith).mul(SKY_FILL * skyIntensity),
-				linear(horizon).mul(SKY_FILL * skyIntensity),
-				linear(lighting.ambientColor()).mul(lighting.ambientIlluminance() * AMBIENT_SCALE),
-				new Vector3f(BLOCK_LIGHT).mul(BLOCK_LIGHT_SCALE),
+				srgb(lighting.moon().color().sample(time)).mul(moonIlluminance * UNIT * direct),
+				new Vector3f(SKY_AMBIENT_COLOR).mul(skyAmbient * UNIT),
+				linear(horizon).mul(skyIntensity * 0.25f),
+				linear(lighting.ambientColor()).mul(ambientIlluminance * UNIT),
+				new Vector3f(BLOCK_LIGHT).mul(BLOCK_LIGHT_INTENSITY * UNIT),
 				level.dimensionType().skybox() == DimensionType.Skybox.OVERWORLD
 						? SkyAtmosphere.sample(atmosphere, lighting, time, sunDirection, new Vector3f(sunDirection).negate(),
 								distanceFog(pack.get().fog(biome.fog())),
 								pack.get().fog(biome.fog()).volumetric().get("air"))
-						: null);
+						: null,
+				sunIlluminance);
 	}
 
 	/**
@@ -124,7 +128,7 @@ public record LightingState(
 		Vector3f sky = new Vector3f(0.15f, 0.2f, 0.3f).mul(day + 0.1f);
 		return new LightingState(sunDirection, new Vector3f(day), new Vector3f(sunDirection).negate(),
 				new Vector3f(0.12f * Math.max(-sunDirection.y, 0)), sky, new Vector3f(sky).mul(1.5f),
-				new Vector3f(0.05f), new Vector3f(BLOCK_LIGHT), null);
+				new Vector3f(0.05f), new Vector3f(BLOCK_LIGHT), null, day * 100f);
 	}
 
 	/**
@@ -135,6 +139,10 @@ public record LightingState(
 		double angle = time * 2 * Math.PI;
 		Vector3f direction = new Vector3f((float) -Math.sin(angle), (float) Math.cos(angle), 0);
 		return direction.rotateX((float) Math.toRadians(offsetDegrees));
+	}
+
+	private static Vector3f srgb(Rgba color) {
+		return new Vector3f(color.r(), color.g(), color.b());
 	}
 
 	private static Vector3f linear(Rgba color) {

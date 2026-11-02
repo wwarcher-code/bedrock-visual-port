@@ -90,13 +90,25 @@ public final class Weather {
 				blend(clear.b(), rainSky[2], thunderSky[2], rain, thunder), clear.a());
 	}
 
-	/** The cloud colour (sRGB) under the current weather; white when clear. */
-	static float[] cloud() {
+	/** CloudColor at midnight in GPU captures of Bedrock (white by day). */
+	private static final float[] NIGHT_CLOUD = {0.1f, 0.1f, 0.15f};
+
+	/**
+	 * The cloud colour (as Bedrock sends it) under the current weather: white by day, Bedrock's night colour
+	 * when the sun is down (TUNE: the blend between them follows the sun's illuminance up to 1; the captures
+	 * only show noon, low sun and midnight), greyed by rain and thunder.
+	 */
+	static float[] cloud(float sunIlluminance) {
 		load();
+		float day = Math.clamp(sunIlluminance, 0f, 1f);
 		float rain = rain() * rainCloudContribution;
 		float thunder = thunder() * thunderCloudContribution;
-		return new float[] {blend(1, rainCloud[0], thunderCloud[0], rain, thunder),
-				blend(1, rainCloud[1], thunderCloud[1], rain, thunder), blend(1, rainCloud[2], thunderCloud[2], rain, thunder)};
+		float[] out = new float[3];
+		for (int i = 0; i < 3; i++) {
+			float base = NIGHT_CLOUD[i] + (1 - NIGHT_CLOUD[i]) * day;
+			out[i] = blend(base, base * rainCloud[i], base * thunderCloud[i], rain, thunder);
+		}
+		return out;
 	}
 
 	/** How much direct sun and moon light reaches the ground: 1 when clear, directional_light_strength in rain. */

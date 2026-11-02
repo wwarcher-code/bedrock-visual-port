@@ -77,7 +77,9 @@ class SettingsTest {
 	void javaNoonIsBedrockZero() {
 		assertEquals(0, TimeOfDay.fromJavaDayTime(6000), EPSILON);
 		assertEquals(0.5f, TimeOfDay.fromJavaDayTime(18000), EPSILON);
-		assertEquals(0.75f, TimeOfDay.fromJavaDayTime(0), EPSILON);
-		assertEquals(0.75f, TimeOfDay.fromJavaDayTime(24000 * 5), EPSILON);
+		// Eased: sunrise sits at 0.7845, not 0.75; the low-sun test time matches Bedrock's capture (0.1945).
+		assertEquals(0.78452f, TimeOfDay.fromJavaDayTime(0), 1e-4);
+		assertEquals(0.78452f, TimeOfDay.fromJavaDayTime(24000 * 5), 1e-4);
+		assertEquals(0.19414f, TimeOfDay.fromJavaDayTime(11500), 1e-4);
 	}
 }

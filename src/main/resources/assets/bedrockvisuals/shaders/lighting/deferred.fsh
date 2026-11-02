@@ -17,9 +17,6 @@ uniform sampler2D PreviousScene;   // the previous frame's HDR scene (BloomPass.
 #include <bedrockvisuals:common.glsl>
 #include <bedrockvisuals:sky.glsl>
 
-// Share of light reaching the ground that bounces back onto faces turned towards it: a neutral ground albedo
-// of 0.12 times a bounce strength, fitted with LightingState's factors to Bedrock screenshots.
-const float GROUND_BOUNCE = 0.238;
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
@@ -39,7 +36,8 @@ vec3 directLight(vec3 n, vec3 v, vec3 l, vec3 radiance, vec3 diffuseColor, vec3 
     vec3 fresnel = f0 + (1.0 - f0) * pow(1.0 - max(dot(h, v), 0.0), 5.0);
     float geometry = smithG1(nDotV, roughness) * smithG1(nDotL, roughness);
     vec3 specular = fresnel * ggx(max(dot(n, h), 0.0), roughness) * geometry / (4.0 * nDotV * nDotL);
-    return ((1.0 - fresnel) * diffuseColor + specular) * radiance * nDotL;
+    // Bedrock's direct lighting: Lambert (albedo / π) for the diffuse part.
+    return ((1.0 - fresnel) * diffuseColor / PI + specular) * radiance * nDotL;
 }
 
 // Fraction of a 3x3 texel neighbourhood that sees the light, or -1 outside the map. Depth is reversed in the
@@ -284,16 +282,13 @@ void main() {
     color += directLight(n, v, moonDir, MoonColor.rgb * moonVisibility, diffuseColor, f0, roughness);
     color *= causticsMultiplier(position, n);
 
-    // Sky fill from the hemisphere a face sees: upward faces see all of the sky, walls half of it and the
-    // ground below, which bounces back some sun, moon and sky. The fill takes the zenith's color even on walls:
-    // in Bedrock, shaded walls are blue, not the paler horizon haze (the fit settled on all zenith).
-    float upness = n.y * 0.5 + 0.5;
-    vec3 skySeen = SkyColor.rgb * upness;
-    // The ground in front of a shaded wall is usually sunlit, so the bounce ignores this pixel's own shadow.
-    vec3 groundLight = (SunColor.rgb * max(sunDir.y, 0.0) + MoonColor.rgb * max(moonDir.y, 0.0)) * skyFallback
-            + SkyColor.rgb;
-    vec3 bounce = GROUND_BOUNCE * groundLight * (1.0 - upness);
-    color += diffuseColor * (skySeen + bounce) * skyLight * skyLight;
+    // Bedrock's indirect light (DiscreteIndirectCombinedLightingPass), one colour whatever the normal:
+    // max(block light + sky ambient × s × mix(s⁴, s², camera sky light), ambient floor), less where emissive.
+    // LightingState holds Bedrock's captured terms.
+    float cameraSky = sqrt(VolumeCamera.x) * 15.0 / 16.0;
+    float skyCurve = skyLight * mix(pow(skyLight, 4.0), skyLight * skyLight, cameraSky);
+    vec3 indirect = max(BlockLightColor.rgb * blockLightColor(blockLight) + SkyColor.rgb * skyCurve, AmbientColor.rgb);
+    color += diffuseColor * indirect * (1.0 - emissive);
 
     // Reflected sky: smooth and metallic surfaces mirror their surroundings. Until there are reflections, the
     // sky in the mirror direction stands in (Bedrock's own sky, else a gradient), fading out with roughness and
@@ -307,16 +302,15 @@ void main() {
             : mix(SkyColor.rgb, SkyHorizonColor.rgb, horizonShare);
     vec3 grazingF0 = max(vec3(1.0 - roughness), f0);
     vec3 skyFresnel = f0 + (grazingF0 - f0) * pow(1.0 - nDotV, 5.0);
-    vec3 reflected = skyInMirror * skyLight * skyLight;
+    // Bedrock's sky reflection: faded in over sky light 12 to 15 (cubed), at IBLParameters.z 0.5.
+    float iblFade = pow(clamp((skyLight * 15.0 - 12.0) / 3.0, 0.0, 1.0), 3.0) * 0.5;
+    vec3 reflected = skyInMirror * iblFade;
     float ssrWeight = 1.0 - smoothstep(0.3, 0.4, roughness);
     if (ssrWeight > 0.0) {
         vec4 traced = terrainReflection(position + n * 0.02, mirror);
         reflected = mix(reflected, traced.rgb, traced.a * ssrWeight);
     }
     color += reflected * skyFresnel * (1.0 - 0.7 * roughness);
-    color += diffuseColor * AmbientColor.rgb;
-    // BlockLightColor carries its exposure (LightingState.blockLightStrength): faint by day, strong at night.
-    color += diffuseColor * BlockLightColor.rgb * blockLightColor(blockLight);
     color += albedo * emissive * 2.0;
 
     // Distance fog: like Bedrock, the terrain fades into the sky behind it towards the render distance's edge.

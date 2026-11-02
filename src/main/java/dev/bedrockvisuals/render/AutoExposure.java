@@ -16,11 +16,11 @@ import java.nio.ByteOrder;
  */
 public final class AutoExposure {
 	/**
-	 * Bedrock's luminance per unit of this renderer's (fitted; this renderer's noon sun level of 1 is Bedrock's
-	 * illuminance 68, near its JSON's 100). By day Bedrock's scenes are far brighter than the average clamp's 2.0,
-	 * so its exposure sits at the clamp and only adapts as the scene darkens (dusk, night, caves).
+	 * Bedrock's luminance per unit of this renderer's: the lighting uses Bedrock's own terms divided by 100
+	 * (LightingState.UNIT). By day Bedrock's scenes are far brighter than the average clamp's 2.0, so its exposure
+	 * sits at the clamp and only adapts as the scene darkens (dusk, night, caves).
 	 */
-	static final float UNIT_SCALE = 67.6f;
+	static final float UNIT_SCALE = 100f;
 	// average_luminance.json
 	static final float MIN_LOG_LUMINANCE = -3f;
 	static final float LOG_LUMINANCE_RANGE = 20f;
@@ -32,14 +32,19 @@ public final class AutoExposure {
 	// tone_mapping.json: min_luminance -3 and max_luminance 4 (EV100, as 0.125 × 2^EV), exposure compensation 0.
 	static final float MIN_AVERAGE = 0.125f * (float) Math.pow(2, -3);
 	static final float MAX_AVERAGE = 0.125f * (float) Math.pow(2, 4);
-	static final float KEY = 1f;
+	/**
+	 * TUNE: with Bedrock's captured light terms, its screenshots land half a stop brighter than 0.18 / average
+	 * (one factor fitted to the test scene's grass and wall at noon and low sun). The cause wasn't captured: most
+	 * likely the sky reflection's share on rough surfaces and the local exposure pass.
+	 */
+	static final float KEY = 1.46f;
 	/** Pixels darker than this go in the histogram's ignored bin 0 (LuminanceHistogram's threshold). */
 	static final float MIN_PIXEL_LUMINANCE = 0.00095f;
 	/**
-	 * TUNE: the `CenterWeight` uniform is set by the engine at runtime and not found yet; a pixel counts
-	 * {@code exp(-CENTER_WEIGHT × r²)}, r its distance from the screen centre in UV units.
+	 * The `CenterWeight` uniform, 25 in GPU captures of Bedrock; a pixel counts {@code exp(-CENTER_WEIGHT × r²)},
+	 * r its distance from the screen centre in UV units.
 	 */
-	static final float CENTER_WEIGHT = 1f;
+	static final float CENTER_WEIGHT = 25f;
 	private static final int BINS = 256;
 	/** Every Nth pixel along each axis feeds the histogram. */
 	private static final int STRIDE = 4;

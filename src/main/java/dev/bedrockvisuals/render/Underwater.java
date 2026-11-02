@@ -90,7 +90,7 @@ public final class Underwater {
 	 * Two vec4s for LightingData: (camera under water, caustics frame, caustics scale, caustics power), then the
 	 * water's extinction per block (rgb) and the surface's height above the camera.
 	 */
-	static void write(Std140Builder builder) {
+	static void write(Std140Builder builder, float sunIlluminance) {
 		load();
 		WaterSettings.Caustics caustics = BedrockInputs.pack()
 				.map(pack -> pack.water(currentBiomeWater()).caustics()).orElse(null);
@@ -102,18 +102,22 @@ public final class Underwater {
 				caustics == null ? 1 : caustics.power());
 		float[] sigma = WaterPass.extinction();
 		builder.putVec4(sigma[0], sigma[1], sigma[2], surfaceAbove);
-		float[] scattering = WaterPass.scattering();
-		builder.putVec4(scattering[0], scattering[1], scattering[2], WATER_PHASE_G);
-		float[] cloud = Weather.cloud();
-		builder.putVec4(cameraSkyAccess(), toLinear(cloud[0]), toLinear(cloud[1]), toLinear(cloud[2]));
+		// The volumetric fog's water medium (WaterAlbedoExtinction in the captures): scattering = albedo ×
+		// extinction 0.112349, phase g 0.6 (HenyeyGreensteinG.y).
+		builder.putVec4(WATER_ALBEDO[0] * WATER_VOLUME_EXTINCTION, WATER_ALBEDO[1] * WATER_VOLUME_EXTINCTION,
+				WATER_ALBEDO[2] * WATER_VOLUME_EXTINCTION, WATER_PHASE_G);
+		// Bedrock sends CloudColor as is (white, or (0.1, 0.1, 0.15) at night); used as the clouds' albedo.
+		float[] cloud = Weather.cloud(sunIlluminance);
+		builder.putVec4(cameraSkyAccess(), cloud[0], cloud[1], cloud[2]);
 	}
 
 	private static float toLinear(float srgb) {
 		return srgb <= 0.04045f ? srgb / 12.92f : (float) Math.pow((srgb + 0.055f) / 1.055f, 2.4f);
 	}
 
-	/** TUNE: the water medium's Henyey-Greenstein g (HenyeyGreensteinG.y), a runtime value not found. */
-	private static final float WATER_PHASE_G = 0.75f;
+	private static final float WATER_PHASE_G = 0.6f;
+	private static final float[] WATER_ALBEDO = {0.022877f, 0.254416f, 0.927091f};
+	private static final float WATER_VOLUME_EXTINCTION = 0.112349f;
 
 	/**
 	 * How much sky the camera's surroundings see, 0 to 1, from the sky light where the camera is: Bedrock lights

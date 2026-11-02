@@ -34,11 +34,8 @@ import org.lwjgl.system.MemoryStack;
 public final class BloomPass {
 	/** bloom_configuration.shared.json intensity. */
 	static final float INTENSITY = 0.02f;
-	/**
-	 * TUNE: Bedrock thresholds at BloomParams.y × the average luminance, a runtime value not found; here, pixels
-	 * whose exposed luminance reaches 1.
-	 */
-	static final float THRESHOLD = 1.0f;
+	/** BloomParams.y in GPU captures: 0, so Bedrock blooms the whole image, not only bright parts. */
+	static final float THRESHOLD = 0f;
 	/** TUNE: dual-filter levels below the half-resolution image (the engine's count isn't in the shaders). */
 	private static final int LEVELS = 5;
 	static final GpuFormat HDR_FORMAT = GpuFormat.RGBA16_FLOAT;

@@ -2,7 +2,6 @@ package dev.bedrockvisuals.render;
 
 import com.mojang.blaze3d.buffers.Std140Builder;
 import dev.bedrockvisuals.bedrock.AtmosphereSettings;
-import dev.bedrockvisuals.bedrock.Curve;
 import dev.bedrockvisuals.bedrock.FogSettings;
 import dev.bedrockvisuals.bedrock.LightingSettings;
 import dev.bedrockvisuals.bedrock.Rgba;
@@ -30,24 +29,24 @@ public record SkyAtmosphere(Vector3f zenith, Vector3f horizon, Vector4f blendSto
 	static final int DATA_SIZE = 9 * 16;
 
 	/**
-	 * TUNE: the air volumetric fog for biomes whose fog settings have none (plains and the default). The engine's
-	 * compiled-in default wasn't found; many biomes set max_density 0 explicitly to turn it off, so it isn't 0.
-	 * These are the most common explicit values in the vanilla fogs (taiga, oceans, hills).
+	 * Bedrock's air medium in plains, which has no volumetric fog settings (the engine's default), from a GPU
+	 * capture: AirAlbedoExtinction (1, 1, 1, 0.001), HeightFogScaleBias (-1, 558.38) (full density below
+	 * y 557.4), HenyeyGreensteinG.x 0.75.
 	 */
-	static final FogSettings.VolumetricFog DEFAULT_AIR = new FogSettings.VolumetricFog(0.05f, 320f, 320f,
-			new dev.bedrockvisuals.bedrock.Vec3(0.04f, 0.04f, 0.04f), dev.bedrockvisuals.bedrock.Vec3.of(0), 0.6f);
+	static final Vector4f DEFAULT_AIR_ALBEDO_EXTINCTION = new Vector4f(1, 1, 1, 0.001f);
+	static final Vector4f DEFAULT_AIR_HEIGHT = new Vector4f(-1f, 558.38f, 0.75f, 1f);
 
 	/**
-	 * Bedrock's air medium for PopulateVolume (AirAlbedoExtinction, HeightFogScaleBias, HenyeyGreensteinG): albedo
-	 * {@code s / (s + a)}, extinction {@code max_density × (s + a)} per block (TUNE: how the engine folds density into
-	 * the coefficients isn't in the shaders), full density below max_density_height fading to none at
+	 * Bedrock's air medium for PopulateVolume (AirAlbedoExtinction, HeightFogScaleBias, HenyeyGreensteinG), for
+	 * biomes with volumetric settings: albedo {@code s / (s + a)}, extinction {@code max_density × (s + a)} per
+	 * block (TUNE: how the engine folds density into the coefficients wasn't captured; plains has none), full density below max_density_height fading to none at
 	 * zero_density_height.
 	 *
 	 * @return {albedo rgb, extinction} and {height scale, height bias, phase g, on}
 	 */
 	static Vector4f[] volume(FogSettings.VolumetricFog air) {
 		if (air == null) {
-			air = DEFAULT_AIR;
+			return new Vector4f[] {new Vector4f(DEFAULT_AIR_ALBEDO_EXTINCTION), new Vector4f(DEFAULT_AIR_HEIGHT)};
 		}
 		float sr = air.scattering().x(), sg = air.scattering().y(), sb = air.scattering().z();
 		float ar = air.absorption().x(), ag = air.absorption().y(), ab = air.absorption().z();
@@ -71,17 +70,9 @@ public record SkyAtmosphere(Vector3f zenith, Vector3f horizon, Vector4f blendSto
 	}
 
 	/**
-	 * TUNE: the sun's (and moon's) strength in the sky fades in over these elevations, in degrees. Bedrock's
-	 * engine fades it by the light's elevation between two angles from its renderer settings, which weren't
-	 * read; these fit the reference shots (about 0.86 at the low-sun shot's 7°).
-	 */
-	static final float FADE_START_DEGREES = -10f;
-	static final float FADE_END_DEGREES = 10f;
-
-	/**
-	 * The sky doesn't follow the lighting's illuminance curve, which falls to a quarter by the low-sun shot:
-	 * Bedrock's afternoon sky is as bright as noon's. It takes the light's full strength (the curve's peak)
-	 * faded by elevation, which matches the reference shots at noon, afternoon and low sun.
+	 * The sun and moon terms are the lighting's own: the illuminance curve at the (eased) time of day, colour
+	 * as sRGB/255. Verified in GPU captures: SunColor (1, 0.628992, 0.320394, 38.4944) at low sun, the curve's
+	 * value there; the moon 0.4 at midnight.
 	 */
 	static SkyAtmosphere sample(AtmosphereSettings atmosphere, LightingSettings lighting, float time,
 			Vector3f sunDirection, Vector3f moonDirection, Vector4f fog, FogSettings.VolumetricFog air) {
@@ -95,8 +86,8 @@ public record SkyAtmosphere(Vector3f zenith, Vector3f horizon, Vector4f blendSto
 						atmosphere.horizonBlendMieStart().sample(time), atmosphere.horizonBlendMax().sample(time)),
 				new Vector4f(atmosphere.rayleighStrength().sample(time), atmosphere.sunMieStrength().sample(time),
 						atmosphere.moonMieStrength().sample(time), atmosphere.sunGlareShape().sample(time)),
-				new Vector4f(linear(sunColor), Curve.max(lighting.sun().illuminance()) * fade(sunDirection)),
-				new Vector4f(linear(moonColor), Curve.max(lighting.moon().illuminance()) * fade(moonDirection)),
+				new Vector4f(sunColor.r(), sunColor.g(), sunColor.b(), lighting.sun().illuminance().sample(time)),
+				new Vector4f(moonColor.r(), moonColor.g(), moonColor.b(), lighting.moon().illuminance().sample(time)),
 				fog, volume[0], volume[1]);
 	}
 
@@ -110,16 +101,13 @@ public record SkyAtmosphere(Vector3f zenith, Vector3f horizon, Vector4f blendSto
 			return new Vector4f(0);
 		}
 		float distance = air.relativeToRenderDistance() ? renderDistanceBlocks : 1f;
-		return new Vector4f(air.start(), 1f / (air.end() - air.start()), distance, 1);
+		// Vibrant Visuals starts the render-distance fog at 0.75, not the fog file's 0.92: the captures'
+		// FogAndDistanceControl is (0.75, 4, 384), with the vanilla packs all saying 0.92.
+		float start = air.relativeToRenderDistance() ? VIBRANT_FOG_START : air.start();
+		return new Vector4f(start, 1f / (air.end() - start), distance, 1);
 	}
 
-	/** 0 below {@link #FADE_START_DEGREES}, 1 above {@link #FADE_END_DEGREES}, linear in the sine between. */
-	static float fade(Vector3f towardsLight) {
-		float start = (float) Math.sin(Math.toRadians(FADE_START_DEGREES));
-		float end = (float) Math.sin(Math.toRadians(FADE_END_DEGREES));
-		float elevation = towardsLight.y / Math.max(towardsLight.length(), 1e-6f);
-		return Math.clamp((elevation - start) / (end - start), 0f, 1f);
-	}
+	static final float VIBRANT_FOG_START = 0.75f;
 
 	/** Writes AtmosphereData; {@code null} writes a disabled block (the shader leaves Java's sky). */
 	static void write(Std140Builder builder, SkyAtmosphere sky) {

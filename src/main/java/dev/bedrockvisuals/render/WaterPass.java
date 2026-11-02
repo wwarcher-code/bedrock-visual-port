@@ -48,13 +48,12 @@ public final class WaterPass {
 	private static final int DATA_SIZE = 5 * 16;
 
 	/*
-	 * TUNE: pure water's absorption and scattering per block (metre), linear RGB, from published measurements
-	 * at roughly 650, 550 and 450 nm (Pope and Fry 1997; Morel 1974). Bedrock's default water has no particles
-	 * (chlorophyll, sediment and dissolved matter are all 0), so it is pure water: red is gone within a few
-	 * blocks, which gives the blue-green tint. The particle concentrations aren't modelled yet.
+	 * Bedrock's water extinction per block, per channel (WaterExtinctionCoefficients in GPU captures of the
+	 * default water: 0.309041, 0.0610688, 0.0411471), which WaterExtinction applies along the view under the
+	 * surface. All of it goes in ABSORPTION; the in-scattered light is the volumetric fog's (Underwater.java).
 	 */
-	private static final float[] ABSORPTION = {0.34f, 0.056f, 0.0092f};
-	private static final float[] SCATTERING = {0.0008f, 0.0019f, 0.0049f};
+	private static final float[] ABSORPTION = {0.309041f, 0.0610688f, 0.0411471f};
+	private static final float[] SCATTERING = {0f, 0f, 0f};
 
 	/** Scattering per block, linear RGB. */
 	static float[] scattering() {
