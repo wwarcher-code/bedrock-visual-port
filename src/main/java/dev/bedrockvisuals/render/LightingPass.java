@@ -34,7 +34,7 @@ import org.lwjgl.system.MemoryStack;
  */
 public final class LightingPass {
 	/** std140 size of the LightingData block (include/common.glsl): three mat4s and seventeen vec4s. */
-	private static final int DATA_SIZE = 3 * 64 + 17 * 16;
+	private static final int DATA_SIZE = 3 * 64 + 18 * 16;
 	/**
 	 * Bedrock's shadow normal offset (shadow_configuration.pc.json normal_offset_strength): lookups move out along
 	 * the normal by this many blocks times (1 - N·L).
@@ -50,6 +50,7 @@ public final class LightingPass {
 			.withUniform("ShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("CloudShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("CausticsMap", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("WaterColumnMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("PreviousScene", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
@@ -116,6 +117,7 @@ public final class LightingPass {
 					AutoExposure.exposure());
 			CloudShadows.write(builder, light.atmosphere() != null);
 			Underwater.write(builder, light.sunIlluminance());
+			WaterColumns.write(builder);
 			builder.putMat4f(new Matrix4f(projection).mul(modelView));
 			encoder.writeToBuffer(data.slice(), builder.get());
 			Std140Builder gradingBuilder = Std140Builder.onStack(stack, ColorGrading.DATA_SIZE);
@@ -146,6 +148,9 @@ public final class LightingPass {
 			pass.setUniform("CloudShadowMap", CloudShadows.view() != null ? CloudShadows.view() : gbuffer.depthView(),
 					RenderSystem.getSamplerCache().getRepeat(FilterMode.NEAREST));
 			pass.setUniform("CausticsMap", Underwater.caustics() != null ? Underwater.caustics() : gbuffer.depthView(),
+					nearest);
+			// Without a map yet the shader skips the lookup (WaterColumnOrigin.w 0).
+			pass.setUniform("WaterColumnMap", WaterColumns.view() != null ? WaterColumns.view() : gbuffer.depthView(),
 					nearest);
 			// Screen-space reflections read the previous frame's HDR scene (this frame's is being drawn).
 			GpuTextureView previous = BloomPass.previousHdr();

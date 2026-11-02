@@ -11,6 +11,7 @@ uniform sampler2D Light;
 uniform sampler2D Depth;
 uniform sampler2D ShadowMap;
 uniform sampler2D CloudShadowMap;  // filled cloud cells (CloudShadows.java)
+uniform sampler2D WaterColumnMap; // each column's top water body (WaterColumns.java)
 uniform sampler2D CausticsMap;     // Bedrock's renderer/caustics.png: frames of 32x32 stacked vertically
 uniform sampler2D PreviousScene;   // the previous frame's HDR scene (BloomPass.java), for reflections
 
@@ -89,6 +90,24 @@ float cloudShadow(vec3 position, vec3 towardsLight) {
 const int VOLUME_STEPS = 48;
 const float VOLUME_FAR = 250.0;
 
+// Whether the camera-relative point p is in the top water body of its column (WaterColumns.java). It stands
+// in for Bedrock's water front and back depths with the camera above water.
+bool inWaterColumn(vec3 p) {
+    // The map covers 128 columns each way; past that a texel holds a nearer column.
+    if (WaterColumnOrigin.w < 0.5 || max(abs(p.x), abs(p.z)) > 120.0) {
+        return false;
+    }
+    ivec2 texel = ivec2(mod(floor(p.xz + WaterColumnOrigin.xz), 256.0));
+    vec4 column = texelFetch(WaterColumnMap, texel, 0) * 255.0;
+    float surface = (column.r + column.g * 256.0) / 16.0;
+    if (surface <= 0.0) {
+        return false;
+    }
+    float bottom = column.b + column.a * 256.0;
+    float y = p.y + WaterColumnOrigin.y;
+    return y >= bottom && y < surface;
+}
+
 float phaseHG(float g, float cosine) {
     return (1.0 - g * g) * 0.07957747 / pow(max(1.0 + g * (2.0 * cosine + g), 1e-4), 1.5);
 }
@@ -109,7 +128,8 @@ float volumeShadow(vec3 p, vec3 towardsLight) {
 vec3 volumetricFog(vec3 dir, float distance, out vec3 transmittance) {
     transmittance = vec3(1.0);
     bool water = UnderwaterParams.x > 0.5;
-    if (AtmosphereZenith.w < 0.5 || (VolumeHeight.w < 0.5 && !water)) {
+    bool waterBelow = !water && WaterColumnOrigin.w > 0.5;
+    if (AtmosphereZenith.w < 0.5 || (VolumeHeight.w < 0.5 && !water && !waterBelow)) {
         return vec3(0.0);
     }
     float end = min(distance, VOLUME_FAR);
@@ -129,6 +149,14 @@ vec3 volumetricFog(vec3 dir, float distance, out vec3 transmittance) {
         float g;
         if (water && p.y < UnderwaterMedium.w) {
             extinction = UnderwaterMedium.rgb;
+            scattering = UnderwaterScattering.rgb;
+            g = UnderwaterScattering.w;
+        } else if (waterBelow && inWaterColumn(p)) {
+            // Seen from above, the water between its surface and the floor scatters too (Bedrock's
+            // PopulateVolume picks the water medium between the water's front and back depths). The water
+            // pass dims everything behind the surface by the whole path's extinction afterwards, so it isn't
+            // applied here as well.
+            extinction = vec3(0.0);
             scattering = UnderwaterScattering.rgb;
             g = UnderwaterScattering.w;
         } else {
@@ -184,10 +212,14 @@ vec4 terrainReflection(vec3 origin, vec3 direction) {
     return vec4(0.0);
 }
 
-// Bedrock's caustics multiplier (DeferredMixedResolutionCaustics): on direct light while the camera is under
-// water. The sheet repeats every 1/scale blocks across world XZ.
+// Bedrock's caustics multiplier (DeferredMixedResolutionCaustics), on direct light: on every surface while the
+// camera is under water; from above, on what's under water (the point is nudged off its surface into the
+// water, so a pool's walls count too). The sheet repeats every 1/scale blocks across world XZ.
 float causticsMultiplier(vec3 position, vec3 n) {
     if (UnderwaterParams.y < 0.0) {
+        return 1.0;
+    }
+    if (UnderwaterParams.x < 0.5 && !inWaterColumn(position + n * 0.05)) {
         return 1.0;
     }
     vec2 world = (position.xz + CameraGridOffset.xz) * UnderwaterParams.z;

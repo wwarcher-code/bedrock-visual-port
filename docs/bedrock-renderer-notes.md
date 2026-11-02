@@ -203,7 +203,17 @@ Order: the scene beneath is attenuated by `WaterExtinction`, then `DeferredWater
 - **DeferredWater from below.** Refraction index 1.33. Outside Snell's window
   (`1.7689 (1 - (N·V)²) > 1`), total internal reflection makes the surface a mirror.
 
-The renderer turns caustics on while the camera's fluid is water (`Camera.getFluidInCamera()`). It
+- **From above water.** The caustics shader has no water test, but in Bedrock they show from above only on
+  what's under water, so the engine must limit that pass to pixels behind the water surface. The render
+  state isn't in the material, so this comes from the game, not the shader. PopulateVolume's water medium
+  also lies between the water's front and back depths, so the light shafts in water show from above.
+
+The renderer applies caustics to every surface while the camera's fluid is water
+(`Camera.getFluidInCamera()`). From above, it applies them, and the water medium in the volume march, to
+points inside the top water body of their column. That comes from a 256×256 map of water surface and
+bottom heights around the camera (`WaterColumns`), standing in for the water depths Bedrock has. Its lighting
+runs before Java draws the water. The water pass then dims what's behind the surface by the whole path's
+extinction, so the march adds the water's scattering from above without its extinction. It
 multiplies the scene, including the sky seen through the surface, by the water's transmittance along the
 view, capping the path where the ray leaves through the surface above the camera. Seen from below, the
 water surface passes the air beyond inside Snell's window and mirrors the water below outside it.

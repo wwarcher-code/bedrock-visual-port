@@ -32,7 +32,8 @@ import org.lwjgl.system.MemoryUtil;
  * <li>Caustics: direct sun and moon light on every surface is multiplied by the engine's caustics pattern
  * (renderer/caustics.png, 64 frames of 32x32), {@code (2 tex(worldXZ × scale) × saturate(N·up))^power ×
  * (power + 1)}. The engine's caustics flag is per frame, not per pixel (the entity shaders apply it with no
- * water test), so it's on exactly while the camera is in water.</li>
+ * water test). From under water they're on for every surface; from above, Bedrock limits them to what's
+ * under water, which the lighting pass gets from {@link WaterColumns}.</li>
  * <li>Extinction: the scene is multiplied by {@code exp(-σ d)} along the view's path through water, which
  * from under water starts at the camera; this caps the path at the water's surface above the camera.</li>
  * </ul>
@@ -94,7 +95,9 @@ public final class Underwater {
 		load();
 		WaterSettings.Caustics caustics = BedrockInputs.pack()
 				.map(pack -> pack.water(currentBiomeWater()).caustics()).orElse(null);
-		boolean causticsOn = submerged && view != null && caustics != null && caustics.enabled();
+		// The lighting pass applies them to everything while the camera is under water, and to what the water
+		// column map says is under water otherwise.
+		boolean causticsOn = view != null && caustics != null && caustics.enabled();
 		float frameLength = caustics == null || caustics.frameLength() <= 0 ? 0.09f : caustics.frameLength();
 		float seconds = (System.nanoTime() - START) / 1e9f;
 		float frame = (float) Math.floor(seconds / frameLength) % frames;

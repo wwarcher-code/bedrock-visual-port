@@ -19,6 +19,7 @@ import dev.bedrockvisuals.render.LightingState;
 import dev.bedrockvisuals.render.MaterialAtlas;
 import dev.bedrockvisuals.render.ShadowPass;
 import dev.bedrockvisuals.render.WaterPass;
+import dev.bedrockvisuals.render.WaterColumns;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -71,7 +72,7 @@ final class DiagnosticsReport {
 		line("G-buffer " + (GBufferPass.isDisabled() ? "FAILED, see log" : "ok"));
 		line("shadows " + (ShadowPass.isDisabled() ? "FAILED, see log" : ShadowPass.isValid() ? "ok" : "no map this frame"));
 		line("materials " + MaterialAtlas.status());
-		line("water " + WaterPass.status() + "; " + Underwater.status());
+		line("water " + WaterPass.status() + "; " + Underwater.status() + "; columns " + WaterColumns.status());
 		line("bloom " + BloomPass.status());
 		line("weather " + Weather.status());
 		line("clouds " + CloudPass.status() + "; cloud shadows " + CloudShadows.status());
