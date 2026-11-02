@@ -150,13 +150,15 @@ void main() {
     color += diffuseColor * (skySeen + bounce) * skyLight * skyLight;
 
     // Reflected sky: smooth and metallic surfaces mirror their surroundings. Until there are reflections, the
-    // sky gradient in the mirror direction stands in, fading out with roughness and sky access.
+    // sky in the mirror direction stands in (Bedrock's own sky, else a gradient), fading out with roughness and
+    // sky access.
     float nDotV = max(dot(n, v), 1e-4);
     vec3 mirror = reflect(-v, n);
     // The horizon color is the glow towards the sun at sunset; most of the horizon is closer to the zenith's
     // blue, so it gets at most 30% (at full weight, walls facing away from the sun turned pink).
     float horizonShare = 0.3 * (1.0 - clamp(mirror.y * 0.5 + 0.5, 0.0, 1.0));
-    vec3 skyInMirror = mix(SkyColor.rgb, SkyHorizonColor.rgb, horizonShare);
+    vec3 skyInMirror = AtmosphereZenith.w > 0.5 ? bedrockSkyReflection(mirror, roughness, sunDir, moonDir)
+            : mix(SkyColor.rgb, SkyHorizonColor.rgb, horizonShare);
     vec3 grazingF0 = max(vec3(1.0 - roughness), f0);
     vec3 skyFresnel = f0 + (grazingF0 - f0) * pow(1.0 - nDotV, 5.0);
     color += skyInMirror * skyFresnel * (1.0 - 0.7 * roughness) * skyLight * skyLight;
@@ -164,6 +166,12 @@ void main() {
     // BlockLightColor carries its exposure (LightingState.blockLightStrength): faint by day, strong at night.
     color += diffuseColor * BlockLightColor.rgb * blockLightColor(blockLight);
     color += albedo * emissive * 2.0;
+
+    // Distance fog: like Bedrock, the terrain fades into the sky behind it towards the render distance's edge.
+    float fog = AtmosphereZenith.w > 0.5 ? bedrockFogAmount(length(position)) : 0.0;
+    if (fog > 0.0) {
+        color = mix(color, bedrockSkyRadiance(normalize(position), sunDir, moonDir) * AtmosphereHorizon.w, fog);
+    }
 
     meterLuminance = vec4(dot(color, LUMA), 0.0, 0.0, 1.0);
     fragColor = vec4(toDisplay(color), 1.0);

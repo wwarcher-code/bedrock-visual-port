@@ -42,6 +42,7 @@ public final class WaterPass {
 			.withUniform("WaterData", UniformType.UNIFORM_BUFFER)
 			.withUniform("u_WaterNormal", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("u_WaterMers", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("AtmosphereData", UniformType.UNIFORM_BUFFER)
 			.build();
 	/** std140 size of WaterData in water/terrain.fsh: five vec4s. */
 	private static final int DATA_SIZE = 5 * 16;
@@ -71,7 +72,7 @@ public final class WaterPass {
 	/** Called after the lighting pass: whether this frame's water can be shaded, and its data written. */
 	public static void prepare(TextureAtlas blockAtlas, RenderTarget main, boolean lit) {
 		ready = false;
-		if (failed || !lit || LightingPass.lightingData() == null) {
+		if (failed || !lit || LightingPass.lightingData() == null || LightingPass.atmosphereData() == null) {
 			return;
 		}
 		try {
@@ -136,6 +137,7 @@ public final class WaterPass {
 		pass.setUniform("WaterData", data);
 		pass.setUniform("u_WaterNormal", WaterSurfaceMaps.normal(), nearest);
 		pass.setUniform("u_WaterMers", WaterSurfaceMaps.mers(), nearest);
+		pass.setUniform("AtmosphereData", LightingPass.atmosphereData());
 	}
 
 	public static RenderPipeline variantOf(RenderPipeline sodium) {

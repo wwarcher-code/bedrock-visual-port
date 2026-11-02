@@ -280,6 +280,13 @@ The horizon blend stop mapping (x min, y start, z mie start, w max) fits the sho
 Still off: just above the horizon at low sun, Bedrock's sky is lilac, about (164,151,171), where the function
 gives peach, about (212,149,148). Bedrock's volumetric fog, which scatters into the sky too, isn't modelled.
 
+**Distance fog.** The same pass blends the lit surface towards that radiance by
+`saturate((RenderChunkFogAlpha.x - FogAndDistanceControl.x + distance / FogAndDistanceControl.z) × FogAndDistanceControl.y)`.
+This matches the fog JSON's air fog: x is the start, y is 1 / (end - start), and z is the distance they're
+fractions of (the render distance for `"render"` fogs). The default air fog runs from 0.92 to 1.0. With
+atmospheric scattering on, the fog's colour is the sky's, not `fog_color`, so terrain fades into the sky
+behind it.
+
 The renderer draws it the same way: the lighting pass shades sky pixels with it, Java's sky gradient and
 sunset fan are skipped, and Java's sun, moon and stars stay. Rain and other weather don't change it yet;
 `atmospheric_weather.json` holds Bedrock's weather variants.

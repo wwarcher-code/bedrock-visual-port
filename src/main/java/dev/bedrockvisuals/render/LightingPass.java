@@ -143,6 +143,10 @@ public final class LightingPass {
 		return data;
 	}
 
+	static GpuBuffer atmosphereData() {
+		return atmosphere;
+	}
+
 	static GpuBuffer gradingData() {
 		return grading;
 	}

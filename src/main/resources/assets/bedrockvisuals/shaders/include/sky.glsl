@@ -13,7 +13,17 @@ layout(std140) uniform AtmosphereData {
     vec4 AtmosphereScattering;  // Rayleigh strength, sun Mie strength, moon Mie strength, sun glare shape
     vec4 AtmosphereSun;         // rgb: colour, linear; w: illuminance
     vec4 AtmosphereMoon;
+    vec4 AtmosphereFog;         // distance fog: start, 1 / (end - start) (fractions of z), z: distance in blocks, w: on
 };
+
+// How much of the sky covers terrain at this distance (Bedrock's FogAndDistanceControl): 0 to 1 between the
+// air fog's start and end.
+float bedrockFogAmount(float distance) {
+    if (AtmosphereFog.w < 0.5) {
+        return 0.0;
+    }
+    return clamp((distance / AtmosphereFog.z - AtmosphereFog.x) * AtmosphereFog.y, 0.0, 1.0);
+}
 
 // Henyey-Greenstein phase with g = 0.9, as Bedrock writes it: (1 - g^2) / (1 + g^2 - 2gx)^1.5 / 4π folded into
 // the constants and the final 1/4π.
@@ -49,6 +59,24 @@ vec3 bedrockSkyRadiance(vec3 d, vec3 sunDir, vec3 moonDir) {
             + AtmosphereScattering.z * AtmosphereMoon.w * xMoon * AtmosphereMoon.rgb * bedrockMiePhase(xMoon);
 
     return (base * rayleigh + mieFade * AtmosphereHorizon.rgb * mie) * 0.07957747;
+}
+
+// The sky seen along d, in this renderer's units (before exposure). A rough reflection sees a blurred sky
+// (Bedrock samples a pre-convolved probe mip by roughness); four directions spread around d by the roughness
+// stand in for that.
+vec3 bedrockSkyReflection(vec3 d, float roughness, vec3 sunDir, vec3 moonDir) {
+    vec3 sky = bedrockSkyRadiance(d, sunDir, moonDir);
+    if (roughness > 0.05) {
+        vec3 side = normalize(abs(d.y) < 0.9 ? cross(d, vec3(0.0, 1.0, 0.0)) : cross(d, vec3(1.0, 0.0, 0.0)));
+        vec3 up = cross(side, d);
+        float spread = roughness * 0.7;
+        vec3 blurred = bedrockSkyRadiance(normalize(d + side * spread), sunDir, moonDir)
+                + bedrockSkyRadiance(normalize(d - side * spread), sunDir, moonDir)
+                + bedrockSkyRadiance(normalize(d + up * spread), sunDir, moonDir)
+                + bedrockSkyRadiance(normalize(d - up * spread), sunDir, moonDir);
+        sky = mix(sky, blurred * 0.25, clamp(roughness * 1.5, 0.0, 1.0));
+    }
+    return sky * AtmosphereHorizon.w;
 }
 
 #endif

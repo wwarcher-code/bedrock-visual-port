@@ -4,6 +4,7 @@ import dev.bedrockvisuals.bedrock.AtmosphereSettings;
 import dev.bedrockvisuals.bedrock.BedrockInputs;
 import dev.bedrockvisuals.bedrock.BedrockPack;
 import dev.bedrockvisuals.bedrock.ClientBiome;
+import dev.bedrockvisuals.bedrock.FogSettings;
 import dev.bedrockvisuals.bedrock.LightingSettings;
 import dev.bedrockvisuals.bedrock.Rgba;
 import dev.bedrockvisuals.bedrock.TimeOfDay;
@@ -11,7 +12,9 @@ import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.level.dimension.DimensionType;
+import dev.bedrockvisuals.lod.DistantTerrain;
 import org.joml.Vector3f;
+import org.joml.Vector4f;
 
 /**
  * This frame's light sources, sampled from Bedrock's lighting and atmosphere settings for the player's biome
@@ -95,8 +98,22 @@ public record LightingState(
 				linear(lighting.ambientColor()).mul(lighting.ambientIlluminance() * AMBIENT_SCALE),
 				new Vector3f(BLOCK_LIGHT).mul(BLOCK_LIGHT_SCALE),
 				level.dimensionType().skybox() == DimensionType.Skybox.OVERWORLD
-						? SkyAtmosphere.sample(atmosphere, lighting, time, sunDirection, new Vector3f(sunDirection).negate())
+						? SkyAtmosphere.sample(atmosphere, lighting, time, sunDirection, new Vector3f(sunDirection).negate(),
+								distanceFog(pack.get().fog(biome.fog())))
 						: null);
+	}
+
+	/**
+	 * The air fog at the edge of the render distance. Off while Distant Horizons is installed: its distant
+	 * terrain starts where the render distance ends and isn't drawn by this renderer, so fogging the near
+	 * terrain into the sky there would leave a ring of sky before the distant terrain.
+	 */
+	private static Vector4f distanceFog(FogSettings fog) {
+		if (DistantTerrain.source().isPresent()) {
+			return new Vector4f(0);
+		}
+		float blocks = Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f;
+		return SkyAtmosphere.distanceFog(fog.distance().get("air"), blocks);
 	}
 
 	private static LightingState fallback(float time) {

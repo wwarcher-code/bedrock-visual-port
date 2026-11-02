@@ -8,6 +8,7 @@ import dev.bedrockvisuals.bedrock.TimeOfDay;
 import dev.bedrockvisuals.render.AutoExposure;
 import dev.bedrockvisuals.render.ColorGrading;
 import dev.bedrockvisuals.render.DeferredRenderer;
+import dev.bedrockvisuals.render.SkyAtmosphere;
 import dev.bedrockvisuals.render.GBufferPass;
 import dev.bedrockvisuals.render.LightingState;
 import dev.bedrockvisuals.render.MaterialAtlas;
@@ -86,6 +87,11 @@ final class DiagnosticsReport {
 		line("towards sun " + vector(light.sunDirection()) + ", sun " + vector(light.sun()) + ", moon " + vector(light.moon()));
 		line("sky zenith " + vector(light.sky()) + ", horizon " + vector(light.skyHorizon()) + ", ambient "
 				+ vector(light.ambient()));
+		SkyAtmosphere sky = light.atmosphere();
+		line(sky == null ? "sky: Java's (no Bedrock atmosphere here)"
+				: "sky: Bedrock's, sun strength " + format(sky.sun().w) + ", moon " + format(sky.moon().w)
+						+ ", distance fog " + (sky.fog().w > 0 ? "from " + format(sky.fog().x * sky.fog().z) + " blocks"
+								: "off (Distant Horizons installed, or no air fog)"));
 		line("exposure " + format(AutoExposure.exposure()) + " (metered average luminance "
 				+ format(AutoExposure.averageLuminance()) + " in Bedrock's units, meter " + AutoExposure.meterStatus() + ")");
 		line("meter " + AutoExposure.meterBreakdown());

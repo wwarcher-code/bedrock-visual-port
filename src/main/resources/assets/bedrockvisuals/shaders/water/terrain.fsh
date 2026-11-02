@@ -13,6 +13,7 @@
 #include <sodium:chunk_material.glsl>
 #include <minecraft:oit.glsl>
 #include <bedrockvisuals:common.glsl>
+#include <bedrockvisuals:sky.glsl>
 
 layout(location = 0) in vec4 v_Color;
 layout(location = 1) in vec2 v_TexCoord;
@@ -245,11 +246,16 @@ vec3 waterColor(WaterSurface s) {
     // Reflection: the scene where the mirror ray lands, else the sky gradient (with the same horizon handling
     // as the deferred pass's reflections).
     vec3 mirror = reflect(-s.v, s.n);
-    float horizonShare = 0.3 * (1.0 - clamp(mirror.y * 0.5 + 0.5, 0.0, 1.0));
-    vec3 skyReflection = toDisplay(mix(SkyColor.rgb, SkyHorizonColor.rgb, horizonShare) * sky);
-    // Rougher texels see a blurrier sky (Bedrock picks a convolved cubemap mip by roughness); here the
-    // reflected sky leans towards its average.
-    skyReflection = mix(skyReflection, toDisplay(mix(SkyColor.rgb, SkyHorizonColor.rgb, 0.15) * sky), s.roughness);
+    vec3 skyReflection;
+    if (AtmosphereZenith.w > 0.5) {
+        // Bedrock's sky probe is its sky (the atmosphere function), so the water reflects the same sky.
+        skyReflection = toDisplay(bedrockSkyReflection(mirror, s.roughness, sunDir, moonDir) * sky);
+    } else {
+        float horizonShare = 0.3 * (1.0 - clamp(mirror.y * 0.5 + 0.5, 0.0, 1.0));
+        skyReflection = toDisplay(mix(SkyColor.rgb, SkyHorizonColor.rgb, horizonShare) * sky);
+        // Rougher texels see a blurrier sky; here the reflected sky leans towards its average.
+        skyReflection = mix(skyReflection, toDisplay(mix(SkyColor.rgb, SkyHorizonColor.rgb, 0.15) * sky), s.roughness);
+    }
     // Bedrock's SSR is mirror-only: full up to roughness 0.3, gone by 0.4.
     float ssrWeight = 1.0 - smoothstep(0.3, 0.4, s.roughness);
     vec4 traced = ssrWeight > 0.0 ? screenSpaceReflection(v_Position + s.n * 0.02, mirror, size, flipY) : vec4(0.0);
