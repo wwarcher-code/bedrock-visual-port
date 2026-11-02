@@ -346,6 +346,15 @@ void main() {
     // Bedrock's sky reflection: faded in over sky light 12 to 15 (cubed), at IBLParameters.z 0.5.
     float iblFade = pow(clamp((skyLight * 15.0 - 12.0) / 3.0, 0.0, 1.0), 3.0) * 0.5;
     vec3 reflected = skyInMirror * iblFade;
+    // Metals by torches (DeferredIndirectSpecular): where the reflected sky is dimmer, they reflect the block
+    // light instead, BlockLightIndirectSpecularIntensity (0.1 in captures) of the block light's ambient term,
+    // blended up from the ambient floor by its luminance (in Bedrock's units) and times the metalness.
+    vec3 blockSpecular = BlockLightColor.rgb * blockLightColor(blockLight) * 0.1;
+    float blockShare = clamp(dot(blockSpecular, LUMA) * 100.0, 0.0, 1.0); // AutoExposure.UNIT_SCALE
+    blockSpecular = mix(AmbientColor.rgb, blockSpecular, blockShare) * metalness;
+    if (dot(reflected, LUMA) < dot(blockSpecular, LUMA)) {
+        reflected = blockSpecular;
+    }
     float ssrWeight = 1.0 - smoothstep(0.3, 0.4, roughness);
     if (ssrWeight > 0.0) {
         vec4 traced = terrainReflection(position + n * 0.02, mirror);

@@ -7,7 +7,7 @@
 layout(std140) uniform LocalExposureData {
     vec4 LocalExposureParams; // LocalExposureParams x, y, z; w: log2 of the metered average luminance
     vec4 GridDimensions;      // grid cells across, down, luminance slices; w: grid filter radius in cells
-    vec4 BlurParams;          // x: blur radius, y: blur step (scene pixels); z: unused; w: Bedrock units per renderer unit
+    vec4 BlurParams;          // x: blur radius, y: blur step (quarter-resolution pixels); z: unused; w: Bedrock units per renderer unit
 };
 
 const float LOG_MIN = -10.0;

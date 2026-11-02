@@ -37,21 +37,23 @@ import org.lwjgl.system.MemoryStack;
  * <li>ApplyLocalExposure: each pixel's level moves a quarter of the way from its surroundings' towards the
  * average, keeping its detail, with LocalExposureParams (0.75, 1, 0.4) from GPU captures.</li>
  * </ol>
- * The grid's size, its filter radius and the blur's radius and step are set by the engine at run time and
- * weren't captured: those are TUNE values.
+ * The runtime sizes are from a GPU capture at 1920×1009: the grid is built from the scene at a quarter of the
+ * resolution (480×252), in cells of 32 of those pixels (GridDimensions 15, 7, 32), filtered over 6 cells
+ * (BilateralFilterParams), and the blur (GaussianBlurParams radius 12, step 1) is written at a sixteenth of
+ * the resolution (120×63).
  */
 public final class LocalExposure {
 	/** LocalExposureParams from the captures: base kept, detail kept, share of the plain blur in the base. */
 	static final float BASE_KEPT = 0.75f;
 	static final float DETAIL_KEPT = 1f;
 	static final float BLUR_SHARE = 0.4f;
-	/** TUNE (not captured): screen pixels per grid cell, luminance slices, filter radius in cells. */
+	/** Quarter-resolution pixels per grid cell, luminance slices, filter radius in cells (captured). */
 	private static final int CELL_PIXELS = 32;
 	private static final int SLICES = 32;
-	private static final int FILTER_RADIUS = 2;
-	/** TUNE (not captured): GaussianBlurParams radius and step, in scene pixels. */
-	private static final int BLUR_RADIUS = 32;
-	private static final int BLUR_STEP = 8;
+	private static final int FILTER_RADIUS = 6;
+	/** GaussianBlurParams radius and step (captured), in quarter-resolution pixels. */
+	private static final int BLUR_RADIUS = 12;
+	private static final int BLUR_STEP = 1;
 
 	private static final BindGroupLayout SOURCE = BindGroupLayout.builder()
 			.withUniform("Source", UniformType.COMBINED_IMAGE_SAMPLER)
@@ -118,12 +120,13 @@ public final class LocalExposure {
 				.build();
 	}
 
+	/** 480 / 32 = 15 and 252 / 32 = 7 in the capture: whole cells of the quarter-resolution scene. */
 	private static int gridWidth() {
-		return Math.max(1, (width + CELL_PIXELS - 1) / CELL_PIXELS);
+		return Math.max(1, Math.max(1, width / 4) / CELL_PIXELS);
 	}
 
 	private static int gridHeight() {
-		return Math.max(1, (height + CELL_PIXELS - 1) / CELL_PIXELS);
+		return Math.max(1, Math.max(1, height / 4) / CELL_PIXELS);
 	}
 
 	private static void resize(int w, int h) {
@@ -136,7 +139,7 @@ public final class LocalExposure {
 		int quarterW = Math.max(1, w / 4);
 		int quarterH = Math.max(1, h / 4);
 		logLuminance = target("log luminance", LOG_FORMAT, quarterW, quarterH);
-		blurred = target("blurred log luminance", LOG_FORMAT, quarterW, quarterH);
+		blurred = target("blurred log luminance", LOG_FORMAT, Math.max(1, w / 16), Math.max(1, h / 16));
 		grid = target("grid", GRID_FORMAT, gridWidth() * SLICES, gridHeight());
 		filtered = target("filtered grid", GRID_FORMAT, gridWidth() * SLICES, gridHeight());
 		exposed = target("exposed scene", BloomPass.HDR_FORMAT, w, h);
@@ -179,7 +182,7 @@ public final class LocalExposure {
 			draw(encoder, "log luminance", logLuminance.view, LOG, pass -> pass.setUniform("Source", scene, linear));
 			draw(encoder, "grid", grid.view, BUILD, pass -> pass.setUniform("Source", logLuminance.view, nearest));
 			draw(encoder, "grid filter", filtered.view, FILTER, pass -> pass.setUniform("Source", grid.view, nearest));
-			draw(encoder, "blur", blurred.view, BLUR, pass -> pass.setUniform("Source", scene, linear));
+			draw(encoder, "blur", blurred.view, BLUR, pass -> pass.setUniform("Source", logLuminance.view, linear));
 			RenderPassDescriptor descriptor = RenderPassDescriptor.builder(() -> "Bedrock Visuals local exposure")
 					.withColorAttachment(main.getColorTextureView(), Optional.empty())
 					.withColorAttachment(exposed.view, Optional.empty())

@@ -203,9 +203,11 @@ Order: the scene beneath is attenuated by `WaterExtinction`, then `DeferredWater
 - **DeferredWater from below.** Refraction index 1.33. Outside Snell's window
   (`1.7689 (1 - (N·V)²) > 1`), total internal reflection makes the surface a mirror.
 
-- **From above water.** The caustics shader has no water test, but in Bedrock they show from above only on
-  what's under water, so the engine must limit that pass to pixels behind the water surface. The render
-  state isn't in the material, so this comes from the game, not the shader. PopulateVolume's water medium
+- **From above water.** The caustics shader has no water test. The engine limits the pass with the stencil:
+  in captures, `CausticsParameters` is (1, 0.5, 1, 1) and the pass (before the main lighting) is a
+  full-screen quad with depth test off and stencil EQUAL 1, so only water-covered pixels are written. A
+  grass pixel fails the stencil, and a pool-floor pixel is written. The multiplier texture is cleared to 1
+  first. `CausticsTextureParameters.y` is the frame (46, 49, 35 in the three captures). PopulateVolume's water medium
   also lies between the water's front and back depths, so the light shafts in water show from above.
 
 The renderer applies caustics to every surface while the camera's fluid is water
@@ -416,8 +418,8 @@ geometry or a ray-marched layer driven by the same cloud field.
   256², with smooth at the bottom row.
 
 The renderer uses the table from the install and the same mip curve. It blurs the analytic sky over a ring of
-directions in place of the probe's mips (a cone up to 60° at the roughest mip), and doesn't have the metal
-block-light term yet (`BlockLightIndirectSpecularIntensity` wasn't captured).
+directions in place of the probe's mips (a cone up to 60° at the roughest mip), and applies the metal
+block-light term with the captured `BlockLightIndirectSpecularIntensity` 0.1.
 
 ## Local exposure (verified in LocalExposure and BilateralGrid)
 
@@ -441,9 +443,15 @@ log2.
   stood in for; the key is now 1 again.
 - Order: after lighting, before bloom.
 
-The grid's size, the filter radius and the blur's radius and step are set at run time and weren't captured.
-The renderer uses TUNE values: 32-pixel cells, 32 slices, radius 2, blur radius 32 and step 8. It gathers
-the grid in fragment passes from a quarter-resolution log luminance, not with atomics. Java draws the water
+Runtime sizes, from a capture at 1920×1009:
+- The grid is built from the scene downsampled to a quarter (480×252, R11G11B10), in whole cells of 32 of
+  those pixels: `GridDimensions` (15, 7, 32). It's filtered over `BilateralFilterParams.x` 6 cells into a
+  15×7×32 RGBA16F array.
+- The blur is `GaussianBlurParams` (12, 1) over the quarter-resolution scene, written at 120×63 (R16F).
+
+The renderer matches those sizes. It gathers the grid in fragment passes from a quarter-resolution log
+luminance rather than with atomics, and blurs the logs of those pixels rather than the logs of each colour
+tap. Java draws the water
 and clouds after this pass, so they aren't locally exposed yet.
 
 ## Shadow sampling (verified in the deferred direct-lighting shader)
@@ -502,6 +510,16 @@ Read from the captures' constant buffers at noon, low sun (/time set 11500) and 
   - `CenterWeight` 25.
   - `LocalExposureParams` (0.75, 1, 0.4).
   - `LuminanceRangeParams` (-10, 20, 2^-10, 2^20).
+- **Reflections** (DeferredIndirectSpecular and SSR):
+  - `IBLSkyFadeParameters` (15, 12).
+  - `BlockLightIndirectSpecularIntensity` 0.1.
+  - `SSRParameters` (1, 1).
+  - `SSRRoughnessCutoffParams` (0.4, 0.3).
+  - `SSRFadingParamsAndThickness` (3, 3, 0.75, 0.025).
+  - `SSRRayMarchingParams` (800, 1, 0.2, 40).
+  - `SSRTemporalAccumulationParams` (1, 0.5, 2, 0.03125).
+- **Local exposure:** `GridDimensions` (15, 7, 32), `BilateralFilterParams` 6, `GaussianBlurParams` (12, 1),
+  and the blur written at 120×63, at 1920×1009.
 - **Fog and IBL:**
   - `FogAndDistanceControl` (0.75, 4, 384): Vibrant Visuals starts the fog at 0.75, not the files' 0.92.
   - `IBLParameters` (1, 10, 0.5, w).

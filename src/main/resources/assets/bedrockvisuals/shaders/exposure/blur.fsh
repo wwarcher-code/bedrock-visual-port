@@ -1,12 +1,13 @@
 #version 330
 #extension GL_ARB_separate_shader_objects : require
 
-// Bedrock's GaussianDownsample: the log luminance of the scene, Gaussian-blurred (radius r, step s, in scene
-// pixels; weight exp(-d² / (r² / 2))), at a lower resolution: the plain blur local exposure mixes in.
+// Bedrock's GaussianDownsample: the log luminance of the quarter-resolution scene, Gaussian-blurred (radius r,
+// step s, in its pixels; weight exp(-d² / (r² / 2))), written at a sixteenth of the resolution: the plain
+// blur local exposure mixes in. Bedrock takes the log of each colour tap; here the taps are already logs.
 
 #include <bedrockvisuals:local_exposure.glsl>
 
-uniform sampler2D Source; // the HDR scene
+uniform sampler2D Source; // log luminance, quarter resolution
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
@@ -24,7 +25,7 @@ void main() {
             vec2 d = vec2(x, y) * float(stepSize);
             float weight = exp(-dot(d, d) / spread);
             vec2 uv = clamp(texCoord + d * texel, vec2(0.0), vec2(1.0));
-            sum += logLuminance(texture(Source, uv).rgb) * weight;
+            sum += texture(Source, uv).r * weight;
             weights += weight;
         }
     }
