@@ -75,17 +75,27 @@ public final class LocalExposure {
 	private static final RenderPipeline FILTER = pipeline("filter", SOURCE, GRID_FORMAT);
 	private static final RenderPipeline BLUR = pipeline("blur", SOURCE, LOG_FORMAT);
 	/** The main image is multiplied by the change (DST_COLOR, ZERO); the exposed HDR scene is written as is. */
-	private static final RenderPipeline APPLY_PIPELINE = RenderPipeline.builder()
-			.withLocation(Identifier.fromNamespaceAndPath("bedrockvisuals", "pipeline/local_exposure_apply"))
-			.withVertexShader(Identifier.withDefaultNamespace("core/screenquad"))
-			.withFragmentShader(Identifier.fromNamespaceAndPath("bedrockvisuals", "exposure/apply"))
-			.withBindGroupLayout(APPLY)
-			.withColorTargetState(0, new ColorTargetState(Optional.of(new BlendFunction(BlendFactor.DST_COLOR, BlendFactor.ZERO)),
-					ColorTargetState.DEFAULT.format(), ColorTargetState.WRITE_ALL))
-			.withColorTargetState(1, new ColorTargetState(Optional.empty(), BloomPass.HDR_FORMAT, ColorTargetState.WRITE_ALL))
-			.withDepthStencilState(Optional.empty())
-			.withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
-			.build();
+	private static final RenderPipeline APPLY_PIPELINE = applyPipeline("apply", true);
+	/**
+	 * The debug view's variant, with no blending: it writes mid-grey times its debug colours itself, so the
+	 * view shows whether the draw lands at all, apart from the multiply.
+	 */
+	private static final RenderPipeline APPLY_DEBUG_PIPELINE = applyPipeline("apply_debug", false);
+
+	private static RenderPipeline applyPipeline(String name, boolean multiply) {
+		return RenderPipeline.builder()
+				.withLocation(Identifier.fromNamespaceAndPath("bedrockvisuals", "pipeline/local_exposure_" + name))
+				.withVertexShader(Identifier.withDefaultNamespace("core/screenquad"))
+				.withFragmentShader(Identifier.fromNamespaceAndPath("bedrockvisuals", "exposure/apply"))
+				.withBindGroupLayout(APPLY)
+				.withColorTargetState(0, new ColorTargetState(
+						multiply ? Optional.of(new BlendFunction(BlendFactor.DST_COLOR, BlendFactor.ZERO)) : Optional.empty(),
+						ColorTargetState.DEFAULT.format(), ColorTargetState.WRITE_ALL))
+				.withColorTargetState(1, new ColorTargetState(Optional.empty(), BloomPass.HDR_FORMAT, ColorTargetState.WRITE_ALL))
+				.withDepthStencilState(Optional.empty())
+				.withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+				.build();
+	}
 
 	private static Target logLuminance;
 	private static Target grid;
@@ -189,7 +199,7 @@ public final class LocalExposure {
 					.withColorAttachment(exposed.view, Optional.empty())
 					.build();
 			try (RenderPass pass = encoder.createRenderPass(descriptor)) {
-				pass.setPipeline(RenderSystem.getCompiledPipeline(APPLY_PIPELINE));
+				pass.setPipeline(RenderSystem.getCompiledPipeline(GBufferDebugView.showsLocalExposure() ? APPLY_DEBUG_PIPELINE : APPLY_PIPELINE));
 				pass.setUniform("Scene", scene, nearest);
 				pass.setUniform("Blurred", blurred.view, linear);
 				pass.setUniform("Grid", filtered.view, linear);
