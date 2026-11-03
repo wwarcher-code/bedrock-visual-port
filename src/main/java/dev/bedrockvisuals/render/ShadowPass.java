@@ -23,9 +23,11 @@ import org.joml.Vector3f;
 import org.lwjgl.system.MemoryStack;
 
 /**
- * Renders Sodium's solid and cutout terrain from the sun (or the moon at night) into a depth map that the
- * lighting pass tests against. One map covers {@link #HALF_EXTENT} blocks around the camera; beyond it the
- * lighting falls back to sky light.
+ * Renders Sodium's solid and cutout terrain from the sun (or the moon at night) into Bedrock's four shadow
+ * cascades, which the lighting pass tests against. Bedrock's PC configuration
+ * (renderer/platform_config/pc/shadow_configuration.pc.json, ultra): 4 cascades of 2048², covering 1/6, 1/3,
+ * 1/2 and all of max_shadow_distance 128 blocks; a point takes the darkest of the cascades it falls in, and
+ * shadows fade out over the last min(range × 0.1, 8) blocks. Beyond that the lighting falls back to sky light.
  *
  * <p>Known limit: Sodium only hands over the chunks the camera can see, so terrain behind the camera or
  * hidden from it doesn't cast shadows into view.
@@ -36,8 +38,17 @@ public final class ShadowPass {
 	 * lighting snaps its lookups to, so where an edge falls within a shadow texel can't move it a whole grid step
 	 * the wrong way when the map turns to follow the sun (at 2048 it could, about a third of the time).
 	 */
-	public static final int RESOLUTION = 4096;
-	public static final float HALF_EXTENT = 96;
+	public static final int RESOLUTION = 2048;
+	public static final int CASCADES = 4;
+	/** max_shadow_distance. */
+	public static final float RANGE = 128;
+	/** Blocks each cascade covers around the camera: 1/6, 1/3, 1/2 and all of the range. */
+	static final float[] HALF_EXTENTS = {RANGE / 6, RANGE / 3, RANGE / 2, RANGE};
+	/**
+	 * Depth bias per cascade, in blocks (TUNE: Bedrock's 0.000275 to 0.003 are in its own depth units): about two
+	 * of the cascade's texels.
+	 */
+	static final float[] BIAS_BLOCKS = {0.1f, 0.15f, 0.2f, 0.3f};
 	public static final float DEPTH_RANGE = 256;
 	/** Below this height above the horizon the light grazes the terrain too flatly to shadow usefully. */
 	private static final float MIN_ELEVATION = 0.03f;
@@ -48,15 +59,15 @@ public final class ShadowPass {
 	/** Reversed depth: 0 is the far side, away from the sun. */
 	private static final double CLEAR_DEPTH = 0.0;
 
-	private static GpuTexture depth;
-	private static GpuTextureView depthView;
+	private static final GpuTexture[] depth = new GpuTexture[CASCADES];
+	private static final GpuTextureView[] depthView = new GpuTextureView[CASCADES];
 	/**
 	 * The pass carries a color attachment beside the depth, matched by the pipeline's color target
 	 * ({@link ShadowTerrainPipelines#UNUSED_COLOR}); nothing is written to it.
 	 */
 	private static GpuTexture unusedColor;
 	private static GpuTextureView unusedColorView;
-	private static GpuBuffer data;
+	private static final GpuBuffer[] data = new GpuBuffer[CASCADES];
 
 	private static boolean active;
 	private static boolean valid;
@@ -64,7 +75,7 @@ public final class ShadowPass {
 	private static boolean disabled;
 	private static boolean reported;
 	private static int terrainDraws;
-	private static final Matrix4f VIEW_PROJECTION = new Matrix4f();
+	private static final Matrix4f[] VIEW_PROJECTION = {new Matrix4f(), new Matrix4f(), new Matrix4f(), new Matrix4f()};
 
 	private ShadowPass() {
 	}
@@ -93,12 +104,17 @@ public final class ShadowPass {
 		return fromMoon;
 	}
 
-	public static Matrix4fc viewProjection() {
-		return VIEW_PROJECTION;
+	public static Matrix4fc viewProjection(int cascade) {
+		return VIEW_PROJECTION[cascade];
 	}
 
-	public static GpuTextureView depthView() {
-		return depthView;
+	public static GpuTextureView depthView(int cascade) {
+		return depthView[cascade];
+	}
+
+	/** Each cascade's depth bias in the map's depth units. */
+	static float bias(int cascade) {
+		return BIAS_BLOCKS[cascade] / (2 * DEPTH_RANGE);
 	}
 
 	public static void render(ChunkSectionsToRender chunks, GpuSampler sampler, GpuTextureView blockAtlas,
@@ -128,8 +144,8 @@ public final class ShadowPass {
 		valid = true;
 		if (!reported) {
 			reported = true;
-			BedrockVisualsClient.LOGGER.info("[shadows] first shadow map drawn: {}x{}, {} blocks around the camera, "
-							+ "{} Sodium terrain draws, {} towards {}", RESOLUTION, RESOLUTION, (int) HALF_EXTENT,
+			BedrockVisualsClient.LOGGER.info("[shadows] first shadows drawn: {} cascades of {}x{} out to {} blocks, "
+							+ "{} Sodium terrain draws, {} towards {}", CASCADES, RESOLUTION, RESOLUTION, (int) RANGE,
 					terrainDraws, moon ? "moon" : "sun", towardsLight);
 		}
 	}
@@ -139,40 +155,45 @@ public final class ShadowPass {
 		ensureResources();
 		terrainDraws = 0;
 		Vec3 camera = Minecraft.getInstance().gameRenderer.mainCamera().position();
-		VIEW_PROJECTION.set(ShadowProjection.build(towardsLight, camera.x, camera.y, camera.z, HALF_EXTENT,
-				DEPTH_RANGE, RESOLUTION));
-
 		CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
-		try (MemoryStack stack = MemoryStack.stackPush()) {
-			encoder.writeToBuffer(data.slice(), Std140Builder.onStack(stack, 64).putMat4f(VIEW_PROJECTION).get());
-		}
-		RenderPassDescriptor descriptor = RenderPassDescriptor.builder(() -> "Bedrock Visuals shadow map")
-				.withColorAttachment(unusedColorView)
-				.withDepthAttachment(depthView, OptionalDouble.of(CLEAR_DEPTH))
-				.build();
-		active = true;
-		try (RenderPass pass = encoder.createRenderPass(descriptor)) {
-			RenderSystem.bindDefaultUniforms(pass);
-			pass.setUniform("ShadowData", data);
-			chunks.renderGroup(ChunkSectionLayerGroup.OPAQUE, pass, sampler, blockAtlas, false);
-		} finally {
-			active = false;
+		for (int c = 0; c < CASCADES; c++) {
+			VIEW_PROJECTION[c].set(ShadowProjection.build(towardsLight, camera.x, camera.y, camera.z, HALF_EXTENTS[c],
+					DEPTH_RANGE, RESOLUTION));
+			try (MemoryStack stack = MemoryStack.stackPush()) {
+				encoder.writeToBuffer(data[c].slice(), Std140Builder.onStack(stack, 64).putMat4f(VIEW_PROJECTION[c]).get());
+			}
+			int cascade = c;
+			RenderPassDescriptor descriptor = RenderPassDescriptor.builder(() -> "Bedrock Visuals shadow cascade " + cascade)
+					.withColorAttachment(unusedColorView)
+					.withDepthAttachment(depthView[c], OptionalDouble.of(CLEAR_DEPTH))
+					.build();
+			active = true;
+			try (RenderPass pass = encoder.createRenderPass(descriptor)) {
+				RenderSystem.bindDefaultUniforms(pass);
+				pass.setUniform("ShadowData", data[c]);
+				chunks.renderGroup(ChunkSectionLayerGroup.OPAQUE, pass, sampler, blockAtlas, false);
+			} finally {
+				active = false;
+			}
 		}
 	}
 
 	private static void ensureResources() {
-		if (depth != null) {
+		if (depth[0] != null) {
 			return;
 		}
 		GpuDevice device = RenderSystem.getDevice();
-		depth = device.createTexture(() -> "Bedrock Visuals shadow map",
-				GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, GpuFormat.D32_FLOAT,
-				RESOLUTION, RESOLUTION, 1, 1);
-		depthView = device.createTextureView(depth);
+		for (int c = 0; c < CASCADES; c++) {
+			int cascade = c;
+			depth[c] = device.createTexture(() -> "Bedrock Visuals shadow cascade " + cascade,
+					GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, GpuFormat.D32_FLOAT,
+					RESOLUTION, RESOLUTION, 1, 1);
+			depthView[c] = device.createTextureView(depth[c]);
+			data[c] = device.createBuffer(() -> "Bedrock Visuals shadow data " + cascade,
+					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, 64);
+		}
 		unusedColor = device.createTexture(() -> "Bedrock Visuals shadow map color (unused)",
 				GpuTexture.USAGE_RENDER_ATTACHMENT, GpuFormat.R8_UNORM, RESOLUTION, RESOLUTION, 1, 1);
 		unusedColorView = device.createTextureView(unusedColor);
-		data = device.createBuffer(() -> "Bedrock Visuals shadow data", GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST,
-				64);
 	}
 }

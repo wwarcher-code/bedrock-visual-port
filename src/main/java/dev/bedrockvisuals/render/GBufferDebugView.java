@@ -21,6 +21,7 @@ public final class GBufferDebugView {
 		MATERIAL("material", GBuffer.Target.MATERIAL),
 		LIGHT("light", GBuffer.Target.LIGHT),
 		SHADOWS("shadows", null),
+		CASCADES("cascades", null),
 		LOCAL_EXPOSURE("local exposure", null);
 
 		public final String label;
@@ -62,7 +63,12 @@ public final class GBufferDebugView {
 
 	/** True when the lighting pass should draw its shadow test instead of lit color. */
 	public static boolean showsShadows() {
-		return showing == View.SHADOWS;
+		return showing == View.SHADOWS || showing == View.CASCADES;
+	}
+
+	/** DebugParams.x for the lighting pass: 0 lit, 1 the shadow test, 2 the shadow test tinted by cascade. */
+	public static int shadowDebugMode() {
+		return showing == View.CASCADES ? 2 : showing == View.SHADOWS ? 1 : 0;
 	}
 
 	/**

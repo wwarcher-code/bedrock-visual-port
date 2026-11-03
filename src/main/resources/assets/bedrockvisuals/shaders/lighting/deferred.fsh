@@ -9,7 +9,10 @@ uniform sampler2D Normal;
 uniform sampler2D Material;
 uniform sampler2D Light;
 uniform sampler2D Depth;
-uniform sampler2D ShadowMap;
+uniform sampler2D ShadowMap0;    // Bedrock's four shadow cascades (ShadowPass.java), nearest first
+uniform sampler2D ShadowMap1;
+uniform sampler2D ShadowMap2;
+uniform sampler2D ShadowMap3;
 uniform sampler2D CloudShadowMap;  // filled cloud cells (CloudShadows.java)
 uniform sampler2D WaterColumnMap; // each column's top water body (WaterColumns.java)
 uniform sampler2D CausticsMap;
@@ -42,8 +45,33 @@ vec3 directLight(vec3 n, vec3 v, vec3 l, vec3 radiance, vec3 diffuseColor, vec3 
     return ((1.0 - fresnel) * diffuseColor / PI + specular) * radiance * nDotL;
 }
 
-// Fraction of a 3x3 texel neighbourhood that sees the light, or -1 outside the map. Depth is reversed in the
-// map too: larger values are nearer the light, so a point is lit when nothing nearer the light was stored.
+// One cascade's test: 1 lit, 0 shadowed, -1 when the point is outside it. Depth is reversed in the maps: larger
+// values are nearer the light, so a point is lit when nothing nearer the light was stored.
+float cascadeTest(sampler2D map, int cascade, vec3 p) {
+    vec4 clip = ShadowViewProjection[cascade] * vec4(p, 1.0);
+    vec2 uv = clip.xy * 0.5 + 0.5;
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) || clip.z <= 0.0 || clip.z >= 1.0) {
+        return -1.0;
+    }
+    // One tap: with the lookup snapped to the texel grid, Bedrock's shadow edges are crisp per texel.
+    return clip.z >= texture(map, uv).r - ShadowCascadeBias[cascade] ? 1.0 : 0.0;
+}
+
+// The nearest cascade a point falls in, or -1 (for the cascade debug view).
+int nearestCascade(vec3 p) {
+    for (int c = 0; c < 4; c++) {
+        vec4 clip = ShadowViewProjection[c] * vec4(p, 1.0);
+        vec2 uv = clip.xy * 0.5 + 0.5;
+        if (all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0))) && clip.z > 0.0 && clip.z < 1.0) {
+            return c;
+        }
+    }
+    return -1;
+}
+
+// Bedrock's cascaded shadow test: the minimum over every cascade the point falls in, or -1 outside them all.
+// edgeFade is 1 inside the range and falls to 0 over its last min(range × 0.1, 8) blocks, where Bedrock fades
+// shadows out.
 float shadowVisibility(vec3 position, vec3 n, vec3 towardsLight, out float edgeFade) {
     edgeFade = 0.0;
     if (ShadowParams.x < 0.5) {
@@ -51,19 +79,20 @@ float shadowVisibility(vec3 position, vec3 n, vec3 towardsLight, out float edgeF
     }
     // Bedrock's normal offset: out along the normal by normal_offset_strength x (1 - N.L) blocks.
     float grazing = clamp(1.0 - dot(n, towardsLight), 0.0, 1.0);
-    vec4 clip = ShadowViewProjection * vec4(position + n * ShadowParams.z * grazing, 1.0);
-    vec2 uv = clip.xy * 0.5 + 0.5;
-    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) || clip.z <= 0.0 || clip.z >= 1.0) {
+    vec3 p = position + n * ShadowParams.z * grazing;
+    float visibility = 2.0;
+    float t;
+    t = cascadeTest(ShadowMap0, 0, p); if (t >= 0.0) visibility = min(visibility, t);
+    t = cascadeTest(ShadowMap1, 1, p); if (t >= 0.0) visibility = min(visibility, t);
+    t = cascadeTest(ShadowMap2, 2, p); if (t >= 0.0) visibility = min(visibility, t);
+    t = cascadeTest(ShadowMap3, 3, p); if (t >= 0.0) visibility = min(visibility, t);
+    if (visibility > 1.5) {
         return -1.0;
     }
-    // Blend towards the sky-light fallback over the outer 5% of the map on each side.
-    vec2 edge = min(uv, 1.0 - uv);
-    edgeFade = smoothstep(0.0, 0.05, min(edge.x, edge.y));
-
-    const float BIAS = 0.0003; // about 0.15 blocks of the map's depth range
-    // One tap: with the lookup snapped to the texel grid, Bedrock's shadow edges are crisp per texel.
-    float stored = texture(ShadowMap, uv).r;
-    return clip.z >= stored - BIAS ? 1.0 : 0.0;
+    const float RANGE = 128.0;
+    float fade = min(RANGE * 0.1, 8.0);
+    edgeFade = 1.0 - smoothstep(RANGE - fade, RANGE, length(position.xz));
+    return visibility;
 }
 
 // How much of the light the clouds let through at this point: the point is projected along the light onto the
@@ -117,12 +146,9 @@ float volumeShadow(vec3 p, vec3 towardsLight) {
     if (ShadowParams.x < 0.5) {
         return 1.0;
     }
-    vec4 clip = ShadowViewProjection * vec4(p, 1.0);
-    vec2 uv = clip.xy * 0.5 + 0.5;
-    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) || clip.z <= 0.0 || clip.z >= 1.0) {
-        return 1.0;
-    }
-    return clip.z >= texture(ShadowMap, uv).r - 0.0003 ? 1.0 : 0.0;
+    // The outer cascade: the fog reaches past the inner ones.
+    float t = cascadeTest(ShadowMap3, 3, p);
+    return t < 0.0 ? 1.0 : t;
 }
 
 // rgb: in-scattered light (this renderer's units, before exposure); transmittance in the out parameter.
@@ -300,7 +326,15 @@ void main() {
     float mapped = shadowVisibility(snapToTexel(position, n), n, moonCasts ? moonDir : sunDir, edgeFade);
     float casterVisibility = mapped < 0.0 ? skyFallback : mix(skyFallback, mapped * skyGuard, edgeFade);
     if (DebugParams.x > 0.5) {
-        fragColor = vec4(mapped < 0.0 ? vec3(1.0, 0.0, 0.0) : vec3(mapped), 1.0);
+        vec3 shown = mapped < 0.0 ? vec3(1.0, 0.0, 0.0) : vec3(mapped);
+        if (DebugParams.x > 1.5) {
+            // The cascade view: the shadow test tinted by the nearest cascade (white, yellow, cyan, magenta).
+            int c = nearestCascade(snapToTexel(position, n));
+            vec3 tint = c == 0 ? vec3(1.0) : c == 1 ? vec3(1.0, 1.0, 0.3) : c == 2 ? vec3(0.3, 1.0, 1.0)
+                    : c == 3 ? vec3(1.0, 0.3, 1.0) : vec3(0.3);
+            shown = (mapped < 0.0 ? 0.5 : 0.35 + 0.65 * mapped) * tint;
+        }
+        fragColor = vec4(shown, 1.0);
         meterLuminance = vec4(0.18, 0.0, 0.0, 1.0);
         hdrColor = vec4(0.0);
         return;

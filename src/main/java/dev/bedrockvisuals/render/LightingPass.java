@@ -34,7 +34,7 @@ import org.lwjgl.system.MemoryStack;
  */
 public final class LightingPass {
 	/** std140 size of the LightingData block (include/common.glsl): three mat4s and seventeen vec4s. */
-	private static final int DATA_SIZE = 3 * 64 + 18 * 16;
+	private static final int DATA_SIZE = 6 * 64 + 19 * 16;
 	/**
 	 * Bedrock's shadow normal offset (shadow_configuration.pc.json normal_offset_strength): lookups move out along
 	 * the normal by this many blocks times (1 - N·L).
@@ -47,7 +47,10 @@ public final class LightingPass {
 			.withUniform("Material", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("Light", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("Depth", UniformType.COMBINED_IMAGE_SAMPLER)
-			.withUniform("ShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("ShadowMap0", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("ShadowMap1", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("ShadowMap2", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("ShadowMap3", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("CloudShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("CausticsMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("WaterColumnMap", UniformType.COMBINED_IMAGE_SAMPLER)
@@ -105,10 +108,13 @@ public final class LightingPass {
 			putVec4(builder, light.sky(), 0);
 			putVec4(builder, light.ambient(), 0);
 			putVec4(builder, light.blockLight(), 0);
-			builder.putMat4f(ShadowPass.viewProjection())
-					.putVec4(ShadowPass.isValid() ? 1 : 0, 1f / ShadowPass.RESOLUTION, NORMAL_OFFSET_STRENGTH,
+			for (int c = 0; c < ShadowPass.CASCADES; c++) {
+				builder.putMat4f(ShadowPass.viewProjection(c));
+			}
+			builder.putVec4(ShadowPass.isValid() ? 1 : 0, 1f / ShadowPass.RESOLUTION, NORMAL_OFFSET_STRENGTH,
 							ShadowPass.fromMoon() ? 1 : 0)
-					.putVec4(GBufferDebugView.showsShadows() ? 1 : 0, LightingState.METER_SKY_SCALE,
+					.putVec4(ShadowPass.bias(0), ShadowPass.bias(1), ShadowPass.bias(2), ShadowPass.bias(3))
+					.putVec4(GBufferDebugView.shadowDebugMode(), LightingState.METER_SKY_SCALE,
 							BrdfLut.view() != null ? 1 : 0, GBufferDebugView.showsLocalExposure() ? 1 : 0);
 			putVec4(builder, light.skyHorizon(), 0);
 			// Modulo 16 keeps float precision far from the origin and still lines up with the 1/16 texel grid.
@@ -144,8 +150,10 @@ public final class LightingPass {
 			pass.setUniform("Light", gbuffer.view(GBuffer.Target.LIGHT), nearest);
 			pass.setUniform("Depth", gbuffer.depthView(), nearest);
 			// Without a map this frame the shader ignores the binding, but every declared sampler must be bound.
-			pass.setUniform("ShadowMap", ShadowPass.depthView() != null ? ShadowPass.depthView() : gbuffer.depthView(),
-					nearest);
+			for (int c = 0; c < ShadowPass.CASCADES; c++) {
+				pass.setUniform("ShadowMap" + c,
+						ShadowPass.depthView(c) != null ? ShadowPass.depthView(c) : gbuffer.depthView(), nearest);
+			}
 			// Without cloud cells yet the shader skips the lookup (strength 0), but the sampler must be bound.
 			pass.setUniform("CloudShadowMap", CloudShadows.view() != null ? CloudShadows.view() : gbuffer.depthView(),
 					RenderSystem.getSamplerCache().getRepeat(FilterMode.NEAREST));
