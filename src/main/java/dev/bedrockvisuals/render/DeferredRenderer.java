@@ -69,6 +69,10 @@ public final class DeferredRenderer {
 		ownsDistantComposite = ownsDistant;
 		Underwater.update();
 		WaterColumns.update();
+		// Placeholders and buffers the water and cloud passes bind are created here, outside any render pass
+		// (uploads can't happen while one is open).
+		CloudShadows.viewOrEmpty();
+		LocalExposure.ensureData();
 		WaterPass.prepare(blockAtlas, main, false);
 		LightingState light = enabled && !lightingFailed ? LightingState.current() : null;
 		if (light != null) {

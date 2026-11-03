@@ -223,7 +223,7 @@ public final class LocalExposure {
 	/** std140 size of LocalExposureData: four vec4s. */
 	private static final int DATA_SIZE = 64;
 
-	private static void ensureData() {
+	static void ensureData() {
 		if (data == null) {
 			data = RenderSystem.getDevice().createBuffer(() -> "Bedrock Visuals local exposure data",
 					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, DATA_SIZE);

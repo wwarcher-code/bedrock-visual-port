@@ -160,6 +160,9 @@ public final class LightingPass {
 		}
 
 		GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
+		// Resolved before the pass opens: a placeholder may need creating and uploading, which can't happen
+		// while a render pass is open.
+		GpuTextureView coverage = CloudShadows.coverageOrEmpty();
 		RenderPassDescriptor descriptor = RenderPassDescriptor.builder(() -> "Bedrock Visuals deferred lighting")
 				.withColorAttachment(main.getColorTextureView(), Optional.empty())
 				.withColorAttachment(LuminanceMeter.target(main.width, main.height), Optional.of(new Vector4f(0)))
@@ -199,7 +202,7 @@ public final class LightingPass {
 					RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
 			pass.setUniform("DistantDepth", frame != null ? frame.depth() : gbuffer.depthView(), nearest);
 			pass.setUniform("DistantData", distant);
-			pass.setUniform("CloudCoverage", CloudShadows.coverageOrEmpty(),
+			pass.setUniform("CloudCoverage", coverage,
 					RenderSystem.getSamplerCache().getRepeat(FilterMode.LINEAR, true));
 			pass.draw(3, 1, 0, 0);
 		}
