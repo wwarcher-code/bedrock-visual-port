@@ -28,6 +28,11 @@ public interface DistantTerrainSource {
 		return false;
 	}
 
+	/** How far the source draws terrain, in blocks; 0 when unknown. */
+	default int renderDistanceBlocks() {
+		return 0;
+	}
+
 	/**
 	 * Hides (or restores) the source's own clouds for this session, without changing its saved settings:
 	 * this renderer lights Minecraft's clouds as Bedrock does, and the source's clouds would be drawn unlit

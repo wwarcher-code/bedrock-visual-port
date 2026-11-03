@@ -21,6 +21,6 @@ abstract class CloudRendererPrepareMixin {
 			long gameTime, float partialTick, CallbackInfo ci) {
 		CloudRenderer.TextureData data = texture;
 		CloudShadows.prepare(data == null ? null : data.cells(), data == null ? 0 : data.width(),
-				data == null ? 0 : data.height(), status, cloudHeight, camera, gameTime, partialTick);
+				data == null ? 0 : data.height(), status, cloudHeight, range, camera, gameTime, partialTick);
 	}
 }

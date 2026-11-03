@@ -34,7 +34,7 @@ import org.lwjgl.system.MemoryStack;
  */
 public final class LightingPass {
 	/** std140 size of the LightingData block (include/common.glsl): three mat4s and seventeen vec4s. */
-	private static final int DATA_SIZE = 6 * 64 + 19 * 16;
+	private static final int DATA_SIZE = 6 * 64 + 20 * 16;
 	/**
 	 * Bedrock's shadow normal offset (shadow_configuration.pc.json normal_offset_strength): lookups move out along
 	 * the normal by this many blocks times (1 - N·L).

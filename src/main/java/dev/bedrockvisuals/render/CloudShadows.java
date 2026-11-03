@@ -46,7 +46,8 @@ public final class CloudShadows {
 	 * drifted to, as Java's cloud renderer works it out.
 	 */
 	public static void prepare(long[] cells, int cellsWide, int cellsHigh, CloudStatus status, float cloudHeight,
-			Vec3 camera, long gameTime, float partialTick) {
+			int rangeChunks, Vec3 camera, long gameTime, float partialTick) {
+		meshRange = rangeChunks * 16f;
 		visible = status != CloudStatus.OFF && cells != null;
 		if (!visible) {
 			return;
@@ -65,6 +66,19 @@ public final class CloudShadows {
 	}
 
 	private static double cameraY;
+	/** Java's cloud range in blocks: its mesh covers ceil(range / 12) cells around the camera's cell. */
+	private static float meshRange;
+
+	/**
+	 * Bedrock's cloud distance (DistanceControl.x, 1152 at 24 chunks in the captures): 3 × the render
+	 * distance. With Distant Horizons (or another far renderer) the terrain reaches further, so the clouds
+	 * reach at least as far as it does.
+	 */
+	static float farDistance() {
+		float bedrock = 3f * net.minecraft.client.Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f;
+		int distant = dev.bedrockvisuals.lod.DistantTerrain.source().map(s -> s.renderDistanceBlocks()).orElse(0);
+		return Math.max(bedrock, distant);
+	}
 
 	private static double floorMod(double value, double span) {
 		return value - Math.floor(value / span) * span;
@@ -131,13 +145,16 @@ public final class CloudShadows {
 	 * Two vec4s for LightingData: the camera's position in the cloud field (x, z, in blocks), the middle of the
 	 * cloud layer relative to the camera, and the shadow strength (0 when off); then the field's size in
 	 * cells, the cell size, and 1 when the cell texture is there (the clouds use it whether or not shadows are
-	 * on).
+	 * on); then the far clouds' parameters.
 	 */
 	static void write(Std140Builder builder, boolean enabled) {
 		boolean on = enabled && visible && view != null;
 		builder.putVec4((float) fieldX, (float) fieldZ, (float) (baseHeight + CLOUD_THICKNESS / 2 - cameraY),
 				on ? CONTRIBUTION : 0f);
 		builder.putVec4(width, height, CELL_BLOCKS, visible && view != null ? 1 : 0);
+		// Far clouds (the lighting pass traces the field beyond Java's mesh): Java's cloud range, the far
+		// distance, and 1 when on.
+		builder.putVec4(meshRange, farDistance(), 0, enabled && visible && view != null && meshRange > 0 ? 1 : 0);
 	}
 
 	public static String status() {

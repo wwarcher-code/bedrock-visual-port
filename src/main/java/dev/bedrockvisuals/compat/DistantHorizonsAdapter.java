@@ -141,6 +141,16 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 
 	/** Uses DH's API override, which sits on top of the player's own setting and isn't saved. */
 	@Override
+	public int renderDistanceBlocks() {
+		try {
+			Integer chunks = DhApi.Delayed.configs.graphics().chunkRenderDistance().getValue();
+			return chunks == null ? 0 : chunks * 16;
+		} catch (RuntimeException e) {
+			return 0;
+		}
+	}
+
+	@Override
 	public void hideOwnClouds(boolean hide) {
 		try {
 			var clouds = DhApi.Delayed.configs.graphics().genericRendering().cloudRenderingEnabled();
