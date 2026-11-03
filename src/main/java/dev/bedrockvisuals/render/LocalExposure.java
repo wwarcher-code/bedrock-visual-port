@@ -10,8 +10,6 @@ import com.mojang.renderpearl.api.commands.RenderPass;
 import com.mojang.renderpearl.api.commands.RenderPassDescriptor;
 import com.mojang.renderpearl.api.device.GpuDevice;
 import com.mojang.renderpearl.api.pipeline.BindGroupLayout;
-import com.mojang.renderpearl.api.pipeline.BlendFactor;
-import com.mojang.renderpearl.api.pipeline.BlendFunction;
 import com.mojang.renderpearl.api.pipeline.ColorTargetState;
 import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
 import com.mojang.renderpearl.api.pipeline.RenderPipeline;
@@ -61,6 +59,7 @@ public final class LocalExposure {
 			.build();
 	private static final BindGroupLayout APPLY = BindGroupLayout.builder()
 			.withUniform("Scene", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("Main", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("Blurred", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("Grid", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
@@ -74,28 +73,25 @@ public final class LocalExposure {
 	private static final RenderPipeline BUILD = pipeline("build", SOURCE, GRID_FORMAT);
 	private static final RenderPipeline FILTER = pipeline("filter", SOURCE, GRID_FORMAT);
 	private static final RenderPipeline BLUR = pipeline("blur", SOURCE, LOG_FORMAT);
-	/** The main image is multiplied by the change (DST_COLOR, ZERO); the exposed HDR scene is written as is. */
-	private static final RenderPipeline APPLY_PIPELINE = applyPipeline("apply", true);
 	/**
-	 * The debug view's variant, with no blending: it writes mid-grey times its debug colours itself, so the
-	 * view shows whether the draw lands at all, apart from the multiply.
+	 * Writes the main image times the change, read from a copy of it, and the exposed HDR scene. Not a multiply
+	 * blend (DST_COLOR, ZERO): in game that left the image untouched, while the same draw without blending
+	 * landed.
 	 */
-	private static final RenderPipeline APPLY_DEBUG_PIPELINE = applyPipeline("apply_debug", false);
+	private static final RenderPipeline APPLY_PIPELINE = RenderPipeline.builder()
+			.withLocation(Identifier.fromNamespaceAndPath("bedrockvisuals", "pipeline/local_exposure_apply"))
+			.withVertexShader(Identifier.withDefaultNamespace("core/screenquad"))
+			.withFragmentShader(Identifier.fromNamespaceAndPath("bedrockvisuals", "exposure/apply"))
+			.withBindGroupLayout(APPLY)
+			.withColorTargetState(0, new ColorTargetState(Optional.empty(), ColorTargetState.DEFAULT.format(),
+					ColorTargetState.WRITE_ALL))
+			.withColorTargetState(1, new ColorTargetState(Optional.empty(), BloomPass.HDR_FORMAT, ColorTargetState.WRITE_ALL))
+			.withDepthStencilState(Optional.empty())
+			.withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+			.build();
 
-	private static RenderPipeline applyPipeline(String name, boolean multiply) {
-		return RenderPipeline.builder()
-				.withLocation(Identifier.fromNamespaceAndPath("bedrockvisuals", "pipeline/local_exposure_" + name))
-				.withVertexShader(Identifier.withDefaultNamespace("core/screenquad"))
-				.withFragmentShader(Identifier.fromNamespaceAndPath("bedrockvisuals", "exposure/apply"))
-				.withBindGroupLayout(APPLY)
-				.withColorTargetState(0, new ColorTargetState(
-						multiply ? Optional.of(new BlendFunction(BlendFactor.DST_COLOR, BlendFactor.ZERO)) : Optional.empty(),
-						ColorTargetState.DEFAULT.format(), ColorTargetState.WRITE_ALL))
-				.withColorTargetState(1, new ColorTargetState(Optional.empty(), BloomPass.HDR_FORMAT, ColorTargetState.WRITE_ALL))
-				.withDepthStencilState(Optional.empty())
-				.withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
-				.build();
-	}
+	/** The main image as the lighting pass left it (with Java's sun, moon and stars under the sky). */
+	private static Target mainCopy;
 
 	private static Target logLuminance;
 	private static Target grid;
@@ -139,11 +135,14 @@ public final class LocalExposure {
 		return Math.max(1, Math.max(1, height / 4) / CELL_PIXELS);
 	}
 
-	private static void resize(int w, int h) {
-		if (logLuminance != null && w == width && h == height) {
+	private static GpuFormat mainFormat;
+
+	private static void resize(int w, int h, GpuFormat format) {
+		if (logLuminance != null && w == width && h == height && format == mainFormat) {
 			return;
 		}
 		close();
+		mainFormat = format;
 		width = w;
 		height = h;
 		int quarterW = Math.max(1, w / 4);
@@ -153,6 +152,10 @@ public final class LocalExposure {
 		grid = target("grid", GRID_FORMAT, gridWidth() * SLICES, gridHeight());
 		filtered = target("filtered grid", GRID_FORMAT, gridWidth() * SLICES, gridHeight());
 		exposed = target("exposed scene", BloomPass.HDR_FORMAT, w, h);
+		GpuDevice device = RenderSystem.getDevice();
+		GpuTexture copy = device.createTexture(() -> "Bedrock Visuals local exposure main copy",
+				GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, mainFormat, w, h, 1, 1);
+		mainCopy = new Target(copy, device.createTextureView(copy));
 	}
 
 	private static Target target(String label, GpuFormat format, int w, int h) {
@@ -173,7 +176,7 @@ public final class LocalExposure {
 			return scene;
 		}
 		try {
-			resize(main.width, main.height);
+			resize(main.width, main.height, main.getColorTexture().getFormat());
 			CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
 			if (data == null) {
 				data = RenderSystem.getDevice().createBuffer(() -> "Bedrock Visuals local exposure data",
@@ -194,12 +197,14 @@ public final class LocalExposure {
 			draw(encoder, "grid", grid.view, BUILD, pass -> pass.setUniform("Source", logLuminance.view, nearest));
 			draw(encoder, "grid filter", filtered.view, FILTER, pass -> pass.setUniform("Source", grid.view, nearest));
 			draw(encoder, "blur", blurred.view, BLUR, pass -> pass.setUniform("Source", logLuminance.view, linear));
+			encoder.copyTextureToTexture(main.getColorTexture(), mainCopy.texture, 0, 0, 0, 0, 0, main.width, main.height);
 			RenderPassDescriptor descriptor = RenderPassDescriptor.builder(() -> "Bedrock Visuals local exposure")
 					.withColorAttachment(main.getColorTextureView(), Optional.empty())
 					.withColorAttachment(exposed.view, Optional.empty())
 					.build();
 			try (RenderPass pass = encoder.createRenderPass(descriptor)) {
-				pass.setPipeline(RenderSystem.getCompiledPipeline(GBufferDebugView.showsLocalExposure() ? APPLY_DEBUG_PIPELINE : APPLY_PIPELINE));
+				pass.setPipeline(RenderSystem.getCompiledPipeline(APPLY_PIPELINE));
+				pass.setUniform("Main", mainCopy.view, nearest);
 				pass.setUniform("Scene", scene, nearest);
 				pass.setUniform("Blurred", blurred.view, linear);
 				pass.setUniform("Grid", filtered.view, linear);
@@ -240,7 +245,7 @@ public final class LocalExposure {
 	}
 
 	private static void close() {
-		for (Target target : new Target[] {logLuminance, blurred, grid, filtered, exposed}) {
+		for (Target target : new Target[] {logLuminance, blurred, grid, filtered, exposed, mainCopy}) {
 			if (target != null) {
 				target.close();
 			}

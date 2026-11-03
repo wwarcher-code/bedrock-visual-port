@@ -7,18 +7,19 @@
 //   scene × 2^((A - L) + y (L - base) + x (base - A))
 // With Bedrock's (x, y, z) = (0.75, 1, 0.4) that keeps detail and pulls each region's level a quarter of the
 // way towards the average. The main image already holds the tone-mapped scene (plus Java's sun, moon and
-// stars), so it's multiplied by how much the tone-mapped result changes; the locally exposed HDR scene goes on
-// to the bloom.
+// stars), so a copy of it is multiplied by how much the tone-mapped result changes and written back; the
+// locally exposed HDR scene goes on to the bloom.
 
 #include <bedrockvisuals:common.glsl>
 #include <bedrockvisuals:local_exposure.glsl>
 
 uniform sampler2D Scene;  // the lighting pass's HDR colour
+uniform sampler2D Main;   // a copy of the main image
 uniform sampler2D Blurred;
 uniform sampler2D Grid;   // the filtered grid: slices side by side
 
 layout(location = 0) in vec2 texCoord;
-layout(location = 0) out vec4 ratio;
+layout(location = 0) out vec4 fragColor;
 layout(location = 1) out vec4 exposed;
 
 vec2 gridAt(vec2 uv, int slice) {
@@ -27,13 +28,22 @@ vec2 gridAt(vec2 uv, int slice) {
     return texture(Grid, vec2((float(slice) * grid.x + cell.x) / (grid.x * GridDimensions.z), cell.y / grid.y)).rg;
 }
 
+vec4 localExposureRatio(vec4 scene, out vec4 exposed);
+
 void main() {
     vec4 scene = texture(Scene, texCoord);
+    vec4 image = texture(Main, texCoord);
+    vec4 ratio = localExposureRatio(scene, exposed);
+    fragColor = vec4(image.rgb * ratio.rgb, image.a);
+}
+
+vec4 localExposureRatio(vec4 scene, out vec4 exposed) {
+    vec4 ratio;
     if (scene.a <= 0.0) {
         // Not drawn by the lighting pass. (Debug view: red 0, green 1, blue 0 times the grey.)
-        ratio = DebugParams.w > 0.5 ? vec4(0.0, 0.5, 0.0, 1.0) : vec4(1.0);
+        ratio = DebugParams.w > 0.5 ? vec4(0.0, 1.0, 0.0, 1.0) : vec4(1.0);
         exposed = scene;
-        return;
+        return ratio;
     }
     float l = logLuminance(scene.rgb);
     float d = texture(Blurred, texCoord).r;
@@ -55,8 +65,9 @@ void main() {
     vec3 after = toDisplay(color);
     ratio = vec4(mix(vec3(1.0), clamp(after / max(before, vec3(1e-4)), 0.0, 16.0), step(vec3(1e-4), before)), 1.0);
     if (DebugParams.w > 0.5) {
-        // The debug view, written without blending: mid-grey times red 2 (this branch), green the factor
+        // The debug view: the lighting pass drew mid-grey; times red 2 (this branch), green the factor
         // (capped at 2), blue 2 where the grid has data there.
-        ratio = vec4(1.0, 0.5 * clamp(exp2(change), 0.0, 2.0), g.x >= 0.001 ? 1.0 : 0.0, 1.0);
+        ratio = vec4(2.0, clamp(exp2(change), 0.0, 2.0), g.x >= 0.001 ? 2.0 : 0.0, 1.0);
     }
+    return ratio;
 }
