@@ -216,7 +216,23 @@ public final class CloudShadows {
 		builder.putVec4(width, height, CELL_BLOCKS, visible && view != null ? 1 : 0);
 		// Far clouds (the lighting pass traces the field beyond Java's mesh): Java's cloud range, the far
 		// distance, and 1 when on.
-		builder.putVec4(meshRange, farDistance(), 0, enabled && visible && view != null && meshRange > 0 ? 1 : 0);
+		builder.putVec4(meshRange, farDistance(), handover(), enabled && visible && view != null && meshRange > 0 ? 1 : 0);
+	}
+
+	/**
+	 * Where Java's cloud mesh hands over to the far clouds, horizontally, in blocks: the edge of the mesh, or
+	 * nearer, where the layer is seen so edge-on that a cell is under about half a pixel tall and the
+	 * rasterized mesh would alias. Seen from h blocks below or above the layer at distance x, a cell spans
+	 * x² × pixel angle / (12 h) cells per pixel; half a cell per pixel is at x = √(6 h / pixel angle).
+	 */
+	static float handover() {
+		var minecraft = net.minecraft.client.Minecraft.getInstance();
+		float edge = (float) ((Math.ceil(meshRange / CELL_BLOCKS) - 1.5) * CELL_BLOCKS);
+		double fov = Math.toRadians(minecraft.options.fov().get());
+		double pixel = 2 * Math.tan(fov / 2) / Math.max(1, minecraft.getWindow().getHeight());
+		double h = Math.max(Math.abs(baseHeight + CLOUD_THICKNESS / 2 - cameraY), CLOUD_THICKNESS);
+		float aliasing = (float) Math.sqrt(6 * h / pixel);
+		return Math.max(CELL_BLOCKS, Math.min(edge, aliasing));
 	}
 
 	/** The far clouds, for diagnostics. */
@@ -225,9 +241,9 @@ public final class CloudShadows {
 			return "off (no Java clouds)";
 		}
 		float range = meshRange;
-		return String.format(java.util.Locale.ROOT, "traced beyond Java's mesh (cloud range %.0f blocks) to %.0f blocks"
-				+ " (Bedrock's 3 x render distance, or Distant Horizons' if further), into the sky by %.0f", range,
-				farDistance(), 1.9f * farDistance());
+		return String.format(java.util.Locale.ROOT, "traced beyond Java's mesh (cloud range %.0f blocks, handing over"
+				+ " at %.0f) to %.0f blocks (Bedrock's 3 x render distance, or Distant Horizons' if further), into the"
+				+ " sky by %.0f", range, handover(), farDistance(), 1.9f * farDistance());
 	}
 
 	public static String status() {

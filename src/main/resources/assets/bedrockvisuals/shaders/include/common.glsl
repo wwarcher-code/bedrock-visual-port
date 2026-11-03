@@ -24,7 +24,8 @@ layout(std140) uniform LightingData {
     vec4 CloudShadowField;      // xy: the camera's position in the cloud field (blocks), z: cloud layer middle above
                                 // the camera, w: cloud shadow strength (0 = off) (CloudShadows.java)
     vec4 CloudShadowSize;       // xy: the field's size in cells, z: cell size in blocks, w: 1 when the cells are there
-    vec4 FarClouds;             // x: Java's cloud range in blocks, y: Bedrock's cloud distance, w: far clouds on
+    vec4 FarClouds;             // x: Java's cloud range in blocks, y: Bedrock's cloud distance, z: where the mesh hands
+                                // over to the far clouds (horizontal blocks), w: far clouds on
     vec4 UnderwaterParams;      // x: camera under water, y: caustics frame (-1 = off), z: caustics scale, w: power
     vec4 UnderwaterMedium;      // rgb: water extinction per block, w: water surface height above the camera
     vec4 UnderwaterScattering;  // rgb: water scattering per block, w: water phase g

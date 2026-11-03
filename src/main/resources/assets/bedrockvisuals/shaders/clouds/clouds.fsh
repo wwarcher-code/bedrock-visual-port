@@ -91,9 +91,13 @@ vec4 cloudColor() {
 // inside that circle is always covered, wherever the camera sits in its cell; past it, cells appear and vanish
 // as the clouds drift, which flickers unless they're already faded out.
 float meshEdge() {
-    // Java's cloud range as CloudRenderer.prepare gets it (FarClouds.x), so the lighting pass's far clouds fade
-    // in exactly where these fade out; FogCloudsEnd before it's known.
-    float range = FarClouds.x > 0.0 ? FarClouds.x : FogCloudsEnd;
+    // The handover to the lighting pass's far clouds (CloudShadows.handover: the mesh's edge, or nearer where
+    // its cells would be under half a pixel tall), so those fade in exactly where these fade out; Java's
+    // cloud range (FogCloudsEnd) before it's known.
+    if (FarClouds.z > 0.0) {
+        return FarClouds.z;
+    }
+    float range = FogCloudsEnd;
     float cells = ceil(max(range, 1.0) / CellSize.x);
     return max((cells - 1.5) * CellSize.x, CellSize.x);
 }

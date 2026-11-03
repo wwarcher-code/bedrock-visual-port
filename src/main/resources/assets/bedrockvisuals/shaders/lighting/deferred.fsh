@@ -274,6 +274,9 @@ float causticsMultiplier(vec3 position, vec3 n) {
 // closer than about 1.5 cells inside that is always covered (clouds/clouds.fsh fades the mesh out over the last
 // quarter of that radius).
 float cloudMeshEdge() {
+    if (FarClouds.z > 0.0) {
+        return FarClouds.z; // the handover (CloudShadows.handover)
+    }
     float cells = ceil(max(FarClouds.x, 1.0) / CLOUD_CELL);
     return max((cells - 1.5) * CLOUD_CELL, CLOUD_CELL);
 }
@@ -401,8 +404,9 @@ vec4 farClouds(vec3 dir, float maxDistance, float footprint) {
         return vec4(0.0);
     }
     r.origin = vec3(CloudShadowField.x, -bottom, CloudShadowField.y);
-    // Cells one pixel spans where the ray reaches the layer.
-    float cellsPerPixel = r.start * footprint / CLOUD_CELL;
+    // Cells one pixel spans where the ray reaches the layer, along its slant: seen edge-on, a pixel stretches
+    // across the layer by 1 / sin(elevation).
+    float cellsPerPixel = r.start * footprint / (CLOUD_CELL * max(abs(dir.y), 0.02));
     float blend = smoothstep(0.35, 0.7, cellsPerPixel);
     vec4 traced = blend < 1.0 ? farCloudsTraced(dir, r) : vec4(0.0);
     vec4 filtered = blend > 0.0 ? farCloudsFiltered(dir, r, cellsPerPixel) : vec4(0.0);
