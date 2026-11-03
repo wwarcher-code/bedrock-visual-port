@@ -115,7 +115,7 @@ public final class LightingPass {
 							ShadowPass.fromMoon() ? 1 : 0)
 					.putVec4(ShadowPass.bias(0), ShadowPass.bias(1), ShadowPass.bias(2), ShadowPass.bias(3))
 					.putVec4(GBufferDebugView.shadowDebugMode(), LightingState.METER_SKY_SCALE,
-							BrdfLut.view() != null ? 1 : 0, GBufferDebugView.showsLocalExposure() ? 1 : 0);
+							BrdfLut.view() != null ? 1 : 0, GBufferDebugView.postDebugMode());
 			putVec4(builder, light.skyHorizon(), 0);
 			// Modulo 16 keeps float precision far from the origin and still lines up with the 1/16 texel grid.
 			Vec3 camera = Minecraft.getInstance().gameRenderer.mainCamera().position();

@@ -22,7 +22,8 @@ public final class GBufferDebugView {
 		LIGHT("light", GBuffer.Target.LIGHT),
 		SHADOWS("shadows", null),
 		CASCADES("cascades", null),
-		LOCAL_EXPOSURE("local exposure", null);
+		LOCAL_EXPOSURE("local exposure", null),
+		BLOOM("bloom", null);
 
 		public final String label;
 		final GBuffer.Target target;
@@ -78,6 +79,11 @@ public final class GBufferDebugView {
 	 */
 	public static boolean showsLocalExposure() {
 		return showing == View.LOCAL_EXPOSURE;
+	}
+
+	/** DebugParams.w for the lighting data: 1 shows local exposure's factor, 2 only the bloom. */
+	public static int postDebugMode() {
+		return showing == View.LOCAL_EXPOSURE ? 1 : showing == View.BLOOM ? 2 : 0;
 	}
 
 	/** Called after Minecraft's main pass. */

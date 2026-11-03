@@ -2,11 +2,13 @@
 #extension GL_ARB_separate_shader_objects : require
 
 // Bedrock's BloomBlend: the last upsample added to the HDR scene as + intensity × bloom, before exposure and
-// tone mapping. The main image already holds the tone-mapped scene, so this adds the difference bloom makes
-// after the same exposure, grading and tone map (additive blend).
+// tone mapping. The main image already holds the tone-mapped scene, so this writes a copy of it plus the
+// difference bloom makes after the same exposure, grading and tone map. The bloom debug view shows only that
+// difference, 20 times over, on black.
 
 uniform sampler2D Source;  // the bloom, half resolution
-uniform sampler2D Scene;   // the lighting pass's HDR colour
+uniform sampler2D Scene;   // the HDR scene after local exposure
+uniform sampler2D Main;    // a copy of the main image
 
 #include <bedrockvisuals:common.glsl>
 
@@ -28,14 +30,17 @@ vec4 upsample(sampler2D source, vec2 uv) {
 }
 
 void main() {
+    vec4 image = texture(Main, texCoord);
+    bool debug = abs(DebugParams.w - 2.0) < 0.5;
     vec4 scene = texture(Scene, texCoord);
     if (scene.a <= 0.0) {
         // Not drawn by the lighting pass (Java's own sky): leave it.
-        fragColor = vec4(0.0);
+        fragColor = debug ? vec4(0.0, 0.0, 0.0, 1.0) : image;
         return;
     }
     vec3 bloom = upsample(Source, texCoord).rgb * BloomParams.x;
     vec3 with = toDisplay(scene.rgb + bloom);
     vec3 without = toDisplay(scene.rgb);
-    fragColor = vec4(max(with - without, 0.0), 0.0);
+    vec3 added = max(with - without, 0.0);
+    fragColor = debug ? vec4(min(added * 20.0, 1.0), 1.0) : vec4(image.rgb + added, image.a);
 }

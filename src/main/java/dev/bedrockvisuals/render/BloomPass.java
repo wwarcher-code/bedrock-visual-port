@@ -10,7 +10,6 @@ import com.mojang.renderpearl.api.commands.RenderPass;
 import com.mojang.renderpearl.api.commands.RenderPassDescriptor;
 import com.mojang.renderpearl.api.device.GpuDevice;
 import com.mojang.renderpearl.api.pipeline.BindGroupLayout;
-import com.mojang.renderpearl.api.pipeline.BlendFactor;
 import com.mojang.renderpearl.api.pipeline.BlendFunction;
 import com.mojang.renderpearl.api.pipeline.ColorTargetState;
 import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
@@ -50,6 +49,7 @@ public final class BloomPass {
 	private static final BindGroupLayout BLEND_INPUTS = BindGroupLayout.builder()
 			.withUniform("Source", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("Scene", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("Main", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("BloomData", UniformType.UNIFORM_BUFFER)
@@ -58,8 +58,22 @@ public final class BloomPass {
 	private static final RenderPipeline THRESHOLD_PIPELINE = pipeline("threshold", THRESHOLD_INPUTS, Optional.empty());
 	private static final RenderPipeline DOWN_PIPELINE = pipeline("down", SOURCE, Optional.empty());
 	private static final RenderPipeline UP_PIPELINE = pipeline("up", SOURCE, Optional.empty());
-	private static final RenderPipeline BLEND_PIPELINE = pipeline("blend", BLEND_INPUTS,
-			Optional.of(new BlendFunction(BlendFactor.ONE, BlendFactor.ONE)));
+	/**
+	 * Writes the main image plus the bloom, read from a copy of the image: an additive blend onto the main image
+	 * may be lost the way local exposure's multiply blend was (LocalExposure).
+	 */
+	private static final RenderPipeline BLEND_PIPELINE = RenderPipeline.builder()
+			.withLocation(Identifier.fromNamespaceAndPath("bedrockvisuals", "pipeline/bloom_blend"))
+			.withVertexShader(Identifier.withDefaultNamespace("core/screenquad"))
+			.withFragmentShader(Identifier.fromNamespaceAndPath("bedrockvisuals", "bloom/blend"))
+			.withBindGroupLayout(BLEND_INPUTS)
+			.withColorTargetState(0, new ColorTargetState(Optional.empty(), ColorTargetState.DEFAULT.format(),
+					ColorTargetState.WRITE_ALL))
+			.withDepthStencilState(Optional.empty())
+			.withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+			.build();
+	private static GpuTexture mainCopy;
+	private static GpuTextureView mainCopyView;
 
 	private static GpuTexture hdr;
 	private static GpuTextureView hdrView;
@@ -167,12 +181,24 @@ public final class BloomPass {
 				previous = upViews[i];
 			}
 			GpuTextureView bloom = upViews[0];
+			if (mainCopy == null || mainCopy.getWidth(0) != main.width || mainCopy.getHeight(0) != main.height) {
+				if (mainCopy != null) {
+					mainCopyView.close();
+					mainCopy.close();
+				}
+				mainCopy = RenderSystem.getDevice().createTexture(() -> "Bedrock Visuals bloom main copy",
+						GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, main.getColorTexture().getFormat(),
+						main.width, main.height, 1, 1);
+				mainCopyView = RenderSystem.getDevice().createTextureView(mainCopy);
+			}
+			encoder.copyTextureToTexture(main.getColorTexture(), mainCopy, 0, 0, 0, 0, 0, main.width, main.height);
 			RenderPassDescriptor descriptor = RenderPassDescriptor.builder(() -> "Bedrock Visuals bloom blend")
 					.withColorAttachment(main.getColorTextureView(), Optional.empty())
 					.build();
 			try (RenderPass pass = encoder.createRenderPass(descriptor)) {
 				pass.setPipeline(RenderSystem.getCompiledPipeline(BLEND_PIPELINE));
 				pass.setUniform("Source", bloom, linear);
+				pass.setUniform("Main", mainCopyView, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
 				pass.setUniform("Scene", scene, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
 				pass.setUniform("LightingData", LightingPass.lightingData());
 				pass.setUniform("GradingData", LightingPass.gradingData());
