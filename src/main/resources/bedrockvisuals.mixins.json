@@ -8,6 +8,7 @@
 		"minecraft.CloudRendererMixin",
 		"minecraft.CloudRendererPrepareMixin",
 		"minecraft.LevelRendererMixin",
+		"minecraft.LightmapMixin",
 		"minecraft.SkyRendererMixin",
 		"sodium.DefaultChunkRendererMixin"
 	],

@@ -418,12 +418,13 @@ pass lights DH's terrain wherever vanilla terrain doesn't cover the pixel:
 - position from DH's depth through its own projection, along this view's ray;
 - normal rebuilt from the neighbouring depths;
 - DH's colour standing in for albedo (level 1: DH gives no normals or materials), with a rough dielectric
-  material and full sky light.
+  material and full sky light. DH multiplies its colour by Minecraft's lightmap. The lightmap's value at
+  full sky light (core/lightmap.fsh, computed from the frame's LightmapRenderState) is divided back out, so
+  night doesn't darken it twice. DH's per-face shading, noise texture and ambient occlusion are switched
+  off for the session through its API.
 
 The distance fog then sits at DH's render distance (from 0.75 of it, as Bedrock's sits at 0.75 of its own),
 when DH's vanilla fog toggle is off. Limits:
-- DH's colour already carries its lightmap, which darkens at night, so DH terrain is darker than it should
-  be at night.
 - Minecraft's depth buffer doesn't hold DH's terrain, so Java's cloud mesh draws over nearer DH terrain
   (mountains within the cloud range).
 

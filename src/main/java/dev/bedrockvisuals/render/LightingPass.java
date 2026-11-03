@@ -90,7 +90,7 @@ public final class LightingPass {
 	private static GpuBuffer atmosphere;
 	/** DistantData (lighting/deferred.fsh): Distant Horizons' inverse projection and flags. */
 	private static GpuBuffer distant;
-	private static final int DISTANT_SIZE = 64 + 16;
+	private static final int DISTANT_SIZE = 64 + 32;
 
 	private LightingPass() {
 	}
@@ -153,6 +153,8 @@ public final class LightingPass {
 			} else {
 				distantBuilder.putMat4f(new Matrix4f()).putVec4(0, 0, 0, 0);
 			}
+			Vector3f lightmap = WorldLightmap.fullSky();
+			distantBuilder.putVec4(lightmap.x, lightmap.y, lightmap.z, 0);
 			encoder.writeToBuffer(distant.slice(), distantBuilder.get());
 			Std140Builder atmosphereBuilder = Std140Builder.onStack(stack, SkyAtmosphere.DATA_SIZE);
 			SkyAtmosphere.write(atmosphereBuilder, light.atmosphere());

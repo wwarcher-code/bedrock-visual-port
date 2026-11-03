@@ -27,6 +27,7 @@ uniform sampler2D PreviousScene;   // the previous frame's HDR scene (BloomPass.
 layout(std140) uniform DistantData {
     mat4 DistantInverseProjection; // Distant Horizons' clip space to its view space
     vec4 DistantParams;            // x: its terrain is lit here, y: reversed depth, z: [0, 1] clip depth
+    vec4 DistantLightmap;          // rgb: Minecraft's lightmap at full sky light, which DH multiplied in
 };
 
 #define CLOUD_CELLS CloudShadowMap
@@ -501,7 +502,9 @@ void main() {
         // Distant Horizons' colour is its own lit terrain colour; it stands in for the albedo (level 1: no
         // normals or materials from it), with a rough dielectric material and full sky light.
         position = ray * distant;
-        albedo = toLinear(texture(DistantColor, texCoord).rgb);
+        // DH multiplied its colour by Minecraft's lightmap (darker at night); divided back out here.
+        vec3 lodColor = texture(DistantColor, texCoord).rgb / max(DistantLightmap.rgb, vec3(0.05));
+        albedo = toLinear(clamp(lodColor, 0.0, 1.0));
         n = distantNormal(texCoord, position);
         mers = vec4(0.0, 0.0, 1.0, 0.0);
         levels = vec2(8.0, 248.0) / 256.0;

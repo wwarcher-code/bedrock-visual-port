@@ -6,6 +6,7 @@ import com.seibel.distanthorizons.api.interfaces.config.client.IDhApiFogConfig;
 import com.seibel.distanthorizons.api.interfaces.config.client.IDhApiGraphicsConfig;
 import com.seibel.distanthorizons.api.enums.config.EDhApiDepthDirection;
 import com.seibel.distanthorizons.api.enums.config.EDhApiDepthRange;
+import com.seibel.distanthorizons.api.enums.config.EDhApiLodShading;
 import com.seibel.distanthorizons.api.enums.config.EDhApiRenderingEngine;
 import com.seibel.distanthorizons.api.interfaces.render.IDhApiBlazeTextureWrapper;
 import com.seibel.distanthorizons.api.interfaces.render.IDhApiRenderProxy;
@@ -75,7 +76,39 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 
 	@Override
 	public void setRendererOwnsComposite(boolean owns) {
+		if (owns && !plainColoursSet) {
+			// Once a session, not on every switch: some of these make DH rebuild its LOD data, and test
+			// captures switch the lighting off and on many times. DH's own drawing (lighting off) keeps them
+			// off too.
+			plainColoursSet = true;
+			plainColours(true);
+		}
 		rendererOwnsComposite = owns;
+	}
+
+	/**
+	 * While this renderer lights DH's terrain, DH's colour stands in for albedo, so the effects DH bakes into
+	 * it are switched off for the session (API overrides, leaving its saved settings alone): its per-face
+	 * shading, its noise texture and its ambient occlusion. The lighting adds Bedrock's own.
+	 */
+	private volatile boolean plainColoursSet;
+
+	private static void plainColours(boolean plain) {
+		try {
+			var graphics = DhApi.Delayed.configs.graphics();
+			if (plain) {
+				graphics.lodShading().setValue(EDhApiLodShading.DISABLED);
+				graphics.noiseTexture().noiseEnabled().setValue(false);
+				graphics.ambientOcclusion().enabled().setValue(false);
+			} else {
+				graphics.lodShading().clearValue();
+				graphics.noiseTexture().noiseEnabled().clearValue();
+				graphics.ambientOcclusion().enabled().clearValue();
+			}
+		} catch (RuntimeException e) {
+			BedrockVisualsClient.LOGGER.warn("[distant] couldn't {} Distant Horizons' shading, noise and occlusion",
+					plain ? "turn off" : "restore", e);
+		}
 	}
 
 	private void captureFrame(DhApiRenderParam param) {
