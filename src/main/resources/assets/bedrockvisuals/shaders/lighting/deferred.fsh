@@ -17,10 +17,18 @@ uniform sampler2D CloudShadowMap;  // filled cloud cells (CloudShadows.java)
 uniform sampler2D WaterColumnMap; // each column's top water body (WaterColumns.java)
 uniform sampler2D CausticsMap;     // Bedrock's renderer/caustics.png: frames of 32x32 stacked vertically
 uniform sampler2D BrdfLut;         // Bedrock's renderer/brdf_lut.png (BrdfLut.java)
+uniform sampler2D CloudCoverage;   // the cloud cells' share per area, mipmapped (CloudShadows.java)
+uniform sampler2D DistantColor;    // Distant Horizons' colour and depth this frame (DistantTerrain)
+uniform sampler2D DistantDepth;
 uniform sampler2D PreviousScene;   // the previous frame's HDR scene (BloomPass.java), for reflections
 
 #include <bedrockvisuals:common.glsl>
 #include <bedrockvisuals:sky.glsl>
+layout(std140) uniform DistantData {
+    mat4 DistantInverseProjection; // Distant Horizons' clip space to its view space
+    vec4 DistantParams;            // x: its terrain is lit here, y: reversed depth, z: [0, 1] clip depth
+};
+
 #define CLOUD_CELLS CloudShadowMap
 #define CLOUD_BRDF BrdfLut
 #include <bedrockvisuals:cloud_lighting.glsl>
@@ -271,73 +279,54 @@ float cloudMeshEdge() {
 
 // Bedrock's clouds beyond Java's mesh: the view ray is traced through the cloud field (the same cells Java's
 // mesh is built from, as they drift) out to where Bedrock's cloud fog, saturate(distance / DistanceControl.x
-// - 0.9), has blended them into the sky. They fade in exactly where the mesh fades out. The first filled cell
-// the ray meets is lit like the mesh's faces (cloud_lighting.glsl). rgb: colour (this renderer's units),
-// a: coverage; nothing past maxDistance.
+// - 0.9), has blended them into the sky. They fade in exactly where the mesh fades out, and are lit like the
+// mesh's faces (cloud_lighting.glsl). Near, the first filled cell the ray meets is found exactly; far, where
+// a pixel spans many cells (one hit per pixel would sparkle), the share of cloud along the ray's path through
+// the layer is read from the filtered coverage instead. rgb: colour (this renderer's units), a: coverage;
+// nothing past maxDistance. footprint: the angle one pixel spans.
 const int FAR_CLOUD_STEPS = 64;
 
-vec4 farClouds(vec3 dir, float maxDistance) {
-    if (FarClouds.w < 0.5 || AtmosphereZenith.w < 0.5) {
-        return vec4(0.0);
-    }
-    float bottom = CloudShadowField.z - CLOUD_HEIGHT * 0.5; // the layer's bottom, relative to the camera
-    float top = bottom + CLOUD_HEIGHT;
-    float horizontal = length(dir.xz);
-    if (horizontal < 1e-4) {
-        return vec4(0.0); // straight up or down: Java's mesh covers it
-    }
-    float enter;
-    float leave;
-    if (abs(dir.y) < 1e-5) {
-        if (bottom > 0.0 || top < 0.0) {
-            return vec4(0.0);
-        }
-        enter = 0.0;
-        leave = 1e9;
-    } else {
-        float a = bottom / dir.y;
-        float b = top / dir.y;
-        enter = max(min(a, b), 0.0);
-        leave = max(a, b);
-    }
-    float edge = cloudMeshEdge();
-    float inner = 0.75 * edge;
-    float far = max(FarClouds.y, 1.0);
-    // Past 1.9 × the cloud distance Bedrock's fog has made them all sky.
-    float start = max(enter, inner / horizontal);
-    float end = min(min(leave, maxDistance), 1.9 * far / horizontal);
-    if (start >= end) {
-        return vec4(0.0);
-    }
-    // March the cell grid along the ray, in the field (x, z in blocks; y from the layer's bottom).
-    vec3 origin = vec3(CloudShadowField.x, -bottom, CloudShadowField.y);
-    vec3 p = origin + dir * start;
+struct FarCloudRay {
+    vec3 origin;  // the camera in the field (x, z in blocks; y from the layer's bottom)
+    float start;  // where the far clouds begin along the ray
+    float end;    // and end (the layer, maxDistance, or where the fog has made them sky)
+    float leave;  // where the ray leaves the layer
+    float edge;   // the mesh's edge, horizontally
+    float far;    // Bedrock's cloud distance
+    float horizontal;
+};
+
+vec3 farCloudShade(vec3 dir, vec3 n, float t, float viewPath, float lightPath, float far) {
+    vec3 color = cloudLight(dir, n, viewPath, lightPath);
+    float fog = clamp(t / far - 0.9, 0.0, 1.0);
+    return mix(color, bedrockSkyRadiance(dir, normalize(SunDirection.xyz), normalize(MoonDirection.xyz))
+            * AtmosphereHorizon.w, fog);
+}
+
+vec4 farCloudsTraced(vec3 dir, FarCloudRay r) {
+    vec3 p = r.origin + dir * r.start;
     ivec2 cell = ivec2(floor(p.xz / CLOUD_CELL));
     vec2 d = dir.xz;
     ivec2 stepDir = ivec2(sign(d));
     vec2 safe = vec2(abs(d.x) > 1e-6 ? d.x : 1e-6, abs(d.y) > 1e-6 ? d.y : 1e-6);
     vec2 tDelta = abs(vec2(CLOUD_CELL) / safe);
-    vec2 tNext = start + ((vec2(cell) + step(0.0, d)) * CLOUD_CELL - p.xz) / safe;
+    vec2 tNext = r.start + ((vec2(cell) + step(0.0, d)) * CLOUD_CELL - p.xz) / safe;
     tNext = mix(vec2(1e9), tNext, greaterThan(abs(d), vec2(1e-6)));
-    float t = start;
+    float t = r.start;
     // The face the ray enters by: the layer's top or bottom at first, then the side of the last cell edge.
     vec3 n = vec3(0.0, dir.y > 0.0 ? -1.0 : 1.0, 0.0);
+    bool moonLights = ShadowParams.w > 0.5;
+    vec3 l = normalize(moonLights ? MoonDirection.xyz : SunDirection.xyz);
     for (int i = 0; i < FAR_CLOUD_STEPS; i++) {
-        if (t >= end) {
+        if (t >= r.end) {
             return vec4(0.0);
         }
         if (cellFilled(cell)) {
-            vec3 hit = origin + dir * t;
+            vec3 hit = r.origin + dir * t;
             float viewPath = cloudPath(hit + dir * 0.01, dir);
-            bool moonLights = ShadowParams.w > 0.5;
-            vec3 l = normalize(moonLights ? MoonDirection.xyz : SunDirection.xyz);
             float lightPath = cloudPath(hit + dir * (viewPath * 0.5 + 0.01), l);
-            vec3 color = cloudLight(dir, n, viewPath, lightPath);
-            float fog = clamp(t / far - 0.9, 0.0, 1.0);
-            color = mix(color, bedrockSkyRadiance(dir, normalize(SunDirection.xyz), normalize(MoonDirection.xyz))
-                    * AtmosphereHorizon.w, fog);
-            float fadeIn = smoothstep(inner, edge, t * horizontal);
-            return vec4(color, CLOUD_OPACITY * fadeIn);
+            float fadeIn = smoothstep(0.75 * r.edge, r.edge, t * r.horizontal);
+            return vec4(farCloudShade(dir, n, t, viewPath, lightPath, r.far), CLOUD_OPACITY * fadeIn);
         }
         if (tNext.x < tNext.y) {
             t = tNext.x;
@@ -354,16 +343,126 @@ vec4 farClouds(vec3 dir, float maxDistance) {
     return vec4(0.0);
 }
 
+vec4 farCloudsFiltered(vec3 dir, FarCloudRay r, float cellsPerPixel) {
+    // The ray's path through the layer, as far as the far clouds go, and the cloud's share around its middle
+    // at the pixel's footprint. A path crossing several cells meets cloud more often than one point does.
+    float through = max(min(r.leave, r.end) - r.start, 0.0);
+    float t = r.start + 0.5 * through;
+    vec2 size = CloudShadowSize.xy;
+    vec3 p = r.origin + dir * t;
+    float lod = log2(max(cellsPerPixel, 1.0));
+    float share = textureLod(CloudCoverage, p.xz / (CLOUD_CELL * size), lod).r;
+    float cellsCrossed = through * r.horizontal / CLOUD_CELL;
+    float hit = 1.0 - pow(1.0 - clamp(share, 0.0, 0.999), 1.0 + cellsCrossed);
+    if (hit <= 0.0) {
+        return vec4(0.0);
+    }
+    bool moonLights = ShadowParams.w > 0.5;
+    vec3 l = normalize(moonLights ? MoonDirection.xyz : SunDirection.xyz);
+    vec3 n = vec3(0.0, dir.y > 0.0 ? -1.0 : 1.0, 0.0);
+    // Typical paths inside a cloud: along the view through the layer, the light through its height.
+    float viewPath = min(through, MAX_PATH);
+    float lightPath = min(CLOUD_HEIGHT * 0.5 / max(abs(l.y), 0.05), MAX_PATH);
+    float fadeIn = smoothstep(0.75 * r.edge, r.edge, r.start * r.horizontal);
+    return vec4(farCloudShade(dir, n, t, viewPath, lightPath, r.far), CLOUD_OPACITY * hit * fadeIn);
+}
+
+vec4 farClouds(vec3 dir, float maxDistance, float footprint) {
+    if (FarClouds.w < 0.5 || AtmosphereZenith.w < 0.5) {
+        return vec4(0.0);
+    }
+    float bottom = CloudShadowField.z - CLOUD_HEIGHT * 0.5; // the layer's bottom, relative to the camera
+    float top = bottom + CLOUD_HEIGHT;
+    FarCloudRay r;
+    r.horizontal = length(dir.xz);
+    if (r.horizontal < 1e-4) {
+        return vec4(0.0); // straight up or down: Java's mesh covers it
+    }
+    float enter;
+    if (abs(dir.y) < 1e-5) {
+        if (bottom > 0.0 || top < 0.0) {
+            return vec4(0.0);
+        }
+        enter = 0.0;
+        r.leave = 1e9;
+    } else {
+        float a = bottom / dir.y;
+        float b = top / dir.y;
+        enter = max(min(a, b), 0.0);
+        r.leave = max(a, b);
+    }
+    r.edge = cloudMeshEdge();
+    r.far = max(FarClouds.y, 1.0);
+    // Past 1.9 × the cloud distance Bedrock's fog has made them all sky.
+    r.start = max(enter, 0.75 * r.edge / r.horizontal);
+    r.end = min(min(r.leave, maxDistance), 1.9 * r.far / r.horizontal);
+    if (r.start >= r.end) {
+        return vec4(0.0);
+    }
+    r.origin = vec3(CloudShadowField.x, -bottom, CloudShadowField.y);
+    // Cells one pixel spans where the ray reaches the layer.
+    float cellsPerPixel = r.start * footprint / CLOUD_CELL;
+    float blend = smoothstep(0.35, 0.7, cellsPerPixel);
+    vec4 traced = blend < 1.0 ? farCloudsTraced(dir, r) : vec4(0.0);
+    vec4 filtered = blend > 0.0 ? farCloudsFiltered(dir, r, cellsPerPixel) : vec4(0.0);
+    float a = mix(traced.a, filtered.a, blend);
+    vec3 rgb = mix(traced.rgb * traced.a, filtered.rgb * filtered.a, blend) / max(a, 1e-5);
+    return vec4(rgb, a);
+}
+
+// The view direction through a screen position, from two points along its ray, not from the camera to the
+// near plane: view bobbing moves the camera by about as much as the near plane's distance, which tipped every
+// sky direction up and down while walking (and the horizon's colours with it).
+vec3 viewRay(vec2 uv) {
+    vec4 near = InverseViewProjection * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+    vec4 far = InverseViewProjection * vec4(uv * 2.0 - 1.0, 0.001, 1.0);
+    return normalize(far.xyz / far.w - near.xyz / near.w);
+}
+
+// Distance to Distant Horizons' terrain at a screen position, from its own depth and projection; negative
+// where it drew none.
+float distantDistance(vec2 uv) {
+    float d = texture(DistantDepth, uv).r;
+    bool cleared = DistantParams.y > 0.5 ? d <= 0.0 : d >= 1.0;
+    if (cleared) {
+        return -1.0;
+    }
+    float z = DistantParams.z > 0.5 ? d : d * 2.0 - 1.0;
+    vec4 view = DistantInverseProjection * vec4(uv * 2.0 - 1.0, z, 1.0);
+    return length(view.xyz / view.w);
+}
+
+// Distant Horizons' terrain carries only colour and depth: the normal is rebuilt from the depth of the
+// neighbouring pixels (the nearer one on each side, so edges don't bend it), facing the camera.
+vec3 distantNormal(vec2 uv, vec3 position) {
+    vec2 texel = 1.0 / vec2(textureSize(DistantDepth, 0));
+    vec3 neighbours[4];
+    vec2 offsets[4] = vec2[](vec2(texel.x, 0.0), vec2(-texel.x, 0.0), vec2(0.0, texel.y), vec2(0.0, -texel.y));
+    for (int i = 0; i < 4; i++) {
+        float d = distantDistance(uv + offsets[i]);
+        neighbours[i] = d < 0.0 ? position : viewRay(uv + offsets[i]) * d;
+    }
+    vec3 dx = length(neighbours[0] - position) < length(neighbours[1] - position)
+            ? neighbours[0] - position : position - neighbours[1];
+    vec3 dy = length(neighbours[2] - position) < length(neighbours[3] - position)
+            ? neighbours[2] - position : position - neighbours[3];
+    vec3 n = normalize(cross(dx, dy));
+    if (any(isnan(n)) || dot(n, n) < 0.5) {
+        n = vec3(0.0, 1.0, 0.0);
+    }
+    return dot(n, position) > 0.0 ? -n : n;
+}
+
 void main() {
     float depth = texture(Depth, texCoord).r;
-    if (depth <= 0.0) {
+    vec3 ray = viewRay(texCoord);
+    // The angle one pixel spans, for the far clouds (taken here, where every pixel runs it).
+    float footprint = 0.5 * (length(dFdx(ray)) + length(dFdy(ray)));
+    // Distant Horizons' terrain, where vanilla terrain doesn't cover the pixel: lit here like the rest, so it
+    // matches the near terrain instead of carrying its own lighting and fog.
+    float distant = depth <= 0.0 && DistantParams.x > 0.5 ? distantDistance(texCoord) : -1.0;
+    if (depth <= 0.0 && distant < 0.0) {
         // No terrain (reversed depth: 0 is the cleared far plane): sky.
-        // The view direction from two points along the pixel's ray, not from the camera to the near plane:
-        // view bobbing moves the camera by about as much as the near plane's distance, which tipped every
-        // sky direction up and down while walking (and the horizon's colours with it).
-        vec4 near = InverseViewProjection * vec4(texCoord * 2.0 - 1.0, 1.0, 1.0);
-        vec4 far = InverseViewProjection * vec4(texCoord * 2.0 - 1.0, 0.001, 1.0);
-        vec3 ray = normalize(far.xyz / far.w - near.xyz / near.w);
         if (AtmosphereZenith.w > 0.5) {
             // Bedrock's sky, exposed like everything else. Java's sky gradient was skipped and its sun, moon
             // and stars drawn over black (SkyRendererMixin), so the sky adds onto them: alpha 0 under the
@@ -371,7 +470,7 @@ void main() {
             vec3 sky = bedrockSkyRadiance(ray, normalize(SunDirection.xyz), normalize(MoonDirection.xyz))
                     * AtmosphereHorizon.w;
             // Clouds beyond Java's cloud mesh, in front of the sky (and of Java's sun, moon and stars).
-            vec4 clouds = farClouds(ray, 1e9);
+            vec4 clouds = farClouds(ray, 1e9, footprint);
             sky = mix(sky, clouds.rgb, clouds.a);
             // Volumetric fog in front of the sky, out to its far plane (under water, through the water above).
             vec3 fogTransmittance;
@@ -393,17 +492,33 @@ void main() {
         return;
     }
 
-    vec3 albedo = toLinear(texture(Albedo, texCoord).rgb);
-    vec3 n = normalize(texture(Normal, texCoord).rgb * 2.0 - 1.0);
-    vec4 mers = texture(Material, texCoord);
-    vec2 levels = texture(Light, texCoord).rg;
+    vec3 albedo;
+    vec3 n;
+    vec4 mers;
+    vec2 levels;
+    vec3 position;
+    if (distant >= 0.0) {
+        // Distant Horizons' colour is its own lit terrain colour; it stands in for the albedo (level 1: no
+        // normals or materials from it), with a rough dielectric material and full sky light.
+        position = ray * distant;
+        albedo = toLinear(texture(DistantColor, texCoord).rgb);
+        n = distantNormal(texCoord, position);
+        mers = vec4(0.0, 0.0, 1.0, 0.0);
+        levels = vec2(8.0, 248.0) / 256.0;
+    } else {
+        albedo = toLinear(texture(Albedo, texCoord).rgb);
+        n = normalize(texture(Normal, texCoord).rgb * 2.0 - 1.0);
+        mers = texture(Material, texCoord);
+        levels = texture(Light, texCoord).rg;
+        vec4 world = InverseViewProjection * vec4(texCoord * 2.0 - 1.0, depth, 1.0);
+        position = world.xyz / world.w;
+    }
 
     float metalness = mers.r;
     float emissive = mers.g;
     float roughness = clamp(mers.b, 0.05, 1.0);
 
-    vec4 world = InverseViewProjection * vec4(texCoord * 2.0 - 1.0, depth, 1.0);
-    vec3 v = normalize(-world.xyz / world.w); // the camera is at the origin
+    vec3 v = normalize(-position); // the camera is at the origin
 
     // Minecraft's light coordinates are (level * 16 + 8) / 256; map back to 0..1.
     vec2 light = clamp((levels * 256.0 - 8.0) / 240.0, 0.0, 1.0);
@@ -418,7 +533,6 @@ void main() {
     // Bedrock's sky light heuristic: no sun or moon at all where there's no sky light.
     float skyGuard = skyLight > 0.0 ? 1.0 : 0.0;
 
-    vec3 position = world.xyz / world.w;
     vec3 sunDir = normalize(SunDirection.xyz);
     vec3 moonDir = normalize(MoonDirection.xyz);
     bool moonCasts = ShadowParams.w > 0.5;
@@ -502,10 +616,13 @@ void main() {
     if (fog > 0.0) {
         color = mix(color, bedrockSkyRadiance(normalize(position), sunDir, moonDir) * AtmosphereHorizon.w, fog);
     }
+    // Far clouds in front of the terrain (Distant Horizons' reaches past Java's cloud mesh).
+    vec4 clouds = farClouds(ray, length(position), footprint);
+    color = mix(color, clouds.rgb, clouds.a);
 
-    vec3 viewRay = normalize(position);
+    vec3 viewDir = normalize(position);
     vec3 fogTransmittance;
-    vec3 fogLight = volumetricFog(viewRay, length(position), fogTransmittance);
+    vec3 fogLight = volumetricFog(viewDir, length(position), fogTransmittance);
     // Under water, the march's water medium is Bedrock's WaterExtinction along the view, up to the surface.
     color = color * fogTransmittance + fogLight;
 

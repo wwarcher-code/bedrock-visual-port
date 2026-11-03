@@ -106,9 +106,71 @@ public final class CloudShadows {
 			MemoryUtil.memFree(data);
 		}
 		view = device.createTextureView(texture);
+		uploadCoverage(device, cells, cellsWide, cellsHigh);
 		width = cellsWide;
 		height = cellsHigh;
 		uploadedCells = cells;
+	}
+
+	private static GpuTexture coverage;
+	private static GpuTextureView coverageView;
+
+	/**
+	 * The filled cells again, with a box-filtered mip chain: each level holds the share of cloud over 2^level
+	 * cells, which the far clouds read where a pixel spans several cells, instead of one cell per pixel
+	 * (which sparkles).
+	 */
+	private static void uploadCoverage(GpuDevice device, long[] cells, int cellsWide, int cellsHigh) {
+		if (coverageView != null) {
+			coverageView.close();
+			coverage.close();
+		}
+		int levels = 1;
+		while ((cellsWide >> levels) > 0 && (cellsHigh >> levels) > 0) {
+			levels++;
+		}
+		coverage = device.createTexture(() -> "Bedrock Visuals cloud coverage",
+				GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA8_UNORM, cellsWide, cellsHigh, 1,
+				levels);
+		float[] level = new float[cellsWide * cellsHigh];
+		for (int i = 0; i < level.length; i++) {
+			level[i] = cells[i] != 0L ? 1f : 0f;
+		}
+		int w = cellsWide;
+		int h = cellsHigh;
+		for (int mip = 0; mip < levels; mip++) {
+			ByteBuffer data = MemoryUtil.memAlloc(w * h * 4);
+			try {
+				for (float value : level) {
+					byte b = (byte) Math.round(value * 255f);
+					data.put(b).put(b).put(b).put((byte) 255);
+				}
+				data.flip();
+				device.createCommandEncoder().writeToTexture(coverage, data, mip, 0, 0, 0, w, h);
+			} finally {
+				MemoryUtil.memFree(data);
+			}
+			if (mip + 1 < levels) {
+				int nw = Math.max(1, w / 2);
+				int nh = Math.max(1, h / 2);
+				float[] next = new float[nw * nh];
+				for (int y = 0; y < nh; y++) {
+					for (int x = 0; x < nw; x++) {
+						next[x + y * nw] = (level[2 * x + 2 * y * w] + level[2 * x + 1 + 2 * y * w]
+								+ level[2 * x + (2 * y + 1) * w] + level[2 * x + 1 + (2 * y + 1) * w]) * 0.25f;
+					}
+				}
+				level = next;
+				w = nw;
+				h = nh;
+			}
+		}
+		coverageView = device.createTextureView(coverage);
+	}
+
+	/** The filtered coverage, or a placeholder before Java's clouds have loaded. */
+	static GpuTextureView coverageOrEmpty() {
+		return coverageView != null ? coverageView : viewOrEmpty();
 	}
 
 	private static GpuTextureView empty;

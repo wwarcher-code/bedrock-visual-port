@@ -1,5 +1,6 @@
 package dev.bedrockvisuals.render;
 
+import dev.bedrockvisuals.lod.DistantTerrain;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -60,6 +61,12 @@ public final class DeferredRenderer {
 		replacedTerrain = false;
 		replacedSky = false;
 		frames++;
+		// While this renderer lights Distant Horizons' terrain, DH's own composite (its lit colour and fog onto
+		// the frame) is cancelled; with lighting off (F8) DH draws itself again. DH draws before this, so the
+		// change takes effect from the next frame.
+		boolean ownsDistant = enabled && !lightingFailed;
+		DistantTerrain.source().ifPresent(source -> source.setRendererOwnsComposite(ownsDistant));
+		ownsDistantComposite = ownsDistant;
 		Underwater.update();
 		WaterColumns.update();
 		WaterPass.prepare(blockAtlas, main, false);
@@ -119,6 +126,13 @@ public final class DeferredRenderer {
 		framesLit = 0;
 		framesWithoutTerrain = 0;
 		return summary;
+	}
+
+	private static boolean ownsDistantComposite;
+
+	/** Whether this frame's Distant Horizons terrain is lit by the lighting pass rather than drawn by DH. */
+	static boolean ownsDistantComposite() {
+		return ownsDistantComposite;
 	}
 
 	public static boolean isEnabled() {

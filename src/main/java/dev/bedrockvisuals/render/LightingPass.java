@@ -21,6 +21,9 @@ import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.phys.Vec3;
+import dev.bedrockvisuals.lod.DistantTerrain;
+import dev.bedrockvisuals.lod.DistantTerrainFrame;
+import dev.bedrockvisuals.lod.DistantTerrainSource;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
 import org.joml.Vector3f;
@@ -55,6 +58,10 @@ public final class LightingPass {
 			.withUniform("CausticsMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("WaterColumnMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("BrdfLut", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("CloudCoverage", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("DistantColor", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("DistantDepth", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("DistantData", UniformType.UNIFORM_BUFFER)
 			.withUniform("PreviousScene", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
@@ -81,6 +88,9 @@ public final class LightingPass {
 	private static GpuBuffer data;
 	private static GpuBuffer grading;
 	private static GpuBuffer atmosphere;
+	/** DistantData (lighting/deferred.fsh): Distant Horizons' inverse projection and flags. */
+	private static GpuBuffer distant;
+	private static final int DISTANT_SIZE = 64 + 16;
 
 	private LightingPass() {
 	}
@@ -95,7 +105,12 @@ public final class LightingPass {
 					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, ColorGrading.DATA_SIZE);
 			atmosphere = RenderSystem.getDevice().createBuffer(() -> "Bedrock Visuals atmosphere data",
 					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, SkyAtmosphere.DATA_SIZE);
+			distant = RenderSystem.getDevice().createBuffer(() -> "Bedrock Visuals distant terrain data",
+					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, DISTANT_SIZE);
 		}
+		// Distant Horizons' terrain this frame, lit here where vanilla terrain doesn't cover the pixel.
+		DistantTerrainFrame frame = DistantTerrain.source().filter(s -> DeferredRenderer.ownsDistantComposite())
+				.flatMap(DistantTerrainSource::latestFrame).orElse(null);
 		CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
 		Matrix4f inverseViewProjection = new Matrix4f(projection).mul(modelView).invert();
 		try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -131,6 +146,14 @@ public final class LightingPass {
 			Std140Builder gradingBuilder = Std140Builder.onStack(stack, ColorGrading.DATA_SIZE);
 			ColorGrading.write(gradingBuilder, ColorGrading.current());
 			encoder.writeToBuffer(grading.slice(), gradingBuilder.get());
+			Std140Builder distantBuilder = Std140Builder.onStack(stack, DISTANT_SIZE);
+			if (frame != null) {
+				distantBuilder.putMat4f(new Matrix4f(frame.projection()).invert())
+						.putVec4(1, frame.reversedZ() ? 1 : 0, frame.zeroToOneDepth() ? 1 : 0, 0);
+			} else {
+				distantBuilder.putMat4f(new Matrix4f()).putVec4(0, 0, 0, 0);
+			}
+			encoder.writeToBuffer(distant.slice(), distantBuilder.get());
 			Std140Builder atmosphereBuilder = Std140Builder.onStack(stack, SkyAtmosphere.DATA_SIZE);
 			SkyAtmosphere.write(atmosphereBuilder, light.atmosphere());
 			encoder.writeToBuffer(atmosphere.slice(), atmosphereBuilder.get());
@@ -172,6 +195,12 @@ public final class LightingPass {
 			pass.setUniform("LightingData", data);
 			pass.setUniform("GradingData", grading);
 			pass.setUniform("AtmosphereData", atmosphere);
+			pass.setUniform("DistantColor", frame != null ? frame.color() : gbuffer.depthView(),
+					RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+			pass.setUniform("DistantDepth", frame != null ? frame.depth() : gbuffer.depthView(), nearest);
+			pass.setUniform("DistantData", distant);
+			pass.setUniform("CloudCoverage", CloudShadows.coverageOrEmpty(),
+					RenderSystem.getSamplerCache().getRepeat(FilterMode.LINEAR, true));
 			pass.draw(3, 1, 0, 0);
 		}
 		LuminanceMeter.measure();

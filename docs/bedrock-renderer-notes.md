@@ -404,8 +404,28 @@ the terrain reaches far past Java's cloud range. Beyond Java's mesh, the lightin
 through the same drifting cloud field (up to 64 cells), out to the larger of 3× the render distance and
 Distant Horizons' render distance. It lights the first filled cell with the same lighting
 (`cloud_lighting.glsl`) and blends it into the sky by Bedrock's fog. It fades in exactly where the mesh fades
-out. Far clouds are only traced over sky pixels: they don't yet know Distant Horizons' terrain depth, so a far
-mountain above the horizon could show a cloud that should be behind it.
+out. They're traced over the sky and in front of terrain (Distant Horizons' too, up to its depth). Near, the
+first filled cell the ray meets is found exactly. Where a pixel spans more than about half a cell, the share
+of cloud along the ray's path through the layer is read from a box-filtered mip chain of the cells instead,
+so the distance doesn't sparkle.
+
+## Distant Horizons
+
+Bedrock lights everything out to its fog with the same model. Distant Horizons draws its LODs into its own
+colour and depth textures, then composites them onto the frame with its own lighting (Minecraft's lightmap)
+and fog. While this renderer is on, it cancels that composite and fog (DH's API events), and the lighting
+pass lights DH's terrain wherever vanilla terrain doesn't cover the pixel:
+- position from DH's depth through its own projection, along this view's ray;
+- normal rebuilt from the neighbouring depths;
+- DH's colour standing in for albedo (level 1: DH gives no normals or materials), with a rough dielectric
+  material and full sky light.
+
+The distance fog then sits at DH's render distance (from 0.75 of it, as Bedrock's sits at 0.75 of its own),
+when DH's vanilla fog toggle is off. Limits:
+- DH's colour already carries its lightmap, which darkens at night, so DH terrain is darker than it should
+  be at night.
+- Minecraft's depth buffer doesn't hold DH's terrain, so Java's cloud mesh draws over nearer DH terrain
+  (mountains within the cloud range).
 
 Water and clouds are drawn after local exposure, so their shaders apply its factor to their own colour (the
 grid, blur and parameters are bound to them). Bloom's blend onto the main image, like local exposure's, is
