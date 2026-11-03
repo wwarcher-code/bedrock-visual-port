@@ -455,7 +455,12 @@ Runtime sizes, from a capture at 1920×1009:
 
 The renderer matches those sizes. It gathers the grid in fragment passes from a quarter-resolution log
 luminance rather than with atomics, and blurs the logs of those pixels rather than the logs of each colour
-tap. Java draws the water
+tap. It writes the result back from a copy of the main image: a multiply blend (DST_COLOR, ZERO)
+onto the main image left it untouched in game, though the same draw unblended landed.
+
+With local exposure applied and no fitted key, the test scene's grass matches Bedrock's screenshots within a
+few levels at every time: noon (134,180,90) against (137,173,90), afternoon (113,150,75) against
+(126,153,74), low sun (78,103,50) against (79,98,49), midnight (50,62,20) against (55,62,22). Java draws the water
 and clouds after this pass, so they aren't locally exposed yet.
 
 ## Shadow sampling (verified in the deferred direct-lighting shader)
