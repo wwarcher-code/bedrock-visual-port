@@ -129,7 +129,8 @@ final class DiagnosticsReport {
 		Path log = gameDirectory.resolve("logs").resolve("latest.log");
 		try {
 			List<String> lines = Files.readAllLines(log, StandardCharsets.UTF_8).stream()
-					.filter(l -> l.contains("(bedrockvisuals)")
+					.filter(l -> l.contains("(bedrockvisuals)") || l.contains("compile pipeline")
+							|| l.contains("bedrockvisuals:")
 							|| (l.contains("Exception") || l.contains("/ERROR]")) && !isKnownNoise(l))
 					.toList();
 			lines.subList(Math.max(0, lines.size() - LOG_LINES), lines.size()).forEach(this::line);
