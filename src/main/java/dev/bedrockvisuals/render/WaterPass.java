@@ -34,7 +34,7 @@ import org.lwjgl.system.MemoryStack;
  * Minecraft's OIT composite blends the result over the deferred-lit terrain.
  */
 public final class WaterPass {
-	static final BindGroupLayout INPUTS = BindGroupLayout.builder()
+	static final BindGroupLayout INPUTS = LocalExposure.withInputs(BindGroupLayout.builder()
 			.withUniform("u_GBufferDepth", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("u_SceneColor", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
@@ -43,7 +43,7 @@ public final class WaterPass {
 			.withUniform("u_WaterNormal", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("u_WaterMers", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("AtmosphereData", UniformType.UNIFORM_BUFFER)
-			.build();
+			).build();
 	/** std140 size of WaterData in water/terrain.fsh: five vec4s. */
 	private static final int DATA_SIZE = 5 * 16;
 
@@ -147,6 +147,7 @@ public final class WaterPass {
 		pass.setUniform("u_WaterNormal", WaterSurfaceMaps.normal(), nearest);
 		pass.setUniform("u_WaterMers", WaterSurfaceMaps.mers(), nearest);
 		pass.setUniform("AtmosphereData", LightingPass.atmosphereData());
+		LocalExposure.bind(pass);
 	}
 
 	public static RenderPipeline variantOf(RenderPipeline sodium) {

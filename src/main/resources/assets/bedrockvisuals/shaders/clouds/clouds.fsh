@@ -15,6 +15,8 @@
 #include <minecraft:oit.glsl>
 #include <bedrockvisuals:common.glsl>
 #include <bedrockvisuals:sky.glsl>
+#define LOCAL_EXPOSURE_APPLY
+#include <bedrockvisuals:local_exposure.glsl>
 
 layout(std140) uniform CloudInfo {
     vec4 CloudColor;
@@ -172,7 +174,8 @@ vec4 cloudColor() {
         color = mix(color, bedrockSkyRadiance(view, normalize(SunDirection.xyz), normalize(MoonDirection.xyz))
                 * AtmosphereHorizon.w, edgeFade());
     }
-    return vec4(toDisplay(color), cloudAlpha());
+    // Local exposure, as Bedrock applies it to the whole HDR scene (the clouds are drawn after that pass).
+    return vec4(toDisplay(locallyExposed(color)), cloudAlpha());
 }
 
 // Java builds its cloud mesh from the cells within ceil(range / 12) cells of the camera's cell (a circle,

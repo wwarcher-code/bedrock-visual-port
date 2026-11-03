@@ -60,8 +60,8 @@ public final class LocalExposure {
 	private static final BindGroupLayout APPLY = BindGroupLayout.builder()
 			.withUniform("Scene", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("Main", UniformType.COMBINED_IMAGE_SAMPLER)
-			.withUniform("Blurred", UniformType.COMBINED_IMAGE_SAMPLER)
-			.withUniform("Grid", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("LocalExposureBlur", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("LocalExposureGrid", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("LocalExposureData", UniformType.UNIFORM_BUFFER)
@@ -178,17 +178,15 @@ public final class LocalExposure {
 		try {
 			resize(main.width, main.height, main.getColorTexture().getFormat());
 			CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
-			if (data == null) {
-				data = RenderSystem.getDevice().createBuffer(() -> "Bedrock Visuals local exposure data",
-						GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, 48);
-			}
+			ensureData();
 			// The unclamped adapted average, as Bedrock's AverageLuminance texture holds it.
 			float average = Math.max(AutoExposure.adaptedLuminance(), 1e-6f);
 			try (MemoryStack stack = MemoryStack.stackPush()) {
-				Std140Builder builder = Std140Builder.onStack(stack, 48);
+				Std140Builder builder = Std140Builder.onStack(stack, DATA_SIZE);
 				builder.putVec4(BASE_KEPT, DETAIL_KEPT, BLUR_SHARE, (float) (Math.log(average) / Math.log(2)));
 				builder.putVec4(gridWidth(), gridHeight(), SLICES, FILTER_RADIUS);
 				builder.putVec4(BLUR_RADIUS, BLUR_STEP, 0, AutoExposure.UNIT_SCALE);
+				builder.putVec4(main.width, main.height, 1, 0);
 				encoder.writeToBuffer(data.slice(), builder.get());
 			}
 			GpuSampler linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
@@ -206,8 +204,8 @@ public final class LocalExposure {
 				pass.setPipeline(RenderSystem.getCompiledPipeline(APPLY_PIPELINE));
 				pass.setUniform("Main", mainCopy.view, nearest);
 				pass.setUniform("Scene", scene, nearest);
-				pass.setUniform("Blurred", blurred.view, linear);
-				pass.setUniform("Grid", filtered.view, linear);
+				pass.setUniform("LocalExposureBlur", blurred.view, linear);
+				pass.setUniform("LocalExposureGrid", filtered.view, linear);
 				pass.setUniform("LightingData", LightingPass.lightingData());
 				pass.setUniform("GradingData", LightingPass.gradingData());
 				pass.setUniform("LocalExposureData", data);
@@ -220,6 +218,43 @@ public final class LocalExposure {
 			BedrockVisualsClient.LOGGER.error("[exposure] local exposure failed; off until restart", e);
 			return scene;
 		}
+	}
+
+	/** std140 size of LocalExposureData: four vec4s. */
+	private static final int DATA_SIZE = 64;
+
+	private static void ensureData() {
+		if (data == null) {
+			data = RenderSystem.getDevice().createBuffer(() -> "Bedrock Visuals local exposure data",
+					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, DATA_SIZE);
+			// Off until the first frame's pass has run (ScreenParams.z 0).
+			try (MemoryStack stack = MemoryStack.stackPush()) {
+				RenderSystem.getDevice().createCommandEncoder().writeToBuffer(data.slice(),
+						Std140Builder.onStack(stack, DATA_SIZE).putVec4(0, 0, 0, 0).putVec4(1, 1, 2, 1)
+								.putVec4(0, 1, 0, AutoExposure.UNIT_SCALE).putVec4(1, 1, 0, 0).get());
+			}
+		}
+	}
+
+	/** The uniform layout of what {@link #bind} binds, for the water and cloud pipelines. */
+	static BindGroupLayout.Builder withInputs(BindGroupLayout.Builder builder) {
+		return builder.withUniform("LocalExposureGrid", UniformType.COMBINED_IMAGE_SAMPLER)
+				.withUniform("LocalExposureBlur", UniformType.COMBINED_IMAGE_SAMPLER)
+				.withUniform("LocalExposureData", UniformType.UNIFORM_BUFFER);
+	}
+
+	/**
+	 * Binds this frame's grid, blur and parameters for shaders drawn after the pass (water, clouds), which apply
+	 * the same factor to their own colour. Before the first pass, or when it's off, placeholders with
+	 * ScreenParams.z 0 (no change).
+	 */
+	static void bind(RenderPass pass) {
+		ensureData();
+		GpuSampler linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
+		boolean ready = filtered != null && !failed;
+		pass.setUniform("LocalExposureGrid", ready ? filtered.view : CloudShadows.viewOrEmpty(), linear);
+		pass.setUniform("LocalExposureBlur", ready ? blurred.view : CloudShadows.viewOrEmpty(), linear);
+		pass.setUniform("LocalExposureData", data);
 	}
 
 	private interface Binder {

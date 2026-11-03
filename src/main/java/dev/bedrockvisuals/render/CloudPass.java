@@ -23,13 +23,13 @@ import net.minecraft.resources.Identifier;
  * hidden for the session while these are on (raise Java's Cloud Distance to see clouds farther).
  */
 public final class CloudPass {
-	static final BindGroupLayout INPUTS = BindGroupLayout.builder()
+	static final BindGroupLayout INPUTS = LocalExposure.withInputs(BindGroupLayout.builder()
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("AtmosphereData", UniformType.UNIFORM_BUFFER)
 			.withUniform("CloudCells", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("BrdfLut", UniformType.COMBINED_IMAGE_SAMPLER)
-			.build();
+			).build();
 	private static final Identifier SHADER = Identifier.fromNamespaceAndPath("bedrockvisuals", "clouds/clouds");
 
 	private static final Map<RenderPipeline, RenderPipeline> VARIANTS = new ConcurrentHashMap<>();
@@ -70,6 +70,7 @@ public final class CloudPass {
 		// Bedrock's BRDF table for the reflected sky; without it (DebugParams.z 0) the shader approximates it.
 		pass.setUniform("BrdfLut", BrdfLut.view() != null ? BrdfLut.view() : CloudShadows.viewOrEmpty(),
 				RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
+		LocalExposure.bind(pass);
 	}
 
 	public static RenderPipeline variantOf(RenderPipeline vanilla) {

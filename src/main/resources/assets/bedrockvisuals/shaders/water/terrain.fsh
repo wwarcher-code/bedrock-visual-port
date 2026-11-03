@@ -14,6 +14,8 @@
 #include <minecraft:oit.glsl>
 #include <bedrockvisuals:common.glsl>
 #include <bedrockvisuals:sky.glsl>
+#define LOCAL_EXPOSURE_APPLY
+#include <bedrockvisuals:local_exposure.glsl>
 
 layout(location = 0) in vec4 v_Color;
 layout(location = 1) in vec2 v_TexCoord;
@@ -265,18 +267,20 @@ vec3 waterColor(WaterSurface s) {
     vec2 self = toScreen(v_Position, size, false).xy;
     bool flipY = abs(self.y - gl_FragCoord.y) > abs(size.y - self.y - gl_FragCoord.y);
 
-    // Reflection: the scene where the mirror ray lands, else the sky gradient (with the same horizon handling
+    // Reflection: the scene where the mirror ray lands (already locally exposed), else the sky gradient
+    // (locally exposed here, as the water is drawn after that pass) (with the same horizon handling
     // as the deferred pass's reflections).
     vec3 mirror = reflect(-s.v, s.n);
     vec3 skyReflection;
     if (AtmosphereZenith.w > 0.5) {
         // Bedrock's sky probe is its sky (the atmosphere function), so the water reflects the same sky.
-        skyReflection = toDisplay(bedrockSkyReflection(mirror, s.roughness, sunDir, moonDir) * sky);
+        skyReflection = toDisplay(locallyExposed(bedrockSkyReflection(mirror, s.roughness, sunDir, moonDir) * sky));
     } else {
         float horizonShare = 0.3 * (1.0 - clamp(mirror.y * 0.5 + 0.5, 0.0, 1.0));
-        skyReflection = toDisplay(mix(SkyColor.rgb, SkyHorizonColor.rgb, horizonShare) * sky);
+        skyReflection = toDisplay(locallyExposed(mix(SkyColor.rgb, SkyHorizonColor.rgb, horizonShare) * sky));
         // Rougher texels see a blurrier sky; here the reflected sky leans towards its average.
-        skyReflection = mix(skyReflection, toDisplay(mix(SkyColor.rgb, SkyHorizonColor.rgb, 0.15) * sky), s.roughness);
+        skyReflection = mix(skyReflection, toDisplay(locallyExposed(mix(SkyColor.rgb, SkyHorizonColor.rgb, 0.15) * sky)),
+                s.roughness);
     }
     // Bedrock's SSR is mirror-only: full up to roughness 0.3, gone by 0.4.
     float ssrWeight = 1.0 - smoothstep(0.3, 0.4, s.roughness);
@@ -298,7 +302,8 @@ vec3 waterColor(WaterSurface s) {
     vec3 behind = texelFetch(u_SceneColor, ivec2(gl_FragCoord.xy), 0).rgb;
     // Bedrock's water only absorbs (WaterExtinction); light scattered in the water comes from volumetric fog.
     vec3 transmitted = behind * s.transmittance;
-    vec3 target = clamp(s.fresnel * reflection + (1.0 - s.fresnel) * transmitted + toDisplay(glint), 0.0, 1.0);
+    vec3 target = clamp(s.fresnel * reflection + (1.0 - s.fresnel) * transmitted + toDisplay(locallyExposed(glint)),
+            0.0, 1.0);
     return clamp((target - (1.0 - s.opacity) * behind) / max(s.opacity, 1e-3), 0.0, 1.0);
 }
 
