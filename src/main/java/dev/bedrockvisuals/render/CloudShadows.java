@@ -157,6 +157,17 @@ public final class CloudShadows {
 		builder.putVec4(meshRange, farDistance(), 0, enabled && visible && view != null && meshRange > 0 ? 1 : 0);
 	}
 
+	/** The far clouds, for diagnostics. */
+	public static String farStatus() {
+		if (!visible || view == null || meshRange <= 0) {
+			return "off (no Java clouds)";
+		}
+		float range = meshRange;
+		return String.format(java.util.Locale.ROOT, "traced beyond Java's mesh (cloud range %.0f blocks) to %.0f blocks"
+				+ " (Bedrock's 3 x render distance, or Distant Horizons' if further), into the sky by %.0f", range,
+				farDistance(), 1.9f * farDistance());
+	}
+
 	public static String status() {
 		return !visible ? "off (Java's Clouds setting is off, or Distant Horizons draws the clouds instead)" : view == null ? "waiting for clouds" : width + "x" + height + " cells, strength " + CONTRIBUTION;
 	}

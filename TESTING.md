@@ -25,15 +25,31 @@ of minutes.
    capture uses the same camera. Run it before each capture, after a pull, or after you've moved.
 3. Press **F9** and stand still for about ten seconds. The mod hides the HUD, clears the weather,
    and takes screenshots at noon, afternoon, low sun and midnight, each with deferred lighting, vanilla,
-   the shadow test and the material view, plus albedo, normal and light at noon. It finishes with a noon
-   shot from inside the pool looking up (caustics, the water's extinction, Snell's window), then puts you
-   back, restores the time, view and HUD, and opens the folder.
+   the shadow test and the material view. At noon it adds two debug rows: albedo, normal, light and local
+   exposure; then bloom and shadow cascades. Next come horizon shots at noon and low sun, lit and vanilla,
+   looking 10° up at the clouds, and a noon shot from inside the pool looking up (caustics, the water's
+   extinction, Snell's window). Then it puts you back, restores the time, view and HUD, and opens the
+   folder.
 4. Send Claude **`contact-sheet.png`** from the folder that opened, and paste the clipboard (Ctrl+V): it
    holds the diagnostics report (build commit, mod versions, GPU, pass status, Bedrock data, biome,
    lighting per time and recent errors). The individual screenshots are in the same folder if Claude asks
    for one at full size.
 
 Captures are kept under `run\bedrock-visuals-captures\<date and time>\`.
+
+### Reading the debug panels
+
+- **Local exposure.** Lit pixels drawn mid-grey, then multiplied by the factor: red and blue at full, and
+  green above mid-grey where an area is lifted, below where it's lowered. Grass should be a little greener
+  than the sky. Plain grey means local exposure isn't reaching the image.
+- **Bloom.** Only what bloom adds, 20 times over, on black. Expect a faint glow around bright things
+  (glowstone, the sea lantern, the sky's brightest part). All black means bloom isn't reaching the image.
+- **Cascades.** The shadow test tinted by Bedrock's four shadow cascades: white within about 21 blocks, then
+  yellow to 43, cyan to 64 and magenta to 128. Shadows fade out over the last 8 blocks. Dark grey is
+  beyond the shadows.
+- **Horizon shots.** Clouds should reach the horizon and fade into the sky, with no ring where Java's own
+  cloud mesh ends (it fades out where the traced far clouds fade in). The vanilla shots show Distant
+  Horizons' own clouds, for comparison.
 
 ## Things to look at in the game
 
@@ -45,6 +61,9 @@ The capture can't show everything that moves. After F9, look at these by eye:
 - **Rain**: `/weather rain` greys the sky and clouds and switches the sun's direct light off.
 - **Reflections** on the iron and gold blocks now show the scene, not only the sky.
 - **Bloom** around glowstone and the sea lantern at midnight.
+- **Clouds** with Distant Horizons on: from a high place, they should carry on to the horizon over the
+  distant terrain, with no seam where Java's cloud mesh ends.
+- **Water and clouds next to the sky**: neither should look brighter than the sky around them.
 
 ## Bedrock reference shots
 
@@ -89,7 +108,7 @@ Don't move between the commands: the shots must be taken from where `bv/scene` p
 
 | Key or command | Does |
 | --- | --- |
-| F7 | Cycle debug views: albedo, normal, material, light, shadow test, off |
+| F7 | Cycle debug views: albedo, normal, material, light, shadow test, cascades, local exposure, bloom, off |
 | F8 | Deferred lighting on and off, for comparison with vanilla |
 | F9 or `/bv capture` | The full test capture above; F9 again cancels it |
 | `/bv scene` | Build the test scene in front of you |

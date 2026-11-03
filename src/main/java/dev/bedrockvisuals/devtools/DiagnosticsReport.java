@@ -71,7 +71,9 @@ final class DiagnosticsReport {
 				+ (DeferredRenderer.lightingFailed() ? " (FAILED, see log)" : "") + "; since the last report: "
 				+ DeferredRenderer.frameSummary());
 		line("G-buffer " + (GBufferPass.isDisabled() ? "FAILED, see log" : "ok"));
-		line("shadows " + (ShadowPass.isDisabled() ? "FAILED, see log" : ShadowPass.isValid() ? "ok" : "no map this frame"));
+		line("shadows " + (ShadowPass.isDisabled() ? "FAILED, see log" : ShadowPass.isValid() ? "ok" : "no map this frame")
+				+ "; " + ShadowPass.CASCADES + " cascades of " + ShadowPass.RESOLUTION + "x" + ShadowPass.RESOLUTION
+				+ " out to " + (int) ShadowPass.RANGE + " blocks");
 		line("materials " + MaterialAtlas.status());
 		line("water " + WaterPass.status() + "; " + Underwater.status() + "; columns " + WaterColumns.status());
 		line("bloom " + BloomPass.status());
@@ -79,6 +81,7 @@ final class DiagnosticsReport {
 		line("weather " + Weather.status());
 		line("clouds " + CloudPass.status() + "; cloud shadows " + CloudShadows.status() + "; Java's Clouds setting "
 				+ minecraft.options.cloudStatus().get());
+		line("far clouds " + CloudShadows.farStatus());
 		line("Bedrock packs " + BedrockInputs.pack().map(pack -> pack.summary()).orElse("NOT LOADED"));
 		if (minecraft.player != null && minecraft.level != null) {
 			section("Player");

@@ -45,8 +45,11 @@ public final class TestCapture {
 	private static final String[] TIME_LABELS = {"noon", "afternoon", "low sun", "midnight"};
 	/** Views captured at every time. */
 	private static final View[] VIEWS = {View.OFF, null, View.SHADOWS, View.MATERIAL};
-	/** Views captured once, at the first time. */
+	/** Views captured once, at the first time, in two rows. */
 	private static final View[] EXTRA_VIEWS = {View.ALBEDO, View.NORMAL, View.LIGHT, View.LOCAL_EXPOSURE};
+	private static final View[] EXTRA_VIEWS_2 = {View.BLOOM, View.CASCADES};
+	/** Pitch for the horizon shots: looking 10° up, at the clouds out to the horizon. */
+	private static final float HORIZON_PITCH = -10f;
 	private static final int TICKS_AFTER_TIME_CHANGE = 15;
 	private static final int TICKS_AFTER_VIEW_CHANGE = 3;
 
@@ -139,8 +142,14 @@ public final class TestCapture {
 					addShot(extras, timeLabel, view);
 				}
 				sheet.add(extras);
+				List<ContactSheet.Cell> extras2 = new ArrayList<>();
+				for (View view : EXTRA_VIEWS_2) {
+					addShot(extras2, timeLabel, view);
+				}
+				sheet.add(extras2);
 			}
 		}
+		addHorizonShots();
 		addUnderwaterShots();
 		STEPS.add(TestCapture::restore);
 		STEPS.add(TestCapture::finishWhenSaved);
@@ -169,6 +178,41 @@ public final class TestCapture {
 		STEPS.add(() -> report.lightingAt("underwater, noon (6000)"));
 		addShot(row, "underwater", View.OFF);
 		addShot(row, "underwater", null);
+		STEPS.add(() -> command(back));
+	}
+
+	/**
+	 * At noon and low sun, from where the player stands but looking 10° up: the clouds out to the horizon, lit
+	 * (Java's mesh near, the far clouds beyond it) against vanilla (Distant Horizons' own clouds, when it's
+	 * installed, show how far its terrain reaches).
+	 */
+	private static void addHorizonShots() {
+		Minecraft minecraft = Minecraft.getInstance();
+		var player = minecraft.player;
+		String back = String.format(java.util.Locale.ROOT, "tp @s %.3f %.3f %.3f %.2f %.2f", player.getX(), player.getY(),
+				player.getZ(), player.getYRot(), player.getXRot());
+		String up = String.format(java.util.Locale.ROOT, "tp @s %.3f %.3f %.3f %.2f %.2f", player.getX(), player.getY(),
+				player.getZ(), player.getYRot(), HORIZON_PITCH);
+		List<ContactSheet.Cell> row = new ArrayList<>();
+		sheet.add(row);
+		long[] times = {6000, 11500};
+		String[] labels = {"horizon noon", "horizon low sun"};
+		for (int i = 0; i < times.length; i++) {
+			long time = times[i];
+			String label = labels[i];
+			STEPS.add(() -> {
+				command("time set " + time);
+				command(up);
+				wait = TICKS_AFTER_TIME_CHANGE;
+			});
+			STEPS.add(() -> {
+				AutoExposure.settle();
+				wait = TICKS_AFTER_VIEW_CHANGE;
+			});
+			STEPS.add(() -> report.lightingAt(label + " (" + time + ")"));
+			addShot(row, label, View.OFF);
+			addShot(row, label, null);
+		}
 		STEPS.add(() -> command(back));
 	}
 

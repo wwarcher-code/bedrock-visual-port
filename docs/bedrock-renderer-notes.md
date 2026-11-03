@@ -399,9 +399,17 @@ Horizons' own clouds are hidden for the session while these are on (through its 
 setting is untouched). Distant Horizons also sets Java's Clouds option to OFF whenever its renderer starts
 (its "override vanilla graphics settings" option, on by default), which a mixin prevents.
 
-**Still to do: far clouds.** Bedrock's cloud field reaches 3× the render distance. With Distant Horizons (and
-later Voxy) the terrain reaches far past Java's cloud range, so the clouds will need their own far
-geometry or a ray-marched layer driven by the same cloud field.
+**Far clouds.** Bedrock's cloud field reaches 3× the render distance. With Distant Horizons (and later Voxy)
+the terrain reaches far past Java's cloud range. Beyond Java's mesh, the lighting pass traces each sky ray
+through the same drifting cloud field (up to 64 cells), out to the larger of 3× the render distance and
+Distant Horizons' render distance. It lights the first filled cell with the same lighting
+(`cloud_lighting.glsl`) and blends it into the sky by Bedrock's fog. It fades in exactly where the mesh fades
+out. Far clouds are only traced over sky pixels: they don't yet know Distant Horizons' terrain depth, so a far
+mountain above the horizon could show a cloud that should be behind it.
+
+Water and clouds are drawn after local exposure, so their shaders apply its factor to their own colour (the
+grid, blur and parameters are bound to them). Bloom's blend onto the main image, like local exposure's, is
+done by writing back from a copy.
 
 ## Indirect specular (verified in DeferredIndirectSpecular)
 
@@ -486,8 +494,11 @@ In the shader:
   way. A shadowed point keeps `max(visibility, 1 - contribution)`.
 - Over the last `min(range × 0.1, 8)` blocks of the shadow range, shadows smoothstep out to fully lit.
 
-The renderer matches the single hard tap, the normal offset, the 0.2° steps and the cloud contribution. It
-still uses one 4096² map over 96 blocks rather than the four cascades.
+The renderer matches the single hard tap, the normal offset, the 0.2° steps, the cloud contribution, the four
+2048² cascades (1/6, 1/3, 1/2 and all of 128 blocks, the darkest of those a point falls in) and the fade over
+the last 8 blocks. The depth biases are in blocks (TUNE: Bedrock's are in its own depth units), and the
+volumetric fog reads the outer cascade. Sodium hands each cascade only the chunks the camera sees, so
+terrain out of view casts no shadows into it.
 
 ## Cloud shadows
 
