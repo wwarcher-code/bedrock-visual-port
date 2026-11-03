@@ -66,8 +66,9 @@ public final class GBufferDebugView {
 	}
 
 	/**
-	 * True when lit pixels should show local exposure's factor: drawn mid-grey, then multiplied by the factor
-	 * (brighter is lifted, darker lowered).
+	 * True when lit pixels should show local exposure at work: drawn mid-grey, then multiplied per channel by
+	 * red 2 where the pass applies, green its factor (above mid is lifted, below lowered), blue 2 where its
+	 * grid has data. Plain grey means the pass's output never reached the image.
 	 */
 	public static boolean showsLocalExposure() {
 		return showing == View.LOCAL_EXPOSURE;

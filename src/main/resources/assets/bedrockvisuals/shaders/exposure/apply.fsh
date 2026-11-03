@@ -30,8 +30,8 @@ vec2 gridAt(vec2 uv, int slice) {
 void main() {
     vec4 scene = texture(Scene, texCoord);
     if (scene.a <= 0.0) {
-        // Not drawn by the lighting pass.
-        ratio = vec4(1.0);
+        // Not drawn by the lighting pass. (Debug view: red 0, green 1, blue 0 times the grey.)
+        ratio = DebugParams.w > 0.5 ? vec4(0.0, 1.0, 0.0, 1.0) : vec4(1.0);
         exposed = scene;
         return;
     }
@@ -55,7 +55,8 @@ void main() {
     vec3 after = toDisplay(color);
     ratio = vec4(mix(vec3(1.0), clamp(after / max(before, vec3(1e-4)), 0.0, 16.0), step(vec3(1e-4), before)), 1.0);
     if (DebugParams.w > 0.5) {
-        // The debug view: the lighting pass drew mid-grey; 0.5 × the factor (capped at 2).
-        ratio = vec4(vec3(clamp(exp2(change), 0.0, 2.0)), 1.0);
+        // The debug view: the lighting pass drew mid-grey. Red 2 (this branch), green the factor (capped
+        // at 2), blue 2 where the grid has data there.
+        ratio = vec4(2.0, clamp(exp2(change), 0.0, 2.0), g.x >= 0.001 ? 2.0 : 0.0, 1.0);
     }
 }
