@@ -481,24 +481,16 @@ int wmain(int argc, wchar_t** argv) {
 					if (SUCCEEDED(hr) && blob) {
 						std::vector<BYTE> bytes(blob->GetSizeBytes());
 						if (!bytes.empty()) blob->GetData(bytes.size(), bytes.data());
-						// The blob runs from the resource's start; the view's window starts at its offset. Keep only the
-						// window (its size when known, else 4 KB: no Bedrock constant buffer is larger).
+						// The blob starts at the view's window (its offset into the resource) and runs to the end of the
+						// resource, so the constants are at its start (checked against values read in PIX by hand).
+						// The view's reported size isn't usable (it comes back as 2^32 minus the offset), so keep 4 KB:
+						// no Bedrock constant buffer is larger.
 						UINT64 offset = 0;
-						UINT64 size = 4096;
 						Ptr<IPixConstantBufferView> cbv;
 						if (SUCCEEDED(view->QueryInterface(__uuidof(IPixConstantBufferView), cbv.vout())) && cbv) {
-							const D3D12_CONSTANT_BUFFER_VIEW_DESC* desc = nullptr;
 							offset = cbv->GetBufferLocationOffset();
-							// A constant buffer view is at most 64 KB (D3D12_REQ_CONSTANT_BUFFER_ELEMENT_COUNT x 16 bytes);
-							// anything larger isn't a real size, so keep the 4 KB default.
-							if (SUCCEEDED(cbv->GetDesc(&desc)) && desc && desc->SizeInBytes > 0 && desc->SizeInBytes <= 65536) {
-								size = desc->SizeInBytes;
-							}
 						}
-						if (offset >= bytes.size()) offset = 0;
-						if (size > 65536) size = 65536;
-						if (size > bytes.size() - offset) size = bytes.size() - offset;
-						bytes = std::vector<BYTE>(bytes.begin() + offset, bytes.begin() + offset + size);
+						if (bytes.size() > 4096) bytes.resize(4096);
 						entry += ",\"offset\":" + std::to_string(offset) + ",\"bytes\":\"" + hex(bytes.data(), bytes.size()) + "\"";
 					} else {
 						failures++;
