@@ -13,6 +13,7 @@
 #include <d3d12.h>
 #include "PixApi.h"
 #include "PixApiD3DStateInterfaces.h"
+#include "PixApiCaptureFileConverterInterfaces.h"
 #include "PixApiUuids.h"
 
 #include <cstdio>
@@ -182,9 +183,34 @@ int wmain(int argc, wchar_t** argv) {
 	Ptr<IPixFactory> factory;
 	if (FAILED(hr = create(__uuidof(IPixFactory), factory.vout()))) { fail("PixCreateFactory", hr); return 1; }
 
+	// Captures from PIX versions before 2026 use the old file format, which the API can't open directly: upgrade
+	// a copy first.
+	{
+		Ptr<IPixCaptureFileConverter> converter;
+		if (SUCCEEDED(factory->CreatePixCaptureFileConverter(__uuidof(IPixCaptureFileConverter), converter.vout())) && converter) {
+			PIX_GPU_CAPTURE_FILE_FORMAT format = converter->GetGpuCaptureFileFormat(capture.c_str());
+			const char* names[] = {"missing", "not a recognised PIX GPU capture (or corrupt)", "pre-2026", "2026"};
+			printf("capture file format: %s\n", format <= 3 ? names[format] : "unknown");
+			if (format == PIX_GPU_CAPTURE_FILE_FORMAT_NO_FILE || format == PIX_GPU_CAPTURE_FILE_FORMAT_INVALID_OR_CORRUPT) {
+				fprintf(stderr, "pixdump: PIX can't read that file as a GPU capture\n");
+				return 1;
+			}
+			if (format == PIX_GPU_CAPTURE_FILE_FORMAT_PRE2026) {
+				std::wstring upgraded = capture.substr(0, capture.size() - (capture.size() >= 5 ? 5 : 0)) + L".upgraded.wpix";
+				printf("upgrading it to the current format: %s\n", utf8(upgraded.c_str()).c_str());
+				if (FAILED(hr = converter->UpgradeGpuCaptureFile(capture.c_str(), upgraded.c_str(), nullptr))) {
+					fail("upgrading the capture", hr);
+					return 1;
+				}
+				capture = upgraded;
+			}
+		}
+	}
+
 	Ptr<IPixGpuCaptureDocument> doc;
 	if (FAILED(hr = factory->OpenGpuCaptureDocument(capture.c_str(), nullptr, nullptr, __uuidof(IPixGpuCaptureDocument), doc.vout()))) {
 		fail("opening the capture", hr);
+		fprintf(stderr, "  (0x8ABC000B is PIX's 'invalid file'. Try opening the capture once in PIX 2610.28 and saving it again.)\n");
 		return 1;
 	}
 	printf("opened %s\n", utf8(capture.c_str()).c_str());
