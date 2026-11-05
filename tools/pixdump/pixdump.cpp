@@ -2,7 +2,7 @@
 // shaders bound there (by DXIL hash), to a JSON file next to the capture. Bedrock Visuals matches the hashes to
 // Bedrock's material files to name every value, so nobody has to read them out of the PIX window.
 //
-// Usage: pixdump <capture.wpix> [--all] [--max-per-pipeline N]
+// Usage: pixdump <capture.wpix> [--all] [--max-per-pipeline N] [--probe EVENT]
 //   By default the first 3 draws of each distinct shader combination are exported (Bedrock draws terrain
 //   thousands of times with the same shaders); --all exports every draw.
 //
@@ -211,7 +211,90 @@ std::vector<Binding> bindingsOf(IPixResourceView* view) {
 	return out;
 }
 
+// --probe <event>: for each constant buffer bound at that event, saves the bytes PIX returns for the view and for
+// the whole resource, with every offset and size PIX reports, to find where the view's window really is.
+void writeFile(const std::wstring& path, const std::vector<BYTE>& bytes) {
+	FILE* f = _wfopen(path.c_str(), L"wb");
+	if (!f) return;
+	fwrite(bytes.data(), 1, bytes.size(), f);
+	fclose(f);
+}
+
+std::vector<BYTE> blobBytes(IPixBlob* blob) {
+	std::vector<BYTE> bytes(blob ? blob->GetSizeBytes() : 0);
+	if (!bytes.empty()) blob->GetData(bytes.size(), bytes.data());
+	return bytes;
+}
+
+void probe(IPixGpuCaptureDocument* doc, IPixGpuCaptureAnalysis* analysis, IPixGenericPipeline* pipeline,
+		const PIX_EVENT_INFO& ev, const std::wstring& capture) {
+	(void)doc;
+	std::wstring base = capture + L".probe" + std::to_wstring(ev.Index);
+	FILE* info = _wfopen((base + L".txt").c_str(), L"w");
+	if (!info) return;
+	fprintf(info, "event %u %s\n", ev.Index, ev.Name ? ev.Name : "");
+	Ptr<IPixResourceViewsAtEvent> views;
+	if (FAILED(pipeline->GetResourceViews(__uuidof(IPixResourceViewsAtEvent), views.vout())) || !views) {
+		fprintf(info, "no views\n");
+		fclose(info);
+		return;
+	}
+	int n = 0;
+	for (UINT32 v = 0; v < views->GetCount(); v++) {
+		PIX_RESOURCE_VIEW_TYPE type;
+		if (FAILED(views->GetType(v, &type)) || type != PIX_RESOURCE_CONSTANT_BUFFER_VIEW) continue;
+		Ptr<IPixResourceView> view;
+		if (FAILED(views->GetView(v, __uuidof(IPixResourceView), view.vout())) || !view) continue;
+		std::vector<Binding> bs = bindingsOf(view.p);
+		fprintf(info, "\nbuffer %d: view %u, binding %s register %d space %d\n", n, v, bs.empty() ? "?" : bs[0].name.c_str(),
+				bs.empty() ? -1 : bs[0].reg, bs.empty() ? -1 : bs[0].space);
+		Ptr<IPixConstantBufferView> cbv;
+		if (SUCCEEDED(view->QueryInterface(__uuidof(IPixConstantBufferView), cbv.vout())) && cbv) {
+			fprintf(info, "  GetBufferLocationOffset %llu\n", (unsigned long long)cbv->GetBufferLocationOffset());
+			const D3D12_CONSTANT_BUFFER_VIEW_DESC* desc = nullptr;
+			HRESULT hr = cbv->GetDesc(&desc);
+			if (SUCCEEDED(hr) && desc) {
+				fprintf(info, "  desc BufferLocation 0x%llx SizeInBytes %u\n", (unsigned long long)desc->BufferLocation, desc->SizeInBytes);
+			} else {
+				fprintf(info, "  GetDesc 0x%08lX\n", static_cast<unsigned long>(hr));
+			}
+		}
+		for (int before = 1; before >= 0; before--) {
+			PIX_GET_BUFFER_BYTES_PARAMETERS bp{};
+			bp.BeforeEvent = before;
+			Ptr<IPixBlob> blob;
+			HRESULT hr = analysis->GetBufferBytesFromResourceView(view.p, &ev, &bp, __uuidof(IPixBlob), blob.vout());
+			std::vector<BYTE> bytes = blobBytes(blob.p);
+			fprintf(info, "  view bytes (%s event): 0x%08lX, %zu bytes\n", before ? "before" : "after", static_cast<unsigned long>(hr), bytes.size());
+			writeFile(base + L"_" + std::to_wstring(n) + (before ? L"_view_before.bin" : L"_view_after.bin"), bytes);
+		}
+		Ptr<IPixD3D12ResourceView> d3dView;
+		Ptr<IPixD3D12Resource> resource;
+		if (SUCCEEDED(view->QueryInterface(__uuidof(IPixD3D12ResourceView), d3dView.vout())) && d3dView
+				&& SUCCEEDED(d3dView->GetD3D12Resource(__uuidof(IPixD3D12Resource), resource.vout())) && resource) {
+			fprintf(info, "  resource %s, id %llu, type %d\n", utf8(resource->GetName()).c_str(),
+					(unsigned long long)resource->GetApiObjectId(), static_cast<int>(resource->GetType()));
+			Ptr<IPixPlacedD3D12Resource> placed;
+			if (SUCCEEDED(resource->QueryInterface(__uuidof(IPixPlacedD3D12Resource), placed.vout())) && placed) {
+				fprintf(info, "  placed at heap offset %llu (heap %llu)\n", (unsigned long long)placed->GetHeapOffset(),
+						(unsigned long long)placed->GetHeapId());
+			}
+			PIX_GET_BUFFER_BYTES_PARAMETERS bp{};
+			bp.BeforeEvent = TRUE;
+			Ptr<IPixBlob> blob;
+			HRESULT hr = analysis->GetBufferBytesFromResource(resource.p, &ev, &bp, __uuidof(IPixBlob), blob.vout());
+			std::vector<BYTE> bytes = blobBytes(blob.p);
+			fprintf(info, "  resource bytes: 0x%08lX, %zu bytes\n", static_cast<unsigned long>(hr), bytes.size());
+			writeFile(base + L"_" + std::to_wstring(n) + L"_resource.bin", bytes);
+		}
+		n++;
+	}
+	fclose(info);
+	printf("probe of event %u written: %s.txt and .bin files\n", ev.Index, utf8(base.c_str()).c_str());
+}
+
 }  // namespace
+
 
 int wmain(int argc, wchar_t** argv) {
 	if (argc < 2) {
@@ -220,8 +303,10 @@ int wmain(int argc, wchar_t** argv) {
 	}
 	std::wstring capture = argv[1];
 	int maxPerPipeline = 3;
+	long long probeEvent = -1;
 	for (int i = 2; i < argc; i++) {
-		if (!wcscmp(argv[i], L"--all")) maxPerPipeline = 1 << 30;
+		if (!wcscmp(argv[i], L"--probe") && i + 1 < argc) probeEvent = _wtoi64(argv[++i]);
+		else if (!wcscmp(argv[i], L"--all")) maxPerPipeline = 1 << 30;
 		else if (!wcscmp(argv[i], L"--max-per-pipeline") && i + 1 < argc) maxPerPipeline = _wtoi(argv[++i]);
 	}
 
@@ -350,6 +435,10 @@ int wmain(int argc, wchar_t** argv) {
 				}
 			}
 			shadersJson += "]";
+			if (probeEvent >= 0) {
+				if (static_cast<long long>(ev.Index) == probeEvent) probe(doc.p, analysis.p, pipeline.p, ev, capture);
+				continue;
+			}
 			if (perPipeline[key]++ >= maxPerPipeline) continue;
 
 			// Enclosing markers, outermost first.
