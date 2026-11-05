@@ -411,9 +411,14 @@ int wmain(int argc, wchar_t** argv) {
 						if (SUCCEEDED(view->QueryInterface(__uuidof(IPixConstantBufferView), cbv.vout())) && cbv) {
 							const D3D12_CONSTANT_BUFFER_VIEW_DESC* desc = nullptr;
 							offset = cbv->GetBufferLocationOffset();
-							if (SUCCEEDED(cbv->GetDesc(&desc)) && desc && desc->SizeInBytes > 0) size = desc->SizeInBytes;
+							// A constant buffer view is at most 64 KB (D3D12_REQ_CONSTANT_BUFFER_ELEMENT_COUNT x 16 bytes);
+							// anything larger isn't a real size, so keep the 4 KB default.
+							if (SUCCEEDED(cbv->GetDesc(&desc)) && desc && desc->SizeInBytes > 0 && desc->SizeInBytes <= 65536) {
+								size = desc->SizeInBytes;
+							}
 						}
 						if (offset >= bytes.size()) offset = 0;
+						if (size > 65536) size = 65536;
 						if (size > bytes.size() - offset) size = bytes.size() - offset;
 						bytes = std::vector<BYTE>(bytes.begin() + offset, bytes.begin() + offset + size);
 						entry += ",\"offset\":" + std::to_string(offset) + ",\"bytes\":\"" + hex(bytes.data(), bytes.size()) + "\"";
@@ -435,7 +440,7 @@ int wmain(int argc, wchar_t** argv) {
 					json(pipelineName).c_str(), markersJson.c_str(), shadersJson.c_str(), buffersJson.c_str());
 			first = false;
 			exported++;
-			if (exported % 50 == 0) printf("  %d draws exported...\n", exported);
+			if (exported % 50 == 0) printf("  %d draws exported (%.1f MB so far)...\n", exported, _ftelli64(out) / 1048576.0);
 		}
 	}
 	fprintf(out, "]}\n");
