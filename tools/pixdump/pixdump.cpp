@@ -137,25 +137,14 @@ void addShader(std::vector<ShaderCode>& out, const char* stage, const D3D12_SHAD
 	out.push_back({stage, hex(b + 4, 16), code.BytecodeLength});
 }
 
-// The shaders in a pipeline's creation description: a graphics or compute desc, or a pipeline state stream
-// (each subobject is a type followed by its value, aligned to pointers; the shader ones hold D3D12_SHADER_BYTECODE).
+// The shaders in a pipeline's creation description, a pipeline state stream (each subobject is a type followed by
+// its value, aligned to pointers; the shader ones hold D3D12_SHADER_BYTECODE).
 std::vector<ShaderCode> shadersOf(const PIX_PIPELINE_STATE_STREAM_DESC* desc, PIX_PIPELINE_STATE_DESC_TYPE type) {
 	std::vector<ShaderCode> out;
 	if (!desc) return out;
-	if (type == PIX_PIPELINE_STATE_DESC_TYPE_GRAPHICS && readable(desc, sizeof(D3D12_GRAPHICS_PIPELINE_STATE_DESC))) {
-		auto* g = reinterpret_cast<const D3D12_GRAPHICS_PIPELINE_STATE_DESC*>(desc);
-		addShader(out, "vertex", g->VS);
-		addShader(out, "pixel", g->PS);
-		addShader(out, "domain", g->DS);
-		addShader(out, "hull", g->HS);
-		addShader(out, "geometry", g->GS);
-		return out;
-	}
-	if (type == PIX_PIPELINE_STATE_DESC_TYPE_COMPUTE && readable(desc, sizeof(D3D12_COMPUTE_PIPELINE_STATE_DESC))) {
-		auto* c = reinterpret_cast<const D3D12_COMPUTE_PIPELINE_STATE_DESC*>(desc);
-		addShader(out, "compute", c->CS);
-		return out;
-	}
+	// GetDesc always returns the stream form, whatever form the game created the pipeline with (type only says
+	// which); an earlier version read it as a graphics or compute desc and got the shaders in the wrong slots.
+	(void)type;
 	if (!desc->SubobjectStream || !desc->SizeInBytes || !readable(desc->SubobjectStream, desc->SizeInBytes)) return out;
 	const BYTE* stream = static_cast<const BYTE*>(desc->SubobjectStream);
 	// Scan pointer-aligned slots for a shader subobject type followed by bytecode that starts with DXBC.
