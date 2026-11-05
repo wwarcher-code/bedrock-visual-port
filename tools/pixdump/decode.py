@@ -107,7 +107,7 @@ def main():
         text = (label + ' ' + ' '.join(draw['markers'])).lower()
         if filters and not any(f in text for f in filters):
             continue
-        print(f"== event {draw['event']} {draw['name']}")
+        print(f"== event {draw['event']} {draw['name']}" + (f" ({draw['pipeline']})" if draw.get('pipeline') else ''))
         if draw['markers']:
             print('   markers: ' + ' > '.join(draw['markers']))
         print('   ' + label)

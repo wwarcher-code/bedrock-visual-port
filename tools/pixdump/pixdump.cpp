@@ -109,6 +109,80 @@ std::wstring findPixApi() {
 	return best;
 }
 
+struct ShaderCode {
+	std::string stage;
+	std::string hash;
+	size_t size = 0;
+};
+
+// Whether [address, address + size) is committed, readable memory (pipeline stream entries are walked
+// heuristically, so a pointer is checked before it is read).
+bool readable(const void* address, size_t size) {
+	MEMORY_BASIC_INFORMATION info;
+	const BYTE* p = static_cast<const BYTE*>(address);
+	const BYTE* end = p + size;
+	while (p < end) {
+		if (!VirtualQuery(p, &info, sizeof info) || info.State != MEM_COMMIT) return false;
+		if (info.Protect & (PAGE_NOACCESS | PAGE_GUARD)) return false;
+		p = static_cast<const BYTE*>(info.BaseAddress) + info.RegionSize;
+	}
+	return true;
+}
+
+void addShader(std::vector<ShaderCode>& out, const char* stage, const D3D12_SHADER_BYTECODE& code) {
+	if (!code.pShaderBytecode || code.BytecodeLength < 32 || code.BytecodeLength > (64u << 20)) return;
+	if (!readable(code.pShaderBytecode, 32)) return;
+	const BYTE* b = static_cast<const BYTE*>(code.pShaderBytecode);
+	if (memcmp(b, "DXBC", 4) != 0) return;
+	out.push_back({stage, hex(b + 4, 16), code.BytecodeLength});
+}
+
+// The shaders in a pipeline's creation description: a graphics or compute desc, or a pipeline state stream
+// (each subobject is a type followed by its value, aligned to pointers; the shader ones hold D3D12_SHADER_BYTECODE).
+std::vector<ShaderCode> shadersOf(const PIX_PIPELINE_STATE_STREAM_DESC* desc, PIX_PIPELINE_STATE_DESC_TYPE type) {
+	std::vector<ShaderCode> out;
+	if (!desc) return out;
+	if (type == PIX_PIPELINE_STATE_DESC_TYPE_GRAPHICS && readable(desc, sizeof(D3D12_GRAPHICS_PIPELINE_STATE_DESC))) {
+		auto* g = reinterpret_cast<const D3D12_GRAPHICS_PIPELINE_STATE_DESC*>(desc);
+		addShader(out, "vertex", g->VS);
+		addShader(out, "pixel", g->PS);
+		addShader(out, "domain", g->DS);
+		addShader(out, "hull", g->HS);
+		addShader(out, "geometry", g->GS);
+		return out;
+	}
+	if (type == PIX_PIPELINE_STATE_DESC_TYPE_COMPUTE && readable(desc, sizeof(D3D12_COMPUTE_PIPELINE_STATE_DESC))) {
+		auto* c = reinterpret_cast<const D3D12_COMPUTE_PIPELINE_STATE_DESC*>(desc);
+		addShader(out, "compute", c->CS);
+		return out;
+	}
+	if (!desc->SubobjectStream || !desc->SizeInBytes || !readable(desc->SubobjectStream, desc->SizeInBytes)) return out;
+	const BYTE* stream = static_cast<const BYTE*>(desc->SubobjectStream);
+	// Scan pointer-aligned slots for a shader subobject type followed by bytecode that starts with DXBC.
+	for (size_t at = 0; at + 8 + sizeof(D3D12_SHADER_BYTECODE) <= desc->SizeInBytes; at += sizeof(void*)) {
+		UINT32 t;
+		memcpy(&t, stream + at, 4);
+		const char* stage = nullptr;
+		switch (t) {
+		case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS: stage = "vertex"; break;
+		case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS: stage = "pixel"; break;
+		case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS: stage = "domain"; break;
+		case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS: stage = "hull"; break;
+		case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS: stage = "geometry"; break;
+		case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_CS: stage = "compute"; break;
+		case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_AS: stage = "amplification"; break;
+		case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS: stage = "mesh"; break;
+		default: continue;
+		}
+		D3D12_SHADER_BYTECODE code;
+		memcpy(&code, stream + at + sizeof(void*), sizeof code);
+		size_t before = out.size();
+		addShader(out, stage, code);
+		if (out.size() > before) at += sizeof code;
+	}
+	return out;
+}
+
 struct Binding {
 	std::string stage;
 	int reg = -1;
@@ -266,21 +340,24 @@ int wmain(int argc, wchar_t** argv) {
 			Ptr<IPixGenericPipeline> pipeline;
 			if (FAILED(state->GetGpuProgram(__uuidof(IPixGenericPipeline), pipeline.vout())) || !pipeline) continue;
 
-			// Shaders: stage and DXIL hash.
+			// Shaders: read from the pipeline state the game created (its shader bytecode's DXIL container digest,
+			// bytes 4-20), which matches Bedrock's material files. IPixShader::GetHash came back empty in practice.
 			std::string shadersJson = "[";
 			std::string key;
-			Ptr<IPixCollection> shaders;
-			if (SUCCEEDED(pipeline->GetShaders(__uuidof(IPixCollection), shaders.vout())) && shaders) {
-				for (UINT64 s = 0; s < shaders->GetCount(); s++) {
-					Ptr<IPixShader> shader;
-					if (FAILED(shaders->Get(s, __uuidof(IPixShader), shader.vout())) || !shader) continue;
-					std::vector<BYTE> hash(shader->GetHashSizeBytes());
-					if (!hash.empty()) shader->GetHash(static_cast<UINT32>(hash.size()), hash.data());
-					std::string h = hex(hash.data(), hash.size());
-					key += h + ";";
-					if (shadersJson.size() > 1) shadersJson += ",";
-					shadersJson += "{\"stage\":\"" + std::string(stageName(shader->GetStage())) + "\",\"hash\":\"" + h
-							+ "\",\"entry\":" + json(utf8(shader->GetEntryPoint())) + "}";
+			std::string pipelineName;
+			{
+				Ptr<IPixPipelineState> pso;
+				if (SUCCEEDED(pipeline->GetPipelineState(__uuidof(IPixPipelineState), pso.vout())) && pso) {
+					pipelineName = utf8(pso->GetName());
+					key += "pso" + std::to_string(static_cast<unsigned long long>(pso->GetApiObjectId())) + ";";
+					const PIX_PIPELINE_STATE_STREAM_DESC* desc = pso->GetDesc();
+					PIX_PIPELINE_STATE_DESC_TYPE descType = pso->GetOriginalDescType();
+					for (const ShaderCode& code : shadersOf(desc, descType)) {
+						key += code.hash + ";";
+						if (shadersJson.size() > 1) shadersJson += ",";
+						shadersJson += "{\"stage\":\"" + code.stage + "\",\"hash\":\"" + code.hash + "\",\"size\":"
+								+ std::to_string(code.size) + "}";
+					}
 				}
 			}
 			shadersJson += "]";
@@ -326,16 +403,19 @@ int wmain(int argc, wchar_t** argv) {
 					if (SUCCEEDED(hr) && blob) {
 						std::vector<BYTE> bytes(blob->GetSizeBytes());
 						if (!bytes.empty()) blob->GetData(bytes.size(), bytes.data());
-						// The view window starts at the view's offset into the resource.
+						// The blob runs from the resource's start; the view's window starts at its offset. Keep only the
+						// window (its size when known, else 4 KB: no Bedrock constant buffer is larger).
 						UINT64 offset = 0;
+						UINT64 size = 4096;
 						Ptr<IPixConstantBufferView> cbv;
 						if (SUCCEEDED(view->QueryInterface(__uuidof(IPixConstantBufferView), cbv.vout())) && cbv) {
 							const D3D12_CONSTANT_BUFFER_VIEW_DESC* desc = nullptr;
 							offset = cbv->GetBufferLocationOffset();
-							if (SUCCEEDED(cbv->GetDesc(&desc)) && desc && offset + desc->SizeInBytes <= bytes.size()) {
-								bytes = std::vector<BYTE>(bytes.begin() + offset, bytes.begin() + offset + desc->SizeInBytes);
-							}
+							if (SUCCEEDED(cbv->GetDesc(&desc)) && desc && desc->SizeInBytes > 0) size = desc->SizeInBytes;
 						}
+						if (offset >= bytes.size()) offset = 0;
+						if (size > bytes.size() - offset) size = bytes.size() - offset;
+						bytes = std::vector<BYTE>(bytes.begin() + offset, bytes.begin() + offset + size);
 						entry += ",\"offset\":" + std::to_string(offset) + ",\"bytes\":\"" + hex(bytes.data(), bytes.size()) + "\"";
 					} else {
 						failures++;
@@ -350,9 +430,9 @@ int wmain(int argc, wchar_t** argv) {
 			}
 			buffersJson += "]";
 
-			fprintf(out, "%s{\"queue\":%llu,\"event\":%u,\"name\":%s,\"markers\":%s,\"shaders\":%s,\"buffers\":%s}\n",
+			fprintf(out, "%s{\"queue\":%llu,\"event\":%u,\"name\":%s,\"pipeline\":%s,\"markers\":%s,\"shaders\":%s,\"buffers\":%s}\n",
 					first ? "" : ",", (unsigned long long)q, ev.Index, json(ev.Name ? ev.Name : "").c_str(),
-					markersJson.c_str(), shadersJson.c_str(), buffersJson.c_str());
+					json(pipelineName).c_str(), markersJson.c_str(), shadersJson.c_str(), buffersJson.c_str());
 			first = false;
 			exported++;
 			if (exported % 50 == 0) printf("  %d draws exported...\n", exported);
