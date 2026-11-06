@@ -97,6 +97,18 @@ public final class TestCapture {
 
 	/** @param only a saved spot's name to capture alone ("scene" for the test scene), or null for all */
 	public static void start(String only) {
+		start(only, false);
+	}
+
+	/**
+	 * /bv flicker: the far terrain's flicker test alone, from where the player stands, as things are (no
+	 * weather or time change, no teleports); its contact sheet and report as for a full capture.
+	 */
+	public static void startFlicker() {
+		start(null, true);
+	}
+
+	private static void start(String only, boolean flickerOnly) {
 		Minecraft minecraft = Minecraft.getInstance();
 		if (running) {
 			cancel();
@@ -121,11 +133,23 @@ public final class TestCapture {
 		viewBefore = GBufferDebugView.view();
 		lightingBefore = DeferredRenderer.isEnabled();
 		timeBefore = minecraft.level.getDefaultClockTime();
-		message("Capturing test views; stand still. It starts with a 20-second flicker test of the far terrain.");
-
 		STEPS.clear();
 		TestSpots.Spot here = TestSpots.here().orElseThrow();
 		returnTo = here;
+		if (flickerOnly) {
+			message("Flicker test of the far terrain: stand still for about 20 seconds.");
+			STEPS.add(() -> {
+				if (!minecraft.gui.hud.isHidden()) {
+					minecraft.gui.hud.toggle();
+				}
+				report.lightingAt("the flicker test");
+			});
+			addFlickerShots();
+			STEPS.add(TestCapture::restore);
+			STEPS.add(TestCapture::finishWhenSaved);
+			return;
+		}
+		message("Capturing test views; stand still. It starts with a 20-second flicker test of the far terrain.");
 		STEPS.add(() -> {
 			if (!minecraft.gui.hud.isHidden()) {
 				minecraft.gui.hud.toggle();

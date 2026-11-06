@@ -153,6 +153,7 @@ Don't move between the commands: the shots must be taken from where `bv/scene` p
 | F7 | Cycle debug views: albedo, normal, material, light, shadow test, cascades, local exposure, bloom, water map, off |
 | F8 | Deferred lighting on and off, for comparison with vanilla |
 | F9 or `/bv capture` | The full test capture above (scene and every spot); F9 again cancels it |
+| `/bv flicker` | The far terrain's flicker test alone, where you stand and as things are (about 20 seconds) |
 | `/bv capture <name>` | Capture one spot alone (`scene` for the test scene) |
 | `/bv scene` | Go to this world's test scene (builds it where you stand the first time) |
 | `/bv scene build` | Build the test scene where you stand, and remember it |

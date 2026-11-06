@@ -23,6 +23,7 @@ public final class DevCommands {
 			  /bv spots           list this world's spots
 			  /bv go <name>       go to a spot
 			  /bv capture [name]  same as F9, or just one spot ("scene" for the test scene)
+			  /bv flicker         the far terrain's flicker test alone, where you stand (about 20 seconds)
 			  /bv status          copy the diagnostics report to the clipboard""";
 
 	private DevCommands() {
@@ -73,6 +74,10 @@ public final class DevCommands {
 							TestCapture.start(name);
 							return 1;
 						})))
+						.then(ClientCommands.literal("flicker").executes(c -> {
+							TestCapture.startFlicker();
+							return 1;
+						}))
 						.then(ClientCommands.literal("scene").executes(c -> {
 							var scene = TestSpots.get(TestSpots.SCENE);
 							if (scene.isPresent()) {
