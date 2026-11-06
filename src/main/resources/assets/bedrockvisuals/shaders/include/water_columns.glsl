@@ -93,14 +93,16 @@ vec3 waterTestPointOn(vec3 p, vec3 n) {
 }
 
 // Bedrock's water volume (PopulateVolume's water medium, WaterAlbedoExtinction.w in the captures of the default
-// water): the light the water scatters is dimmed by the volume at this rate, every channel, before it leaves
-// the water, so deep water reaches its colour (the albedo times the light) within about nine blocks. The view
-// extinction alone (WaterExtinction, 0.041 a block in blue) let the blue keep building for some 25 blocks to
-// several times that, and a drop-off showed as a hard seam of saturated blue.
+// water): 0.112 a block in every channel. Seen from above water, what lies under the surface reaches the camera
+// through the scattering volume's transmittance (which holds this) and then the surface's WaterExtinction
+// (DeferredWater), so both the floor and the light the water scatters fade at their sum: deep water settles at
+// about the albedo times the light within a few blocks, and a shallow floor beside it is dimmed as much as
+// Bedrock's (with the view extinction alone the blue built for some 25 blocks to several times Bedrock's level,
+// and a drop-off showed as a hard seam).
 const float WATER_VOLUME_EXTINCTION = 0.112349;
 
 vec3 waterScatterExtinction() {
-    return max(UnderwaterMedium.rgb, vec3(WATER_VOLUME_EXTINCTION));
+    return UnderwaterMedium.rgb + vec3(WATER_VOLUME_EXTINCTION);
 }
 
 // What's left of light the water scatters at p on its way out through the surface, along the view.
@@ -121,10 +123,10 @@ vec3 waterTransmittanceAt(vec3 testPoint, vec3 p, vec3 dir) {
     }
     depth = max(depth + testPoint.y - p.y, 0.0);
     float path = min(depth / max(-dir.y, 0.05), 64.0);
-    return exp(-UnderwaterMedium.rgb * path);
+    return exp(-waterScatterExtinction() * path);
 }
 
-// The water's extinction between its surface and the surface at p, along the view from the camera (above
+// The water's extinction (the view's and the volume's) between its surface and the surface at p, along the view from the camera (above
 // water), or 1 when p isn't under the mapped water.
 vec3 waterTransmittanceTo(vec3 p, vec3 dir) {
     return waterTransmittanceAt(waterTestPoint(p), p, dir);

@@ -144,7 +144,7 @@ vec3 bvMedium(vec3 color) {
         float depth = depthBelowWaterSurface(waterTestPoint(bvPosition));
         if (depth >= 0.0) {
             float path = min(depth / max(-dir.y, 0.05), 64.0);
-            color = color * exp(-UnderwaterMedium.rgb * path) + waterInScatter(dir, path, 1.0,
+            color = color * exp(-waterScatterExtinction() * path) + waterInScatter(dir, path, 1.0,
                     waterSkyAccess(max(waterColumnSkyLight(waterTestPoint(bvPosition)), 0.0)));
         }
     }

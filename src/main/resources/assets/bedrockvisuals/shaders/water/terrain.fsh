@@ -188,7 +188,8 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
         float ratio = viewDistance(opaque) / max(viewDistance(gl_FragCoord.z), 1e-4);
         path = min(length(v_Position) * max(ratio - 1.0, 0.0), BOTTOMLESS);
     }
-    s.transmittance = exp(-(Absorption.rgb + Scattering.rgb) * path);
+    // The view's extinction and the water volume's (water_columns.glsl).
+    s.transmittance = exp(-(Absorption.rgb + Scattering.rgb + vec3(WATER_VOLUME_EXTINCTION)) * path);
     s.path = path;
     s.scatters = UnderwaterParams.x < 0.5;
     s.beneathLit = 1.0;

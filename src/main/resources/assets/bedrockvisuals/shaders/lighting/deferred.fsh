@@ -486,7 +486,7 @@ vec3 distantWaterSurface(vec3 below, vec3 ray, float surface, float ground, vec3
     }
     const float ROUGHNESS = 0.085;
     float fresnel = 0.02 + 0.98 * pow(1.0 - nDotV, 5.0);
-    vec3 transmittance = exp(-UnderwaterMedium.rgb * max(ground - surface, 0.0));
+    vec3 transmittance = exp(-waterScatterExtinction() * max(ground - surface, 0.0));
     // F0 = mix(0.04, grey 0.371 (linear), metalness 0.0667), as for the near water.
     float f0 = mix(0.04, 0.371, 0.0667);
     float specularScale;
