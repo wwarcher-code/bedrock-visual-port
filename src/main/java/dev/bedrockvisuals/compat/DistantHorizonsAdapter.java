@@ -147,6 +147,37 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 			BedrockVisualsClient.LOGGER.warn("[distant] couldn't {} Distant Horizons' shading, noise and occlusion",
 					plain ? "turn off" : "restore", e);
 		}
+		vanillaFade(!plain);
+	}
+
+	/**
+	 * DH's vanilla fade blends its own LOD colour over the vanilla chunks near their edge, after Minecraft's
+	 * terrain and so after this renderer's lighting: an unlit band of DH's colour just inside the vanilla
+	 * render distance. The lighting pass already lights DH's terrain where vanilla has none, so the fade goes
+	 * while it does. Not in DH's public API: its internal config entry, overridden like an API setting (its
+	 * saved setting is left alone).
+	 */
+	private static com.seibel.distanthorizons.api.enums.config.EDhApiMcRenderingFadeMode savedFade;
+
+	private static void vanillaFade(boolean on) {
+		try {
+			var entry = com.seibel.distanthorizons.core.config.Config.Client.Advanced.Graphics.Quality.vanillaFadeMode;
+			var none = com.seibel.distanthorizons.api.enums.config.EDhApiMcRenderingFadeMode.NONE;
+			if (entry.getAllowApiOverride()) {
+				entry.setApiValue(on ? null : none, "Bedrock Visuals");
+			} else if (!on) {
+				// No API override on this entry: set in memory only, never saved, and put back on restore.
+				if (savedFade == null) {
+					savedFade = entry.get();
+				}
+				entry.setWithoutSaving(none);
+			} else if (savedFade != null) {
+				entry.setWithoutSaving(savedFade);
+				savedFade = null;
+			}
+		} catch (RuntimeException | LinkageError e) {
+			BedrockVisualsClient.LOGGER.warn("[distant] couldn't {} Distant Horizons' vanilla fade", on ? "restore" : "turn off", e);
+		}
 	}
 
 	/** Copies DH's colour and depth as they are before its translucent pass. */
