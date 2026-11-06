@@ -33,8 +33,11 @@ layout(std140) uniform WaterData {
     vec4 FlowRect;    // the same for water_flow
     vec4 Absorption;  // per block, linear RGB
     vec4 Scattering;  // per block, linear RGB; w: 1 when water shading is on
-    vec4 Animation;   // x: current frame of the surface maps, y: frames in them
+    vec4 Animation;   // x: current frame of the surface maps, y: frames in them; z: 1 when u_BrdfLut is Bedrock's
 };
+
+// Bedrock's split-sum BRDF table (BrdfLut.java), read as DeferredIndirectSpecular reads it.
+uniform sampler2D u_BrdfLut;
 
 // Bedrock's water_still_grey normal map and MERS (WaterSurfaceMaps.java): strips of 16x16 frames.
 uniform sampler2D u_WaterNormal;
@@ -119,6 +122,7 @@ float viewDistance(float depth) {
 struct WaterSurface {
     vec3 n;              // with the surface map's per-texel tilt
     float roughness;     // the surface map's per-texel roughness
+    float metalness;     // the surface map's per-texel metalness, as the G-buffer stores it
     vec3 v;
     float fresnel;
     vec3 transmittance;  // along the path from the surface to the bottom
@@ -127,7 +131,7 @@ struct WaterSurface {
 
 // This texel's normal and MERS from Bedrock's surface maps, for the current animation frame. The water
 // sprite's UVs cover 16 texels per block (32 for the flowing sprite, which spans two).
-void surfaceTexel(out vec3 tangentNormal, out float roughness) {
+void surfaceTexel(out vec3 tangentNormal, out float roughness, out float metalness) {
     vec4 rect = inRect(v_TexCoord, StillRect) ? StillRect : FlowRect;
     vec2 local = (v_TexCoord - rect.xy) / max(rect.zw - rect.xy, vec2(1e-6));
     float spriteTexels = max(round((rect.z - rect.x) / u_TexelSize.x), 1.0);
@@ -137,7 +141,11 @@ void surfaceTexel(out vec3 tangentNormal, out float roughness) {
     texel.y += int(Animation.x) * frameSize;
     texel = clamp(texel, ivec2(0), mapSize - 1);
     tangentNormal = normalize(texelFetch(u_WaterNormal, texel, 0).xyz * 2.0 - 1.0);
-    roughness = texelFetch(u_WaterMers, texel, 0).b;
+    vec4 mers = texelFetch(u_WaterMers, texel, 0);
+    roughness = mers.b;
+    // Bedrock's G-buffer keeps metalness in the colour target's alpha as 0.5 + 0.498 m, which
+    // DeferredIndirectSpecular reads back as saturate((a - 0.502) × 2.0079): water's 0.0706 becomes 0.0667.
+    metalness = clamp((0.5 + 0.498 * mers.r - 0.50196) * 2.00787, 0.0, 1.0);
 }
 
 WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
@@ -147,7 +155,7 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
         face = -face;
     }
     vec3 tangentNormal;
-    surfaceTexel(tangentNormal, s.roughness);
+    surfaceTexel(tangentNormal, s.roughness, s.metalness);
     s.n = normalize(tangent * tangentNormal.x + bitangent * tangentNormal.y + face * tangentNormal.z);
     if (dot(s.n, v_Position) > 0.0) {
         s.n = face;
@@ -245,7 +253,7 @@ vec4 screenSpaceReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
 // The straight-alpha color that, blended over the scene beneath at the surface's opacity, gives the water's
 // look: reflection + glint + (1 - F) * (bottom * transmittance + scattered light). The parts combine on screen
 // (after tone mapping), since the scene beneath and the reflections come from the finished image.
-vec3 waterColor(WaterSurface s) {
+vec3 waterColor(WaterSurface s, float albedo) {
     if (UnderwaterParams.x > 0.5) {
         vec2 size = vec2(textureSize(u_GBufferDepth, 0));
         vec2 self = toScreen(v_Position, size, false).xy;
@@ -260,6 +268,22 @@ vec3 waterColor(WaterSurface s) {
     }
     vec2 levels = clamp((v_LightCoord * 256.0 - 8.0) / 240.0, 0.0, 1.0);
     float sky = levels.y * levels.y;
+    // Bedrock draws the water surface into its G-buffer (DoWaterSurfaceBuffer) and DeferredIndirectSpecular
+    // reflects onto it as onto terrain: the sky probe faded in over sky light 12 to 15 (cubed) at
+    // IBLParameters.z 0.5, replaced by SSR where that hits, all times F0 × A + B from the BRDF table, with
+    // F0 = mix(0.04, albedo, metalness) for the grey water texel. DeferredWater's own Fresnel (F0 0.02) only
+    // sets how much of the scene beneath shows through.
+    float iblFade = pow(clamp((levels.y * 15.0 - 12.0) / 3.0, 0.0, 1.0), 3.0) * 0.5;
+    float f0 = mix(0.04, albedo, s.metalness);
+    float nDotVClamped = clamp(dot(s.n, s.v), 0.0, 1.0);
+    float specularScale;
+    if (Animation.z > 0.5) {
+        vec2 ab = texture(u_BrdfLut, vec2(nDotVClamped, 1.0 - s.roughness)).rg;
+        specularScale = f0 * ab.x + ab.y;
+    } else {
+        specularScale = (f0 + (max(1.0 - s.roughness, f0) - f0) * pow(1.0 - nDotVClamped, 5.0))
+                * (1.0 - 0.7 * s.roughness);
+    }
     vec3 sunDir = normalize(SunDirection.xyz);
     vec3 moonDir = normalize(MoonDirection.xyz);
     vec2 size = vec2(textureSize(u_GBufferDepth, 0));
@@ -274,12 +298,12 @@ vec3 waterColor(WaterSurface s) {
     vec3 skyReflection;
     if (AtmosphereZenith.w > 0.5) {
         // Bedrock's sky probe is its sky (the atmosphere function), so the water reflects the same sky.
-        skyReflection = toDisplay(locallyExposed(bedrockSkyReflection(mirror, s.roughness, sunDir, moonDir) * sky));
+        skyReflection = toDisplay(locallyExposed(bedrockSkyReflection(mirror, s.roughness, sunDir, moonDir) * iblFade));
     } else {
         float horizonShare = 0.3 * (1.0 - clamp(mirror.y * 0.5 + 0.5, 0.0, 1.0));
-        skyReflection = toDisplay(locallyExposed(mix(SkyColor.rgb, SkyHorizonColor.rgb, horizonShare) * sky));
+        skyReflection = toDisplay(locallyExposed(mix(SkyColor.rgb, SkyHorizonColor.rgb, horizonShare) * iblFade));
         // Rougher texels see a blurrier sky; here the reflected sky leans towards its average.
-        skyReflection = mix(skyReflection, toDisplay(locallyExposed(mix(SkyColor.rgb, SkyHorizonColor.rgb, 0.15) * sky)),
+        skyReflection = mix(skyReflection, toDisplay(locallyExposed(mix(SkyColor.rgb, SkyHorizonColor.rgb, 0.15) * iblFade)),
                 s.roughness);
     }
     // Bedrock's SSR is mirror-only: full up to roughness 0.3, gone by 0.4.
@@ -302,7 +326,7 @@ vec3 waterColor(WaterSurface s) {
     vec3 behind = texelFetch(u_SceneColor, ivec2(gl_FragCoord.xy), 0).rgb;
     // Bedrock's water only absorbs (WaterExtinction); light scattered in the water comes from volumetric fog.
     vec3 transmitted = behind * s.transmittance;
-    vec3 target = clamp(s.fresnel * reflection + (1.0 - s.fresnel) * transmitted + toDisplay(locallyExposed(glint)),
+    vec3 target = clamp(specularScale * reflection + (1.0 - s.fresnel) * transmitted + toDisplay(locallyExposed(glint)),
             0.0, 1.0);
     return clamp((target - (1.0 - s.opacity) * behind) / max(s.opacity, 1e-3), 0.0, 1.0);
 }
@@ -325,7 +349,9 @@ void main() {
         #ifdef OIT_ALPHA_ONLY
         executeAlphaOnlyPhase(gl_FragCoord.z, surface.opacity);
         #else
-        fragColor = calculateFinalColor(vec4(waterColor(surface), surface.opacity));
+        // The water texel's grey (untinted: Bedrock's G-buffer gets water_still_grey's colour), linear.
+        float albedo = toLinear(vec3(dot(color.rgb, vec3(0.2126, 0.7152, 0.0722)))).r;
+        fragColor = calculateFinalColor(vec4(waterColor(surface, albedo), surface.opacity));
         #endif
         return;
     }

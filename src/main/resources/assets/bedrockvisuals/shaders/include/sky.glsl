@@ -64,13 +64,14 @@ vec3 bedrockSkyRadiance(vec3 d, vec3 sunDir, vec3 moonDir) {
 }
 
 // The sky seen along d, in this renderer's units (before exposure), as a reflection of the given roughness
-// sees it. Bedrock samples its pre-convolved sky probe at mip (IBLParameters.y - 1) × (1 - (1 - r)⁴) of 9
-// (DeferredIndirectSpecular), so the blur grows quickly with roughness and a rough surface sees the whole
+// sees it. Bedrock samples its pre-convolved sky probe at mip (IBLParameters.y - 1) × (1 - (1 - r)²) of 9
+// (DeferredIndirectSpecular with ConvolutionType 1, as captured; (1 - r)⁸ otherwise), so the blur grows
+// quickly with roughness and a rough surface sees the whole
 // sky's average. Here a ring of 8 directions around d, up to 60° out at the roughest mip, stands in for the
 // convolution.
 vec3 bedrockSkyReflection(vec3 d, float roughness, vec3 sunDir, vec3 moonDir) {
-    float smooth4 = pow(clamp(1.0 - roughness, 0.0, 1.0), 4.0);
-    float mip = 1.0 - smooth4;
+    float smoothness = clamp(1.0 - roughness, 0.0, 1.0);
+    float mip = 1.0 - smoothness * smoothness;
     vec3 sky = bedrockSkyRadiance(d, sunDir, moonDir);
     if (mip > 0.02) {
         vec3 side = normalize(abs(d.y) < 0.9 ? cross(d, vec3(0.0, 1.0, 0.0)) : cross(d, vec3(1.0, 0.0, 0.0)));

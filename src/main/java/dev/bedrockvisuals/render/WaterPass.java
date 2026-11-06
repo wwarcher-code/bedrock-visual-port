@@ -43,6 +43,7 @@ public final class WaterPass {
 			.withUniform("u_WaterNormal", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("u_WaterMers", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("AtmosphereData", UniformType.UNIFORM_BUFFER)
+			.withUniform("u_BrdfLut", UniformType.COMBINED_IMAGE_SAMPLER)
 			).build();
 	/** std140 size of WaterData in water/terrain.fsh: five vec4s. */
 	private static final int DATA_SIZE = 5 * 16;
@@ -100,7 +101,7 @@ public final class WaterPass {
 				ClientLevel level = Minecraft.getInstance().level;
 				long ticks = level == null ? 0 : level.getGameTime();
 				int frames = WaterSurfaceMaps.frames();
-				builder.putVec4((float) ((ticks / 2) % frames), frames, 0, 0);
+				builder.putVec4((float) ((ticks / 2) % frames), frames, BrdfLut.view() != null ? 1 : 0, 0);
 				RenderSystem.getDevice().createCommandEncoder().writeToBuffer(data.slice(), builder.get());
 			}
 			ready = true;
@@ -147,6 +148,9 @@ public final class WaterPass {
 		pass.setUniform("u_WaterNormal", WaterSurfaceMaps.normal(), nearest);
 		pass.setUniform("u_WaterMers", WaterSurfaceMaps.mers(), nearest);
 		pass.setUniform("AtmosphereData", LightingPass.atmosphereData());
+		// Without Bedrock's table the shader approximates it (WaterData.Animation.z 0) and never reads this.
+		pass.setUniform("u_BrdfLut", BrdfLut.view() != null ? BrdfLut.view() : WaterSurfaceMaps.mers(),
+				RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
 		LocalExposure.bind(pass);
 	}
 

@@ -46,6 +46,8 @@ public final class Underwater {
 	private static boolean loaded;
 
 	private static boolean submerged;
+	/** When the camera last went under water, System.nanoTime(). */
+	private static long submergedSince;
 	/** Height of the water's surface above the camera, blocks; large when the water is very deep. */
 	private static float surfaceAbove;
 	private static final long START = System.nanoTime();
@@ -58,7 +60,11 @@ public final class Underwater {
 		Minecraft minecraft = Minecraft.getInstance();
 		Camera camera = minecraft.gameRenderer.mainCamera();
 		ClientLevel level = minecraft.level;
+		boolean wasSubmerged = submerged;
 		submerged = level != null && camera.getFluidInCamera() == FogType.WATER;
+		if (submerged && !wasSubmerged) {
+			submergedSince = System.nanoTime();
+		}
 		if (!submerged) {
 			return;
 		}
@@ -75,6 +81,11 @@ public final class Underwater {
 			top = pos.getY() - 1 + fluid.getHeight(level, pos.below());
 		}
 		surfaceAbove = Math.max(top - (float) cameraY, 0f);
+	}
+
+	/** How long the camera has been under water, seconds (for the water fog's transition). */
+	static float secondsSubmerged() {
+		return submerged ? (System.nanoTime() - submergedSince) / 1e9f : 0f;
 	}
 
 	static boolean submerged() {

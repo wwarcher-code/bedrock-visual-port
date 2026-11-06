@@ -436,7 +436,8 @@ done by writing back from a copy.
 
 - `F0 = mix(0.04, albedo, metalness)`; metalness is `saturate((ColorMetalnessSubsurface.a - 0.502) × 2.0079)`.
 - The probe (the sky probe cube) is sampled at the reflected view direction at mip
-  `(IBLParameters.y - 1) × (1 - (1 - r)⁴)` (`(1 - r)²` when `ConvolutionType` is 1), with `IBLParameters.y` 10.
+  `(IBLParameters.y - 1) × (1 - (1 - r)²)` when `ConvolutionType` is 1 (as in every capture), else
+  `(1 - r)⁸`, with `IBLParameters.y` 10.
   It's blended between the last two probe captures by `IBLParameters.w`.
 - It's scaled by `saturate((sky light - IBLSkyFadeParameters.y) / max(.x - .y, 1))³ × IBLParameters.x × .z`.
   With `.z` 0.5, that's the fade in over sky light 12 to 15.

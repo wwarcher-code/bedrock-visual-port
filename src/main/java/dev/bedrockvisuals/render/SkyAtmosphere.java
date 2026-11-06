@@ -77,6 +77,7 @@ public record SkyAtmosphere(Vector3f zenith, Vector3f horizon, Vector4f blendSto
 	static SkyAtmosphere sample(AtmosphereSettings atmosphere, LightingSettings lighting, float time,
 			Vector3f sunDirection, Vector3f moonDirection, Vector4f fog, FogSettings.VolumetricFog air) {
 		Vector4f[] volume = volume(air);
+		volume[0].w *= Weather.airExtinctionScale();
 		Rgba sunColor = Weather.sky(lighting.sun().color().sample(time));
 		Rgba moonColor = Weather.sky(lighting.moon().color().sample(time));
 		return new SkyAtmosphere(
@@ -96,7 +97,8 @@ public record SkyAtmosphere(Vector3f zenith, Vector3f horizon, Vector4f blendSto
 	 * the sky's behind it) from {@code fog_start} to {@code fog_end}, fractions of the render distance (or
 	 * blocks, for "fixed" fogs). Off ({@code w} 0) when there's no air fog.
 	 */
-	static Vector4f distanceFog(FogSettings.DistanceFog air, float renderDistanceBlocks) {
+	static Vector4f distanceFog(FogSettings.DistanceFog air, FogSettings.DistanceFog weather,
+			float renderDistanceBlocks) {
 		if (air == null || air.end() <= air.start()) {
 			return new Vector4f(0);
 		}
@@ -104,10 +106,64 @@ public record SkyAtmosphere(Vector3f zenith, Vector3f horizon, Vector4f blendSto
 		// Vibrant Visuals starts the render-distance fog at 0.75, not the fog file's 0.92: the captures'
 		// FogAndDistanceControl is (0.75, 4, 384), with the vanilla packs all saying 0.92.
 		float start = air.relativeToRenderDistance() ? VIBRANT_FOG_START : air.start();
-		return new Vector4f(start, 1f / (air.end() - start), distance, 1);
+		float end = air.end();
+		// Rain pulls the fog in towards the weather fog (Weather.fogRange), when both are in the same units.
+		if (weather != null && weather.relativeToRenderDistance() == air.relativeToRenderDistance()
+				&& weather.end() > weather.start()) {
+			float[] range = Weather.fogRange(start, end, weather.start(), weather.end());
+			start = range[0];
+			end = range[1];
+		}
+		return new Vector4f(start, 1f / Math.max(end - start, 1e-3f), distance, 1);
 	}
 
 	static final float VIBRANT_FOG_START = 0.75f;
+
+	/*
+	 * Under water Bedrock swaps the atmosphere function's inputs for its own (GPU capture 2, camera under water
+	 * at noon): SkyZenithColor (0, 0.2, 0.2), SkyHorizonColor (0, 0.8, 0.8), FogSkyBlend (0, 0.60554, 0.56068,
+	 * 0.8), AtmosphericScattering.x 0.5. They're in no pack file. Its distance fog then fades the scene into
+	 * that teal, and the sky above the surface is the same function.
+	 */
+	private static final Vector3f UNDERWATER_ZENITH = new Vector3f(0f, 0.2f, 0.2f);
+	private static final Vector3f UNDERWATER_HORIZON = new Vector3f(0f, 0.8f, 0.8f);
+	private static final Vector4f UNDERWATER_BLEND = new Vector4f(0f, 0.60554f, 0.56068f, 0.8f);
+	private static final float UNDERWATER_RAYLEIGH = 0.5f;
+
+	/**
+	 * This atmosphere as Bedrock has it while the camera is under water: the captured underwater sky, and the
+	 * water's distance fog (Underwater.waterFog).
+	 */
+	SkyAtmosphere underwater(Vector4f waterFog) {
+		return new SkyAtmosphere(new Vector3f(UNDERWATER_ZENITH), new Vector3f(UNDERWATER_HORIZON),
+				new Vector4f(UNDERWATER_BLEND),
+				new Vector4f(UNDERWATER_RAYLEIGH, scattering.y, scattering.z, scattering.w), sun, moon, waterFog,
+				volumeAir, volumeHeight);
+	}
+
+	/**
+	 * The water's distance fog ({@code distance.water}: fixed, 0 to 60 blocks in vanilla), grown in by its
+	 * transition fog over the time spent under water. Captured about 7 s after going under:
+	 * FogAndDistanceControl (0, 9.21555, 384), so the fog ends at 41.7 blocks, which is 60 at the transition's
+	 * 0.694 (0.6 at 5 s rising to 1 at 30 s).
+	 */
+	static Vector4f waterFog(FogSettings.DistanceFog water, FogSettings.TransitionFog transition, float seconds,
+			float renderDistanceBlocks) {
+		if (water == null || water.end() <= water.start()) {
+			return new Vector4f(0);
+		}
+		float scale = water.relativeToRenderDistance() ? renderDistanceBlocks : 1f;
+		float start = water.start() * scale;
+		float end = water.end() * scale;
+		if (transition != null) {
+			FogSettings.DistanceFog init = transition.init();
+			float initScale = init.relativeToRenderDistance() ? renderDistanceBlocks : 1f;
+			float percent = transition.percent(seconds);
+			start = init.start() * initScale + (start - init.start() * initScale) * percent;
+			end = init.end() * initScale + (end - init.end() * initScale) * percent;
+		}
+		return new Vector4f(start, 1f / Math.max(end - start, 1e-3f), 1f, 1);
+	}
 
 	/** Writes AtmosphereData; {@code null} writes a disabled block (the shader leaves Java's sky). */
 	static void write(Std140Builder builder, SkyAtmosphere sky) {

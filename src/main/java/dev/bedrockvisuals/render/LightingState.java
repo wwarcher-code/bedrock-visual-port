@@ -90,6 +90,25 @@ public record LightingState(
 		// thunder: SunColor (0.404, 0.404, 0.404, 100) and (0.251, 0.251, 0.251, 100), Weather.sky).
 		float skyIntensity = lighting.skyIntensity().sample(time);
 		float skyAmbient = SKY_INDIRECT * (sunIlluminance + moonIlluminance + ambientIlluminance) * skyIntensity;
+		FogSettings fog = pack.get().fog(biome.fog());
+		boolean overworld = level.dimensionType().skybox() == DimensionType.Skybox.OVERWORLD;
+		SkyAtmosphere sky = overworld
+				? SkyAtmosphere.sample(atmosphere, lighting, time, sunDirection, new Vector3f(sunDirection).negate(),
+						distanceFog(fog), fog.volumetric().get("air"))
+				: null;
+		// Under water the sky light takes the water fog's colour (GPU capture 2: SkyAmbientLightColorIntensity
+		// (0.222988, 0.673226, 0.938823, 18.35), the FogColor, at the usual intensity) and the atmosphere is
+		// Bedrock's underwater one (SkyAtmosphere.underwater).
+		Vector3f skyAmbientColor = new Vector3f(SKY_AMBIENT_COLOR);
+		FogSettings.DistanceFog water = fog.distance().get("water");
+		if (Underwater.submerged() && water != null) {
+			skyAmbientColor = srgb(water.color());
+			if (sky != null) {
+				float blocks = Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f;
+				sky = sky.underwater(SkyAtmosphere.waterFog(water, fog.transitions().get("water"),
+						Underwater.secondsSubmerged(), blocks));
+			}
+		}
 		return new LightingState(
 				sunDirection,
 				// Bedrock sends the sun and moon colours as sRGB/255, not linearised (the captures' SunColor is
@@ -97,15 +116,11 @@ public record LightingState(
 				srgb(Weather.sky(lighting.sun().color().sample(time))).mul(sunIlluminance * UNIT),
 				new Vector3f(sunDirection).negate(),
 				srgb(Weather.sky(lighting.moon().color().sample(time))).mul(moonIlluminance * UNIT),
-				new Vector3f(SKY_AMBIENT_COLOR).mul(skyAmbient * UNIT),
+				skyAmbientColor.mul(skyAmbient * UNIT),
 				linear(horizon).mul(skyIntensity * 0.25f),
 				linear(lighting.ambientColor()).mul(ambientIlluminance * UNIT),
 				new Vector3f(BLOCK_LIGHT).mul(BLOCK_LIGHT_INTENSITY * UNIT),
-				level.dimensionType().skybox() == DimensionType.Skybox.OVERWORLD
-						? SkyAtmosphere.sample(atmosphere, lighting, time, sunDirection, new Vector3f(sunDirection).negate(),
-								distanceFog(pack.get().fog(biome.fog())),
-								pack.get().fog(biome.fog()).volumetric().get("air"))
-						: null,
+				sky,
 				sunIlluminance);
 	}
 
@@ -123,7 +138,7 @@ public record LightingState(
 			}
 			blocks = Math.max(blocks, distant);
 		}
-		return SkyAtmosphere.distanceFog(fog.distance().get("air"), blocks);
+		return SkyAtmosphere.distanceFog(fog.distance().get("air"), fog.distance().get("weather"), blocks);
 	}
 
 	private static LightingState fallback(float time) {

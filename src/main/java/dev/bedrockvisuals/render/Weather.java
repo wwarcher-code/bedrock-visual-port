@@ -70,6 +70,29 @@ public final class Weather {
 				array.get(2).getAsFloat() / 255f};
 	}
 
+	/**
+	 * How much rain thickens the air for the volumetric fog: AirAlbedoExtinction.w is 0.001 in clear plains and
+	 * 0.004 in rain and in thunder (GPU captures at noon, rain level about 1), so the extinction is scaled by
+	 * {@code 1 + 3 × rain}.
+	 */
+	private static final float RAIN_AIR_EXTINCTION = 4f;
+
+	/** The volumetric air's extinction multiplier under the current weather. */
+	static float airExtinctionScale() {
+		return 1 + (RAIN_AIR_EXTINCTION - 1) * rain();
+	}
+
+	/**
+	 * The distance fog under the current weather: Bedrock blends from the air fog towards the fog file's
+	 * {@code weather} entry (default: start 0.23, end 0.7, #666666) by the rain level. Captured in rain:
+	 * FogAndDistanceControl (0.23071, 2.12948), which is exactly (0.75, 1) blended to (0.23, 0.7) at rain
+	 * 0.9986. Returns {start, end}.
+	 */
+	static float[] fogRange(float start, float end, float weatherStart, float weatherEnd) {
+		float rain = rain();
+		return new float[] {start + (weatherStart - start) * rain, end + (weatherEnd - end) * rain};
+	}
+
 	private static float rain() {
 		ClientLevel level = Minecraft.getInstance().level;
 		return level == null ? 0 : level.getRainLevel(1f);

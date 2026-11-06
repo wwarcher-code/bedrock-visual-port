@@ -39,7 +39,7 @@ def index_shaders(root):
     return index
 
 
-TYPE = re.compile(r';\s+(column_major\s+)?(float|int|uint|bool)(\d)?(x\d)?\s+(\w+)(\[(\d+)\])?;\s+; Offset:\s+(\d+)')
+TYPE = re.compile(r';\s+(column_major\s+)?(float|int|uint|bool)(\d)?(x\d)?\s+(\w+)(\[(\d+)\])?;\s*;\s+Offset:\s+(\d+)')
 
 
 def reflection(path, dumpbin, cache={}):
