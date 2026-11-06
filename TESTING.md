@@ -58,7 +58,7 @@ The capture can't show everything that moves. After F9, look at these by eye:
 - **Cloud shadows** drifting across the ground at noon, and the clouds themselves at low sun.
 - **Light shafts** through the tree and the overhang at low sun (volumetric fog).
 - **Under water**: swim in the pool or an ocean; caustics play on everything while your head is under.
-- **Rain**: `/weather rain` greys the sky and clouds and switches the sun's direct light off.
+- **Rain**: `/weather rain` greys the sky, clouds, sun and moon alike (Bedrock's captured SunColor 0.404 in rain, 0.251 in thunder); shadows stay, softer in tone.
 - **Reflections** on the iron and gold blocks now show the scene, not only the sky.
 - **Bloom** around glowstone and the sea lantern at midnight.
 - **Clouds** with Distant Horizons on: from a high place, they should carry on to the horizon over the
