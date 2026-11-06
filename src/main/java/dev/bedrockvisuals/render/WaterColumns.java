@@ -36,6 +36,8 @@ public final class WaterColumns {
 	private static final int ROWS_PER_FRAME = 16;
 	/** How far down a water body is followed; deeper water counts as this deep. */
 	private static final int MAX_DEPTH = 96;
+	/** How far below a solid top block the map looks for water (overhangs over a lake's edge). */
+	private static final int UNDER_COVER = 12;
 
 	private static GpuTexture texture;
 	private static GpuTextureView view;
@@ -93,6 +95,18 @@ public final class WaterColumns {
 			int top = chunk.getHeight(Heightmap.Types.MOTION_BLOCKING, x & 15, z & 15);
 			pos.set(x, top, z);
 			FluidState fluid = chunk.getFluidState(pos);
+			// Under an overhang (a ledge, a lily pad's block, a tree over the shore) the top block is solid and
+			// the water lies below it: look down a little way for it, so water in the shade counts as water (it
+			// was left to the water pass's unshadowed estimate and came out bright blue).
+			for (int below = 1; below <= UNDER_COVER && !fluid.is(FluidTags.WATER) && top - below > minY; below++) {
+				pos.setY(top - below);
+				FluidState under = chunk.getFluidState(pos);
+				if (under.is(FluidTags.WATER)) {
+					top -= below;
+					fluid = under;
+				}
+			}
+			pos.setY(top);
 			if (fluid.is(FluidTags.WATER)) {
 				float height = fluid.getHeight(level, pos);
 				int y = top;
