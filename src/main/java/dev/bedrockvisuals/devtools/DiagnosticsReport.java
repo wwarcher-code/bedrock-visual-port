@@ -86,6 +86,7 @@ final class DiagnosticsReport {
 				+ dev.bedrockvisuals.render.DistantHeights.status()));
 		line("volumetric fog " + dev.bedrockvisuals.render.FroxelVolume.status());
 		line("sun and moon " + dev.bedrockvisuals.render.SunMoon.status());
+		line("sky probe " + dev.bedrockvisuals.render.SkyProbe.status());
 		line("biome mix " + dev.bedrockvisuals.render.BiomeMix.status() + " (a new biome takes 30 s to take over)");
 		line("clouds " + CloudPass.status() + "; cloud shadows " + CloudShadows.status() + "; Java's Clouds setting "
 				+ minecraft.options.cloudStatus().get());

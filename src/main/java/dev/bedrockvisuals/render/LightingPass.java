@@ -65,6 +65,7 @@ public final class LightingPass {
 			.withUniform("DistantFinalColor", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("DistantData", UniformType.UNIFORM_BUFFER)
 			.withUniform("DistantHeightMap", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("SkyProbe", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("SunTexture", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("MoonTexture", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("FroxelScatter", UniformType.COMBINED_IMAGE_SAMPLER)
@@ -201,6 +202,8 @@ public final class LightingPass {
 			encoder.writeToBuffer(distant.slice(), distantBuilder.get());
 			Std140Builder atmosphereBuilder = Std140Builder.onStack(stack, SkyAtmosphere.DATA_SIZE);
 			SkyAtmosphere.write(atmosphereBuilder, light.atmosphere());
+			// x: 1 when the sky probe is there to read (SkyProbe, drawn below before the pass opens).
+			atmosphereBuilder.putVec4(SkyProbe.ready() ? 1 : 0, 0, 0, 0);
 			encoder.writeToBuffer(atmosphere.slice(),
 					SkyAtmosphere.cameraRelative(atmosphereBuilder.get()));
 		}
@@ -208,6 +211,8 @@ public final class LightingPass {
 		SunMoon.prepare();
 		// Bedrock's coarse fog grid for this frame, before the lighting pass reads it.
 		FroxelVolume.render(encoder, data, atmosphere, gbuffer.depthView());
+		// Bedrock's sky reflection probe, redrawn every few frames.
+		SkyProbe.render(encoder, data, atmosphere, light.atmosphere() != null);
 		froxelTried = true;
 		GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
 		// Resolved before the pass opens: a placeholder may need creating and uploading, which can't happen
@@ -260,6 +265,8 @@ public final class LightingPass {
 			pass.setUniform("DistantFinalColor", frame != null ? frame.color() : gbuffer.depthView(), nearest);
 			pass.setUniform("DistantData", distant);
 			GpuSampler linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
+			pass.setUniform("SkyProbe", SkyProbe.view() != null ? SkyProbe.view() : gbuffer.depthView(),
+					RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR, true));
 			pass.setUniform("SunTexture", SunMoon.sunView() != null ? SunMoon.sunView() : gbuffer.depthView(), nearest);
 			pass.setUniform("MoonTexture", SunMoon.moonView() != null ? SunMoon.moonView() : gbuffer.depthView(),
 					nearest);

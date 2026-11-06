@@ -16,7 +16,13 @@ layout(std140) uniform AtmosphereData {
     vec4 AtmosphereFog;         // distance fog: start, 1 / (end - start) (fractions of z), z: distance in blocks, w: on
     vec4 VolumeAir;             // volumetric fog air medium: albedo rgb, extinction per block at full density
     vec4 VolumeHeight;          // density = saturate(x × (y relative to camera) + y); z: phase g; w: on
+    vec4 SkyProbeParams;        // x: 1 when the sky probe (SkyProbe.java) is there to read
 };
+
+#include <bedrockvisuals:octahedral.glsl>
+#ifdef SKY_PROBE
+uniform sampler2D SKY_PROBE;    // Bedrock's sky probe: the sky, convolved per roughness into 10 mips (SkyProbe)
+#endif
 
 // How much of the sky covers terrain at this distance (Bedrock's FogAndDistanceControl): 0 to 1 between the
 // air fog's start and end.
@@ -64,14 +70,18 @@ vec3 bedrockSkyRadiance(vec3 d, vec3 sunDir, vec3 moonDir) {
 }
 
 // The sky seen along d, in this renderer's units (before exposure), as a reflection of the given roughness
-// sees it. Bedrock samples its pre-convolved sky probe at mip (IBLParameters.y - 1) × (1 - (1 - r)²) of 9
-// (DeferredIndirectSpecular with ConvolutionType 1, as captured; (1 - r)⁸ otherwise), so the blur grows
-// quickly with roughness and a rough surface sees the whole
-// sky's average. Here a ring of 8 directions around d, up to 60° out at the roughest mip, stands in for the
-// convolution.
+// sees it: Bedrock's pre-convolved sky probe at mip (IBLParameters.y - 1) × (1 - (1 - r)²) of 9
+// (DeferredIndirectSpecular with ConvolutionType 1, as captured), here an octahedral map with the same 10 mips
+// (SkyProbe.java). Where a shader has no probe bound, or before the first, a ring of 8 directions around d,
+// up to 60° out at the roughest mip, stands in for the convolution.
 vec3 bedrockSkyReflection(vec3 d, float roughness, vec3 sunDir, vec3 moonDir) {
     float smoothness = clamp(1.0 - roughness, 0.0, 1.0);
     float mip = 1.0 - smoothness * smoothness;
+#ifdef SKY_PROBE
+    if (SkyProbeParams.x > 0.5) {
+        return textureLod(SKY_PROBE, octahedralEncode(d), mip * 9.0).rgb;
+    }
+#endif
     vec3 sky = bedrockSkyRadiance(d, sunDir, moonDir);
     if (mip > 0.02) {
         vec3 side = normalize(abs(d.y) < 0.9 ? cross(d, vec3(0.0, 1.0, 0.0)) : cross(d, vec3(1.0, 0.0, 0.0)));

@@ -14,6 +14,7 @@
 #include <minecraft:fog.glsl>
 #include <minecraft:oit.glsl>
 #include <bedrockvisuals:common.glsl>
+#define SKY_PROBE SkyProbe
 #include <bedrockvisuals:sky.glsl>
 #define LOCAL_EXPOSURE_APPLY
 #include <bedrockvisuals:local_exposure.glsl>

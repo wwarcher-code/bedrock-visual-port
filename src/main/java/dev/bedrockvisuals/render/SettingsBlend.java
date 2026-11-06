@@ -25,6 +25,11 @@ final class SettingsBlend {
 	private static long snapUntilNanos;
 	private static boolean teleported;
 
+	/** Whether this frame takes new values at once (the time of day jumped or the camera was teleported). */
+	static boolean snapping() {
+		return System.nanoTime() < snapUntilNanos;
+	}
+
 	/** Whether the camera was teleported since the last frame (BiomeMix starts over then). */
 	static boolean teleported() {
 		return teleported;

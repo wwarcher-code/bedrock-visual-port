@@ -39,6 +39,7 @@ public final class WaterPass {
 			.withUniform("u_SceneColor", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("u_LitFlags", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
+			.withUniform("SkyProbe", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("WaterData", UniformType.UNIFORM_BUFFER)
 			.withUniform("u_WaterNormal", UniformType.COMBINED_IMAGE_SAMPLER)
@@ -161,6 +162,9 @@ public final class WaterPass {
 		// alpha 1 everywhere, so this pass dims all of it).
 		pass.setUniform("u_LitFlags", BloomPass.hdrView() != null ? BloomPass.hdrView() : sceneView, nearest);
 		pass.setUniform("LightingData", LightingPass.lightingData());
+		// Bedrock's sky reflection probe (the shader reads it when AtmosphereData says it is there).
+		pass.setUniform("SkyProbe", SkyProbe.view() != null ? SkyProbe.view() : gbuffer.depthView(),
+				RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR, true));
 		pass.setUniform("GradingData", LightingPass.gradingData());
 		pass.setUniform("WaterData", data);
 		pass.setUniform("u_WaterNormal", WaterSurfaceMaps.normal(), nearest);

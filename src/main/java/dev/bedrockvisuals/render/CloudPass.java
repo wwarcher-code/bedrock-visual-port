@@ -25,6 +25,7 @@ import net.minecraft.resources.Identifier;
 public final class CloudPass {
 	static final BindGroupLayout INPUTS = LocalExposure.withInputs(BindGroupLayout.builder()
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
+			.withUniform("SkyProbe", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("AtmosphereData", UniformType.UNIFORM_BUFFER)
 			.withUniform("CloudCells", UniformType.COMBINED_IMAGE_SAMPLER)
@@ -64,6 +65,9 @@ public final class CloudPass {
 	/** Binds the lighting inputs on the pass Java's clouds are about to be drawn into. */
 	public static void bind(RenderPass pass) {
 		pass.setUniform("LightingData", LightingPass.lightingData());
+		// Bedrock's sky reflection probe (the shader reads it when AtmosphereData says it is there).
+		pass.setUniform("SkyProbe", SkyProbe.view() != null ? SkyProbe.view() : CloudShadows.viewOrEmpty(),
+				RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR, true));
 		pass.setUniform("GradingData", LightingPass.gradingData());
 		pass.setUniform("AtmosphereData", LightingPass.atmosphereData());
 		// Which cells are filled (CloudShadows), for paths through neighbouring cells.
