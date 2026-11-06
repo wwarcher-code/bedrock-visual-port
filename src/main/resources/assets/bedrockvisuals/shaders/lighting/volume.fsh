@@ -117,37 +117,53 @@ void main() {
                 stepAmbient = (SkyColor.rgb * sky * sky + BlockLightColor.rgb * blockLightColor(here.y)) * 0.07957747;
                 stepSun = sky > 0.0001 ? 1.0 : 0.0;
             }
-        } else if (waterBelow && depthBelowWaterSurface(p) >= 0.0) {
-            // Seen from above, the water between its surface and the floor is the volume's water medium
-            // (PopulateVolume picks it between the water's front and back depths: WaterAlbedoExtinction, 0.112 a
-            // block in every channel, integrated here like the air's). What it scatters then passes up through
-            // the water above it, which DeferredWater dims by WaterExtinction: applied per point here. Its
-            // ambient light by the sky light reaching that water, and no sun where none reaches.
-            extinction = vec3(WATER_VOLUME_EXTINCTION);
-            scattering = UnderwaterScattering.rgb * waterViewTransmittanceTo(p, dir);
-            g = UnderwaterScattering.w;
-            // The sky light at the point itself where the light volume reaches (water under a ledge or an
-            // overhang is dark by its own light), else its column's.
-            // Minecraft takes a level of sky light per block of water above a point; Bedrock's sky samples
-            // don't (the volume's water medium does the dimming), so that loss is given back, up to what
-            // reaches the column's surface. Counted twice, deep water inside the light volume came out darker
-            // than beyond it: a hard edge where the volume ends.
-            float surfaceSky = max(waterColumnSkyLight(p), 0.0);
-            float columnSky = here.x >= 0.0
-                    ? min(here.x + max(depthBelowWaterSurface(p), 0.0) / 15.0, max(surfaceSky, here.x))
-                    : surfaceSky;
-            stepAmbient = (SkyColor.rgb * waterSkyAccess(columnSky)
-                    + BlockLightColor.rgb * blockLightColor(max(here.y, 0.0))) * 0.07957747;
-            stepSun = columnSky > 0.0001 ? 1.0 : 0.0;
         } else {
             float density = clamp(VolumeHeight.x * p.y + VolumeHeight.y, 0.0, 1.0) * VolumeHeight.w;
             extinction = vec3(VolumeAir.w * density);
             scattering = extinction * VolumeAir.rgb;
             g = VolumeHeight.z;
         }
-        scattering *= 1.0 - bedrockFogAmount(t);
-        float visibility = volumeShadow(p) * cloudShadow(p, l) * stepSun;
-        vec3 source = scattering * (stepAmbient + light * phaseHG(g, cosine) * visibility);
+        vec3 source = scattering * (1.0 - bedrockFogAmount(t))
+                * (stepAmbient + light * phaseHG(g, cosine) * volumeShadow(p) * cloudShadow(p, l) * stepSun);
+
+        // Seen from above, the water between its surface and the floor is the volume's water medium
+        // (PopulateVolume picks it between the water's front and back depths: WaterAlbedoExtinction, 0.112 a
+        // block in every channel, integrated here like the air's). What it scatters then passes up through the
+        // water above it, which DeferredWater dims by WaterExtinction: applied per point here. The step takes the
+        // share of its stretch that lies between the column's surface and bottom (a slice all water or all air
+        // by its centre striped the water in bands of constant depth).
+        WaterColumn column;
+        if (waterBelow && waterColumnAt(p, column)) {
+            float surfaceY = column.surface - WaterColumnOrigin.y;
+            float bottomY = column.bottom - 0.3 - WaterColumnOrigin.y;
+            float y0 = dir.y * t0;
+            float y1 = dir.y * t1;
+            float lo = min(y0, y1);
+            float hi = max(y0, y1);
+            float share = hi - lo < 1e-3 ? (lo < surfaceY && lo >= bottomY ? 1.0 : 0.0)
+                    : clamp((min(hi, surfaceY) - max(lo, bottomY)) / (hi - lo), 0.0, 1.0);
+            if (share > 0.0) {
+                // Its light at a point of the stretch inside the water.
+                vec3 inWater = vec3(p.x, clamp(p.y, bottomY + 0.05, surfaceY - 0.05), p.z);
+                // The sky light there where the light volume reaches (water under a ledge or an overhang is dark
+                // by its own light), else its column's. Minecraft takes a level of sky light per block of water
+                // above a point; Bedrock's sky samples don't (the water medium does the dimming), so that loss is
+                // given back, up to what reaches the column's surface.
+                float surfaceSky = max(waterColumnSkyLight(inWater), 0.0);
+                float depth = max(surfaceY - inWater.y, 0.0);
+                float columnSky = here.x >= 0.0 ? min(here.x + depth / 15.0, max(surfaceSky, here.x)) : surfaceSky;
+                vec3 waterAmbient = (SkyColor.rgb * waterSkyAccess(columnSky)
+                        + BlockLightColor.rgb * blockLightColor(max(here.y, 0.0))) * 0.07957747;
+                float waterSun = columnSky > 0.0001 ? 1.0 : 0.0;
+                vec3 waterScattering = UnderwaterScattering.rgb
+                        * exp(-UnderwaterMedium.rgb * min(depth / max(-dir.y, 0.05), 64.0));
+                vec3 waterSource = waterScattering * (1.0 - bedrockFogAmount(t)) * (waterAmbient
+                        + light * phaseHG(UnderwaterScattering.w, cosine) * volumeShadow(inWater)
+                        * cloudShadow(inWater, l) * waterSun);
+                extinction = mix(extinction, vec3(WATER_VOLUME_EXTINCTION), share);
+                source = mix(source, waterSource, share);
+            }
+        }
         vec3 stepTransmittance = exp(-extinction * stepLength);
         vec3 stepIntegral = vec3(
                 extinction.r > 1e-5 ? (1.0 - stepTransmittance.r) / extinction.r : stepLength,

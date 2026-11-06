@@ -230,8 +230,10 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
     s.beneathSky = -1.0;
     // Where the water column map puts what's beneath under this water, the lighting pass already dimmed it by
     // the water above it (and the water's in-scattered light likewise) and says so, so nothing more here:
-    // exactly one of them applies it.
-    if (opaque > 0.0 && path < BOTTOMLESS) {
+    // exactly one of them applies it. Whatever the path's length: gated on the path being under the 64-block
+    // cap, long paths (looking across water far out, or down into a hollow under a ledge) skipped the lighting
+    // pass's flag and got this pass's deep-water fallback on top, saturated blue.
+    if (opaque > 0.0) {
         vec3 beneath = v_Position * (viewDistance(opaque) / max(viewDistance(gl_FragCoord.z), 1e-4));
         s.beneathLit = surfaceFogShadow(beneath);
         s.beneathSky = waterColumnSkyLight(waterTestPoint(beneath));
