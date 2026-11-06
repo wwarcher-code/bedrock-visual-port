@@ -174,6 +174,8 @@ float surfaceFootprint = 1.0;
 
 // Defined with the surface fog below: the outer cascade's shadow test at p.
 float surfaceFogShadow(vec3 p);
+// Defined with the reflections below: Distant Horizons' ground at a texture and a clip position.
+float distantDistanceAt(vec2 uv, vec2 ndcXy);
 
 WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
     WaterSurface s;
@@ -203,6 +205,15 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
         // The bottom lies on the same view ray, this much farther along the view axis.
         float ratio = viewDistance(opaque) / max(viewDistance(gl_FragCoord.z), 1e-4);
         path = min(length(v_Position) * max(ratio - 1.0, 0.0), BOTTOMLESS);
+    } else if (DistantParams.x > 0.5) {
+        // Nothing of Java's under this water: near the edge of the loaded chunks the view runs on under the
+        // surface past them, to Distant Horizons' ground. Counted as bottomless, that water came out deep
+        // blue: a wall hanging under the chunk border, in front of DH's water.
+        vec4 clip = u_ProjectionMatrix * u_ModelViewMatrix * vec4(v_Position, 1.0);
+        float ground = distantDistanceAt(gl_FragCoord.xy / vec2(textureSize(u_GBufferDepth, 0)), clip.xy / clip.w);
+        if (ground > 0.0) {
+            path = min(max(ground - length(v_Position), 0.0), BOTTOMLESS);
+        }
     }
     // The view's extinction and the water volume's (water_columns.glsl).
     s.transmittance = exp(-(Absorption.rgb + Scattering.rgb + vec3(WATER_VOLUME_EXTINCTION)) * path);

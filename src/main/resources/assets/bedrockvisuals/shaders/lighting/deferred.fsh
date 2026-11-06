@@ -637,6 +637,12 @@ void main() {
     float distantWater = depth <= 0.0 && DistantParams.x > 0.5 && DistantParams.w > 0.5
             ? distantDistanceIn(DistantWaterDepth, texCoord) : -1.0;
     bool distantWaterHere = distantWater >= 0.0 && (distant < 0.0 || distantWater < distant - 0.25);
+    // DH closes its water off with side faces where its LODs stop at the loaded chunks' edge; seen through the
+    // near water they were shaded as more water surface (a wall). A water face more than a block under sea
+    // level is such a side: the ground behind it shows, and the near water above measures down to it.
+    if (distantWaterHere && DistantLightmap.w < 0.0 && (ray * distantWater).y < DistantLightmap.w - 1.0) {
+        distantWaterHere = false;
+    }
     // DH may draw its water without writing depth: then its final colour differs from the ground's at the same
     // depth. Water there is assumed to lie at sea level (oceans; a lake above it keeps DH's own colour).
     bool distantTranslucent = false;
@@ -782,6 +788,9 @@ void main() {
     }
     if (DebugParams.x > 0.5) {
         vec3 shown = mapped < 0.0 ? vec3(1.0, 0.0, 0.0) : vec3(mapped);
+        // Orange where the far terrain's heights (DistantHeights) shade it.
+        float far = distantHeightShadow(snapToTexel(position, n), moonCasts ? moonDir : sunDir, mapped >= 0.0);
+        shown = mix(shown, vec3(1.0, 0.5, 0.0), 1.0 - far);
         if (DebugParams.x > 1.5) {
             // The cascade view: the shadow test tinted by the nearest cascade (white, yellow, cyan, magenta).
             int c = nearestCascade(snapToTexel(position, n));

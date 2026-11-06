@@ -98,9 +98,12 @@ public final class LightingPass {
 	private static Matrix4f previousViewProjection;
 	private static net.minecraft.world.phys.Vec3 previousCamera;
 	private static final int DISTANT_SIZE = 64 + 48;
-	/** Biome settings ease across biome borders (SettingsBlend); the atmosphere's last vec4 follows the camera. */
+	/**
+	 * Biome settings ease across biome borders (SettingsBlend), the air fog's too (its glow round the sun); its
+	 * height term is made relative to the camera after blending.
+	 */
 	private static final SettingsBlend GRADING_BLEND = new SettingsBlend(Integer.MAX_VALUE);
-	private static final SettingsBlend ATMOSPHERE_BLEND = new SettingsBlend(8 * 4);
+	private static final SettingsBlend ATMOSPHERE_BLEND = new SettingsBlend(Integer.MAX_VALUE);
 	private static boolean lastSubmerged;
 	private static boolean lastSkyOn;
 
@@ -123,7 +126,9 @@ public final class LightingPass {
 		// Distant Horizons' terrain this frame, lit here where vanilla terrain doesn't cover the pixel.
 		DistantTerrainFrame frame = DistantTerrain.source().filter(s -> DeferredRenderer.ownsDistantComposite())
 				.flatMap(DistantTerrainSource::latestFrame).orElse(null);
-		distantDepth = frame != null ? frame.depth() : null;
+		// The ground under DH's water where there is a copy of it (the water pass measures near water that runs
+		// on past the loaded chunks down to it), else DH's final depth.
+		distantDepth = frame == null ? null : frame.opaqueDepth() != null ? frame.opaqueDepth() : frame.depth();
 		CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
 		Matrix4f inverseViewProjection = new Matrix4f(projection).mul(modelView).invert();
 		try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -199,7 +204,8 @@ public final class LightingPass {
 			encoder.writeToBuffer(distant.slice(), distantBuilder.get());
 			Std140Builder atmosphereBuilder = Std140Builder.onStack(stack, SkyAtmosphere.DATA_SIZE);
 			SkyAtmosphere.write(atmosphereBuilder, light.atmosphere());
-			encoder.writeToBuffer(atmosphere.slice(), ATMOSPHERE_BLEND.blend(atmosphereBuilder.get(), snap));
+			encoder.writeToBuffer(atmosphere.slice(),
+					SkyAtmosphere.cameraRelative(ATMOSPHERE_BLEND.blend(atmosphereBuilder.get(), snap)));
 		}
 
 		GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);

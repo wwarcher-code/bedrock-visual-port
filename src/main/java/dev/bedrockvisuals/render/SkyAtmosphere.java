@@ -166,6 +166,21 @@ public record SkyAtmosphere(Vector3f zenith, Vector3f horizon, Vector4f blendSto
 	}
 
 	/** Writes AtmosphereData; {@code null} writes a disabled block (the shader leaves Java's sky). */
+	/** Float index of the height fog's scale in the block write() fills; its bias follows. */
+	static final int VOLUME_HEIGHT_SCALE = 8 * 4;
+
+	/**
+	 * After blending: the height fog's bias made relative to the camera, as the shader reads it
+	 * (density = saturate(scale × (cameraY + y) + bias)).
+	 */
+	static java.nio.ByteBuffer cameraRelative(java.nio.ByteBuffer data) {
+		java.nio.ByteBuffer floats = data.duplicate().order(java.nio.ByteOrder.nativeOrder());
+		int at = floats.position() + VOLUME_HEIGHT_SCALE * 4;
+		double cameraY = net.minecraft.client.Minecraft.getInstance().gameRenderer.mainCamera().position().y;
+		floats.putFloat(at + 4, (float) (floats.getFloat(at + 4) + floats.getFloat(at) * cameraY));
+		return data;
+	}
+
 	static void write(Std140Builder builder, SkyAtmosphere sky) {
 		if (sky == null) {
 			for (int i = 0; i < 9; i++) {
@@ -181,10 +196,9 @@ public record SkyAtmosphere(Vector3f zenith, Vector3f horizon, Vector4f blendSto
 		builder.putVec4(sky.moon);
 		builder.putVec4(sky.fog);
 		builder.putVec4(sky.volumeAir);
-		// The shader works relative to the camera: density = saturate(scale × (cameraY + y) + bias).
-		double cameraY = net.minecraft.client.Minecraft.getInstance().gameRenderer.mainCamera().position().y;
-		builder.putVec4(sky.volumeHeight.x, (float) (sky.volumeHeight.y + sky.volumeHeight.x * cameraY),
-				sky.volumeHeight.z, sky.volumeHeight.w);
+		// The biome's (scale, bias, phase g, on): blended as they are; LightingPass then moves the bias to the
+		// camera (cameraRelative), as the shader works relative to it.
+		builder.putVec4(sky.volumeHeight.x, sky.volumeHeight.y, sky.volumeHeight.z, sky.volumeHeight.w);
 	}
 
 	private static Vector3f linear(Rgba color) {
