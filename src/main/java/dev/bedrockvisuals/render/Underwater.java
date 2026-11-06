@@ -203,6 +203,7 @@ public final class Underwater {
 		load();
 		return (view == null ? "no caustics texture" : "caustics " + frames + " frames")
 				+ (submerged ? ", camera under water, surface " + String.format(java.util.Locale.ROOT, "%.1f", surfaceAbove)
-						+ " blocks up" : "");
+						+ " blocks up, under for " + String.format(java.util.Locale.ROOT, "%.1f", secondsSubmerged())
+						+ " s (the water fog grows in over 30 s)" : "");
 	}
 }

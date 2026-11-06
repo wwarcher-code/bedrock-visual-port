@@ -52,6 +52,8 @@ public final class TestCapture {
 	private static final float HORIZON_PITCH = -10f;
 	private static final int TICKS_AFTER_TIME_CHANGE = 15;
 	private static final int TICKS_AFTER_VIEW_CHANGE = 3;
+	/** Rain's level rises 0.01 a tick: 100 ticks to full, and a little more. */
+	private static final int RAIN_FADE_TICKS = 110;
 
 	private static final Deque<Runnable> STEPS = new ArrayDeque<>();
 	private static final AtomicInteger PENDING_SHOTS = new AtomicInteger();
@@ -151,6 +153,7 @@ public final class TestCapture {
 		}
 		addHorizonShots();
 		addUnderwaterShots();
+		addRainShots();
 		STEPS.add(TestCapture::restore);
 		STEPS.add(TestCapture::finishWhenSaved);
 	}
@@ -179,6 +182,29 @@ public final class TestCapture {
 		addShot(row, "underwater", View.OFF);
 		addShot(row, "underwater", null);
 		STEPS.add(() -> command(back));
+	}
+
+	/**
+	 * At noon in rain, from where the player stands: the grey sky, sun and clouds, and the fog pulled in to the
+	 * weather fog (Bedrock: 0.23 to 0.7 of the render distance). Rain fades in at 0.01 a tick, so it waits
+	 * for that; the weather is cleared again afterwards.
+	 */
+	private static void addRainShots() {
+		List<ContactSheet.Cell> row = new ArrayList<>();
+		sheet.add(row);
+		STEPS.add(() -> {
+			command("time set 6000");
+			command("weather rain");
+			wait = RAIN_FADE_TICKS;
+		});
+		STEPS.add(() -> {
+			AutoExposure.settle();
+			wait = TICKS_AFTER_VIEW_CHANGE;
+		});
+		STEPS.add(() -> report.lightingAt("rain, noon (6000)"));
+		addShot(row, "rain", View.OFF);
+		addShot(row, "rain", null);
+		STEPS.add(() -> command("weather clear"));
 	}
 
 	/**

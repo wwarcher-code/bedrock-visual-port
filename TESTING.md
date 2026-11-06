@@ -28,8 +28,9 @@ of minutes.
    the shadow test and the material view. At noon it adds two debug rows: albedo, normal, light and local
    exposure; then bloom and shadow cascades. Next come horizon shots at noon and low sun, lit and vanilla,
    looking 10° up at the clouds, and a noon shot from inside the pool looking up (caustics, the water's
-   extinction, Snell's window). Then it puts you back, restores the time, view and HUD, and opens the
-   folder.
+   extinction, Snell's window, the teal underwater fog). Last, it turns on rain at noon, waits about five
+   seconds for it to fade in, takes a lit and a vanilla shot, and clears the weather. Then it puts you back,
+   restores the time, view and HUD, and opens the folder. It now takes about 20 seconds.
 4. Send Claude **`contact-sheet.png`** from the folder that opened, and paste the clipboard (Ctrl+V): it
    holds the diagnostics report (build commit, mod versions, GPU, pass status, Bedrock data, biome,
    lighting per time and recent errors). The individual screenshots are in the same folder if Claude asks
@@ -47,6 +48,11 @@ Captures are kept under `run\bedrock-visuals-captures\<date and time>\`.
 - **Cascades.** The shadow test tinted by Bedrock's four shadow cascades: white within about 21 blocks, then
   yellow to 43, cyan to 64 and magenta to 128. Shadows fade out over the last 8 blocks. Dark grey is
   beyond the shadows.
+- **Rain shots.** Sky, clouds and sun grey; the fog closes in from about a quarter of the render distance
+  and is complete by 70% of it (Bedrock's weather fog). The report's rain line gives the fog range.
+- **Underwater shot.** The far side of the pool and the view up through the surface fade into teal, not
+  the blue daytime sky. The report says how long the camera had been under; Bedrock's water fog grows in
+  over 30 seconds, so a quick shot has a shorter fog distance than a long swim.
 - **Horizon shots.** Clouds should reach the horizon and fade into the sky, with no ring where Java's own
   cloud mesh ends (it fades out where the traced far clouds fade in). The vanilla shots show Distant
   Horizons' own clouds, for comparison.
@@ -57,8 +63,17 @@ The capture can't show everything that moves. After F9, look at these by eye:
 
 - **Cloud shadows** drifting across the ground at noon, and the clouds themselves at low sun.
 - **Light shafts** through the tree and the overhang at low sun (volumetric fog).
-- **Under water**: swim in the pool or an ocean; caustics play on everything while your head is under.
-- **Rain**: `/weather rain` greys the sky, clouds, sun and moon alike (Bedrock's captured SunColor 0.404 in rain, 0.251 in thunder); shadows stay, softer in tone.
+- **Under water**: swim in the pool or an ocean; caustics play on everything while your head is under. The
+  view fades into teal, and the fog distance grows over your first 30 seconds under (Bedrock's transition
+  fog), out to 60 blocks.
+- **Water from above**: a river or ocean at noon and at low sun, next to Bedrock's. Reflections of the sky
+  and the shore should now be about three times stronger looking down, closer to Bedrock's (its water
+  reflects through the same split-sum term as metal, with the water texture's grey as F0's tint).
+- **Rain**: `/weather rain` greys the sky, clouds, sun and moon alike (Bedrock's captured SunColor 0.404 in
+  rain, 0.251 in thunder); shadows stay, softer in tone. The fog closes in as the rain fades in.
+- **Shadow edges**: shadows now use Bedrock's own biases (about 0.05 blocks near you, 0.5 far out). Look
+  for shadow acne (dark speckles or stripes on lit faces), especially on faces at a slant to the sun, and
+  for shadows detached from the blocks casting them.
 - **Reflections** on the iron and gold blocks now show the scene, not only the sky.
 - **Bloom** around glowstone and the sea lantern at midnight.
 - **Clouds** with Distant Horizons on: from a high place, they should carry on to the horizon over the

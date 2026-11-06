@@ -105,8 +105,11 @@ final class DiagnosticsReport {
 		SkyAtmosphere sky = light.atmosphere();
 		line(sky == null ? "sky: Java's (no Bedrock atmosphere here)"
 				: "sky: Bedrock's, sun strength " + format(sky.sun().w) + ", moon " + format(sky.moon().w)
-						+ ", distance fog " + (sky.fog().w > 0 ? "from " + format(sky.fog().x * sky.fog().z) + " blocks"
-								: "off (Distant Horizons' vanilla fog is off, or no air fog)"));
+						+ ", distance fog " + (sky.fog().w > 0 ? "from " + format(sky.fog().x * sky.fog().z) + " to "
+								+ format((sky.fog().x + 1 / sky.fog().y) * sky.fog().z) + " blocks"
+								: "off (Distant Horizons' vanilla fog is off, or no air fog)")
+						+ ", air extinction " + format(sky.volumeAir().w) + ", zenith " + vector(sky.zenith()));
+		line("weather " + dev.bedrockvisuals.render.Weather.status() + "; " + Underwater.status());
 		line("exposure " + format(AutoExposure.exposure()) + " (metered average luminance "
 				+ format(AutoExposure.averageLuminance()) + " in Bedrock's units after the tone map's clamp, "
 				+ format(AutoExposure.adaptedLuminance()) + " before it; meter " + AutoExposure.meterStatus() + ")");
