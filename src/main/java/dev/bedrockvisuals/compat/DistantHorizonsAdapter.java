@@ -275,7 +275,11 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 	@Override
 	public int renderDistanceBlocks() {
 		try {
-			Integer chunks = DhApi.Delayed.configs.graphics().chunkRenderDistance().getValue();
+			var graphics = DhApi.Delayed.configs.graphics();
+			if (!Boolean.TRUE.equals(graphics.renderingEnabled().getValue())) {
+				return 0;
+			}
+			Integer chunks = graphics.chunkRenderDistance().getValue();
 			return chunks == null ? 0 : chunks * 16;
 		} catch (RuntimeException e) {
 			return 0;

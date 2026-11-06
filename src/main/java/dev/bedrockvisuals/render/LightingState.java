@@ -125,18 +125,20 @@ public record LightingState(
 	}
 
 	/**
-	 * The air fog at the edge of the render distance. With Distant Horizons' vanilla fog toggle off (and its
-	 * rendering on), the terrain reaches DH's render distance and this renderer lights it, so the fog sits at
-	 * the edge of that instead, as Bedrock's sits at the edge of its own render distance.
+	 * The air fog at the edge of the render distance. While this renderer lights Distant Horizons' terrain, the
+	 * terrain reaches DH's render distance, so the fog sits at the edge of that instead, as Bedrock's sits at
+	 * the edge of its own render distance. That holds whatever DH's vanilla fog toggle says: that fog only ever
+	 * covered Java's chunks, and DH's terrain shows past it (with it on, the fog at Java's distance hid all of
+	 * DH's terrain).
 	 */
 	private static Vector4f distanceFog(FogSettings fog) {
 		float blocks = Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f;
-		if (DistantTerrain.source().map(source -> !source.wantsRenderDistanceFog()).orElse(false)) {
-			int distant = DistantTerrain.source().map(source -> source.renderDistanceBlocks()).orElse(0);
-			if (distant <= 0) {
-				return new Vector4f(0);
-			}
+		int distant = DeferredRenderer.ownsDistantComposite()
+				? DistantTerrain.source().map(source -> source.renderDistanceBlocks()).orElse(0) : 0;
+		if (distant > 0) {
 			blocks = Math.max(blocks, distant);
+		} else if (DistantTerrain.source().map(source -> !source.wantsRenderDistanceFog()).orElse(false)) {
+			return new Vector4f(0);
 		}
 		return SkyAtmosphere.distanceFog(fog.distance().get("air"), fog.distance().get("weather"), blocks);
 	}
