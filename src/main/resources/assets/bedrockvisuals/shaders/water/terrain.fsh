@@ -38,6 +38,9 @@ layout(std140) uniform WaterData {
 
 // Bedrock's split-sum BRDF table (BrdfLut.java), read as DeferredIndirectSpecular reads it.
 uniform sampler2D u_BrdfLut;
+// The outer shadow cascade and the cloud cells, for the volumetric fog in front of the surface.
+uniform sampler2D u_ShadowMap3;
+uniform sampler2D u_CloudShadowMap;
 
 // Bedrock's water_still_grey normal map and MERS (WaterSurfaceMaps.java): strips of 16x16 frames.
 uniform sampler2D u_WaterNormal;
@@ -250,6 +253,67 @@ vec4 screenSpaceReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
     return vec4(0.0);
 }
 
+// Bedrock's volumetric fog in front of the surface (DeferredWater applies the scattering volume on top: in-scatter
+// times its alpha plus transmittance times its colour). The lighting pass's march (lighting/deferred.fsh,
+// volumetricFog), in fewer steps: from above water the path to the surface is all air.
+const int SURFACE_FOG_STEPS = 16;
+
+float surfaceFogShadow(vec3 p) {
+    if (ShadowParams.x < 0.5) {
+        return 1.0;
+    }
+    vec4 clip = ShadowViewProjection[3] * vec4(p, 1.0);
+    vec2 uv = clip.xy * 0.5 + 0.5;
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) || clip.z <= 0.0 || clip.z >= 1.0) {
+        return 1.0;
+    }
+    return clip.z >= texture(u_ShadowMap3, uv).r - ShadowCascadeBias[3] ? 1.0 : 0.0;
+}
+
+float surfaceFogCloudShadow(vec3 p, vec3 towardsLight) {
+    if (CloudShadowField.w <= 0.0 || towardsLight.y <= 0.01) {
+        return 1.0;
+    }
+    float rise = CloudShadowField.z - p.y;
+    if (rise <= 0.0) {
+        return 1.0;
+    }
+    vec2 field = (CloudShadowField.xy + p.xz + towardsLight.xz * (rise / towardsLight.y)) / CloudShadowSize.z;
+    float filled = texture(u_CloudShadowMap, (floor(field) + 0.5) / CloudShadowSize.xy).r;
+    return filled > 0.5 ? 1.0 - CloudShadowField.w : 1.0;
+}
+
+// rgb: in-scattered light (before exposure); transmittance in the out parameter.
+vec3 surfaceFog(vec3 dir, float distance, out vec3 transmittance) {
+    transmittance = vec3(1.0);
+    if (AtmosphereZenith.w < 0.5 || VolumeHeight.w < 0.5) {
+        return vec3(0.0);
+    }
+    float stepLength = min(distance, 250.0) / float(SURFACE_FOG_STEPS);
+    float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    bool moonCasts = ShadowParams.w > 0.5;
+    vec3 l = normalize(moonCasts ? MoonDirection.xyz : SunDirection.xyz);
+    vec3 light = moonCasts ? MoonColor.rgb : SunColor.rgb;
+    float g = VolumeHeight.z;
+    float cosine = dot(l, -dir);
+    float phase = (1.0 - g * g) * 0.07957747 / pow(max(1.0 + g * (2.0 * cosine + g), 1e-4), 1.5);
+    vec3 ambient = SkyColor.rgb * VolumeCamera.x * 0.07957747;
+    vec3 inScattered = vec3(0.0);
+    for (int i = 0; i < SURFACE_FOG_STEPS; i++) {
+        float t = (float(i) + jitter) * stepLength;
+        vec3 p = dir * t;
+        float density = clamp(VolumeHeight.x * p.y + VolumeHeight.y, 0.0, 1.0);
+        vec3 extinction = vec3(max(VolumeAir.w * density, 1e-6));
+        vec3 scattering = extinction * VolumeAir.rgb * (1.0 - bedrockFogAmount(t));
+        float visibility = surfaceFogShadow(p) * surfaceFogCloudShadow(p, l);
+        vec3 source = scattering * (ambient + light * phase * visibility);
+        vec3 stepTransmittance = exp(-extinction * stepLength);
+        inScattered += transmittance * source * (1.0 - stepTransmittance) / extinction;
+        transmittance *= stepTransmittance;
+    }
+    return inScattered;
+}
+
 // The straight-alpha color that, blended over the scene beneath at the surface's opacity, gives the water's
 // look: reflection + glint + (1 - F) * (bottom * transmittance + scattered light). The parts combine on screen
 // (after tone mapping), since the scene beneath and the reflections come from the finished image.
@@ -338,6 +402,10 @@ vec3 waterColor(WaterSurface s, float albedo) {
                     bedrockSkyRadiance(normalize(v_Position), sunDir, moonDir) * AtmosphereHorizon.w * open));
             surfaceLight = mix(surfaceLight, fogColor * s.fresnel, fog);
         }
+        // Then the volumetric fog between the camera and the surface.
+        vec3 fogTransmittance;
+        vec3 fogLight = surfaceFog(normalize(v_Position), length(v_Position), fogTransmittance);
+        surfaceLight = surfaceLight * fogTransmittance + toDisplay(locallyExposed(fogLight)) * s.fresnel;
     }
     vec3 target = clamp(surfaceLight + (1.0 - s.fresnel) * transmitted, 0.0, 1.0);
     return clamp((target - (1.0 - s.opacity) * behind) / max(s.opacity, 1e-3), 0.0, 1.0);

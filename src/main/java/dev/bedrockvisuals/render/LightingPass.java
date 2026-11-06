@@ -90,6 +90,8 @@ public final class LightingPass {
 	private static GpuBuffer atmosphere;
 	/** DistantData (lighting/deferred.fsh): Distant Horizons' inverse projection and flags. */
 	private static GpuBuffer distant;
+	/** This frame's Distant Horizons depth, or null when its terrain isn't lit here. */
+	private static GpuTextureView distantDepth;
 	private static final int DISTANT_SIZE = 64 + 32;
 
 	private LightingPass() {
@@ -111,6 +113,7 @@ public final class LightingPass {
 		// Distant Horizons' terrain this frame, lit here where vanilla terrain doesn't cover the pixel.
 		DistantTerrainFrame frame = DistantTerrain.source().filter(s -> DeferredRenderer.ownsDistantComposite())
 				.flatMap(DistantTerrainSource::latestFrame).orElse(null);
+		distantDepth = frame != null ? frame.depth() : null;
 		CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
 		Matrix4f inverseViewProjection = new Matrix4f(projection).mul(modelView).invert();
 		try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -218,6 +221,16 @@ public final class LightingPass {
 	/** This frame's LightingData buffer, shared with the water shader; null before the first frame. */
 	static GpuBuffer lightingData() {
 		return data;
+	}
+
+	/** DistantData, shared with the cloud shader (which hides Java's cloud mesh behind DH's terrain). */
+	static GpuBuffer distantData() {
+		return distant;
+	}
+
+	/** Distant Horizons' depth this frame, or null when its terrain isn't lit here. */
+	static GpuTextureView distantDepth() {
+		return distantDepth;
 	}
 
 	static GpuBuffer atmosphereData() {

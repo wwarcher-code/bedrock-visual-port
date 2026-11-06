@@ -44,6 +44,8 @@ public final class WaterPass {
 			.withUniform("u_WaterMers", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("AtmosphereData", UniformType.UNIFORM_BUFFER)
 			.withUniform("u_BrdfLut", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("u_ShadowMap3", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("u_CloudShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			).build();
 	/** std140 size of WaterData in water/terrain.fsh: five vec4s. */
 	private static final int DATA_SIZE = 5 * 16;
@@ -151,6 +153,12 @@ public final class WaterPass {
 		// Without Bedrock's table the shader approximates it (WaterData.Animation.z 0) and never reads this.
 		pass.setUniform("u_BrdfLut", BrdfLut.view() != null ? BrdfLut.view() : WaterSurfaceMaps.mers(),
 				RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
+		// Without a shadow map or cloud cells this frame the shader skips them (ShadowParams.x,
+		// CloudShadowField.w), but every declared sampler must be bound.
+		GpuTextureView outer = ShadowPass.depthView(ShadowPass.CASCADES - 1);
+		pass.setUniform("u_ShadowMap3", outer != null ? outer : gbuffer.depthView(), nearest);
+		pass.setUniform("u_CloudShadowMap", CloudShadows.view() != null ? CloudShadows.view() : gbuffer.depthView(),
+				RenderSystem.getSamplerCache().getRepeat(FilterMode.NEAREST));
 		LocalExposure.bind(pass);
 	}
 

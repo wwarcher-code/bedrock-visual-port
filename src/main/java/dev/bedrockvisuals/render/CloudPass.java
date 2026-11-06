@@ -29,6 +29,8 @@ public final class CloudPass {
 			.withUniform("AtmosphereData", UniformType.UNIFORM_BUFFER)
 			.withUniform("CloudCells", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("BrdfLut", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("DistantDepth", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("DistantData", UniformType.UNIFORM_BUFFER)
 			).build();
 	private static final Identifier SHADER = Identifier.fromNamespaceAndPath("bedrockvisuals", "clouds/clouds");
 
@@ -70,6 +72,11 @@ public final class CloudPass {
 		// Bedrock's BRDF table for the reflected sky; without it (DebugParams.z 0) the shader approximates it.
 		pass.setUniform("BrdfLut", BrdfLut.view() != null ? BrdfLut.view() : CloudShadows.viewOrEmpty(),
 				RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
+		// Distant Horizons' depth: Java's cloud mesh is hidden behind its terrain (DistantData's flag says whether
+		// there is any this frame; without it the placeholder is never read).
+		pass.setUniform("DistantDepth", LightingPass.distantDepth() != null ? LightingPass.distantDepth()
+				: CloudShadows.viewOrEmpty(), RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+		pass.setUniform("DistantData", LightingPass.distantData());
 		LocalExposure.bind(pass);
 	}
 

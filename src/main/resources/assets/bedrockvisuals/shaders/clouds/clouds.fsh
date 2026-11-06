@@ -34,6 +34,30 @@ layout(location = 0) out vec4 fragColor;
 
 uniform sampler2D BrdfLut;    // Bedrock's renderer/brdf_lut.png (BrdfLut.java)
 uniform sampler2D CloudCells; // which cells of the field are filled (CloudShadows.java)
+uniform sampler2D DistantDepth; // Distant Horizons' depth this frame (LightingPass.java), when its terrain is lit
+layout(std140) uniform DistantData {
+    mat4 DistantInverseProjection; // Distant Horizons' clip space to its view space
+    vec4 DistantParams;            // x: its terrain is lit here, y: reversed depth, z: [0, 1] clip depth
+    vec4 DistantLightmap;
+};
+
+// Whether Distant Horizons' terrain lies in front of this fragment. Java's depth buffer doesn't hold DH's
+// terrain (the lighting pass composites it from DH's own depth), so without this the cloud mesh would draw
+// over distant mountains. The same distance the lighting pass uses (deferred.fsh, distantDistance).
+bool behindDistantTerrain() {
+    if (DistantParams.x < 0.5) {
+        return false;
+    }
+    vec2 uv = gl_FragCoord.xy / max(ScreenParams.xy, vec2(1.0));
+    float d = texture(DistantDepth, uv).r;
+    bool cleared = DistantParams.y > 0.5 ? d <= 0.0 : d >= 1.0;
+    if (cleared) {
+        return false;
+    }
+    float z = DistantParams.z > 0.5 ? d : d * 2.0 - 1.0;
+    vec4 view = DistantInverseProjection * vec4(uv * 2.0 - 1.0, z, 1.0);
+    return length(view.xyz / view.w) < length(cloudPosition);
+}
 #define CLOUD_CELLS CloudCells
 #define CLOUD_BRDF BrdfLut
 #include <bedrockvisuals:cloud_lighting.glsl>
@@ -115,6 +139,10 @@ float cloudAlpha() {
 }
 
 void main() {
+    // Every OIT stage drops the same fragments, so the stages stay consistent.
+    if (behindDistantTerrain()) {
+        discard;
+    }
     #ifdef OIT_ALPHA_ONLY
     executeAlphaOnlyPhase(gl_FragCoord.z, cloudAlpha());
     #else
