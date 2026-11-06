@@ -40,4 +40,9 @@ public interface DistantTerrainSource {
 	 */
 	default void hideOwnClouds(boolean hide) {
 	}
+
+	/** How the source's water is drawn, for diagnostics. */
+	default String waterStatus() {
+		return "as the source draws it";
+	}
 }

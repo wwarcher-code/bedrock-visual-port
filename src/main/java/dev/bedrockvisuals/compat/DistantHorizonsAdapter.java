@@ -12,6 +12,11 @@ import com.seibel.distanthorizons.api.interfaces.render.IDhApiBlazeTextureWrappe
 import com.seibel.distanthorizons.api.interfaces.render.IDhApiRenderProxy;
 import com.seibel.distanthorizons.api.methods.events.abstractEvents.DhApiBeforeApplyShaderRenderEvent;
 import com.seibel.distanthorizons.api.methods.events.abstractEvents.DhApiBeforeFogRenderEvent;
+import com.seibel.distanthorizons.api.methods.events.abstractEvents.DhApiBeforeRenderPassEvent;
+import com.seibel.distanthorizons.api.methods.events.abstractEvents.DhApiBeforeRenderSetupEvent;
+import com.seibel.distanthorizons.api.methods.events.sharedParameterObjects.DhApiEventParam;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.seibel.distanthorizons.api.methods.events.sharedParameterObjects.DhApiCancelableEventParam;
 import com.seibel.distanthorizons.api.methods.events.sharedParameterObjects.DhApiRenderParam;
 import com.seibel.distanthorizons.api.objects.DhApiResult;
@@ -37,6 +42,19 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 	private volatile boolean rendererOwnsComposite;
 	private volatile DistantTerrainFrame latest;
 	private volatile boolean reportedFrame;
+	/*
+	 * DH's terrain before its water: DH draws its opaque terrain, then (with its transparency set to complete
+	 * and not deferred) its translucent terrain, each after a DhApiBeforeRenderPassEvent, into the same colour
+	 * and depth textures. Copying them at the second event keeps the terrain under the water, so the lighting
+	 * pass can light the seabed and shade the water surface over it (where the final depth is nearer).
+	 */
+	private int terrainPasses;
+	private boolean opaqueTaken;
+	private boolean snapshotFailed;
+	private GpuTexture opaqueColor;
+	private GpuTexture opaqueDepth;
+	private GpuTextureView opaqueColorView;
+	private GpuTextureView opaqueDepthView;
 
 	private DistantHorizonsAdapter() {
 	}
@@ -50,6 +68,22 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 				adapter.captureFrame(event.value);
 				if (adapter.rendererOwnsComposite) {
 					event.cancelEvent();
+				}
+			}
+		});
+		DhApi.events.bind(DhApiBeforeRenderSetupEvent.class, new DhApiBeforeRenderSetupEvent() {
+			@Override
+			public void beforeSetup(DhApiEventParam<DhApiRenderParam> event) {
+				adapter.terrainPasses = 0;
+				adapter.opaqueTaken = false;
+			}
+		});
+		DhApi.events.bind(DhApiBeforeRenderPassEvent.class, new DhApiBeforeRenderPassEvent() {
+			@Override
+			public void beforeRender(DhApiEventParam<DhApiRenderParam> event) {
+				adapter.terrainPasses++;
+				if (adapter.terrainPasses == 2 && adapter.rendererOwnsComposite) {
+					adapter.snapshotOpaque();
 				}
 			}
 		});
@@ -100,15 +134,79 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 				graphics.lodShading().setValue(EDhApiLodShading.DISABLED);
 				graphics.noiseTexture().noiseEnabled().setValue(false);
 				graphics.ambientOcclusion().enabled().setValue(false);
+				// Its water in a pass of its own, so the terrain under it can be copied first (snapshotOpaque).
+				graphics.transparency().setValue(
+						com.seibel.distanthorizons.api.enums.rendering.EDhApiTransparency.COMPLETE);
 			} else {
 				graphics.lodShading().clearValue();
 				graphics.noiseTexture().noiseEnabled().clearValue();
 				graphics.ambientOcclusion().enabled().clearValue();
+				graphics.transparency().clearValue();
 			}
 		} catch (RuntimeException e) {
 			BedrockVisualsClient.LOGGER.warn("[distant] couldn't {} Distant Horizons' shading, noise and occlusion",
 					plain ? "turn off" : "restore", e);
 		}
+	}
+
+	/** Copies DH's colour and depth as they are before its translucent pass. */
+	private void snapshotOpaque() {
+		if (snapshotFailed) {
+			return;
+		}
+		IDhApiRenderProxy proxy = DhApi.Delayed.renderProxy;
+		GpuTextureView color = textureView(proxy.getDhColorTextureBlazeWrapper());
+		GpuTextureView depth = textureView(proxy.getDhDepthTextureBlazeWrapper());
+		if (color == null || depth == null) {
+			return;
+		}
+		try {
+			GpuTexture colorTexture = color.texture();
+			GpuTexture depthTexture = depth.texture();
+			int width = colorTexture.getWidth(0);
+			int height = colorTexture.getHeight(0);
+			if (opaqueColor == null || opaqueColor.getWidth(0) != width || opaqueColor.getHeight(0) != height
+					|| opaqueColor.getFormat() != colorTexture.getFormat()
+					|| opaqueDepth.getFormat() != depthTexture.getFormat()) {
+				closeSnapshot();
+				var device = RenderSystem.getDevice();
+				int usage = GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST;
+				opaqueColor = device.createTexture(() -> "Bedrock Visuals DH terrain under water", usage,
+						colorTexture.getFormat(), width, height, 1, 1);
+				opaqueDepth = device.createTexture(() -> "Bedrock Visuals DH depth under water", usage,
+						depthTexture.getFormat(), depthTexture.getWidth(0), depthTexture.getHeight(0), 1, 1);
+				opaqueColorView = device.createTextureView(opaqueColor);
+				opaqueDepthView = device.createTextureView(opaqueDepth);
+			}
+			var encoder = RenderSystem.getDevice().createCommandEncoder();
+			encoder.copyTextureToTexture(colorTexture, opaqueColor, 0, 0, 0, 0, 0, width, height);
+			encoder.copyTextureToTexture(depthTexture, opaqueDepth, 0, 0, 0, 0, 0, depthTexture.getWidth(0),
+					depthTexture.getHeight(0));
+			opaqueTaken = true;
+		} catch (RuntimeException e) {
+			snapshotFailed = true;
+			closeSnapshot();
+			BedrockVisualsClient.LOGGER.warn("[distant] could not copy DH's terrain before its water; distant water stays as DH draws it", e);
+		}
+	}
+
+	private void closeSnapshot() {
+		if (opaqueColorView != null) {
+			opaqueColorView.close();
+			opaqueDepthView.close();
+			opaqueColor.close();
+			opaqueDepth.close();
+		}
+		opaqueColor = null;
+		opaqueDepth = null;
+		opaqueColorView = null;
+		opaqueDepthView = null;
+	}
+
+	/** Whether DH's water is being shaded here (for diagnostics). */
+	@Override
+	public String waterStatus() {
+		return snapshotFailed ? "failed (see log)" : opaqueTaken ? "shaded here" : "as DH draws it (no translucent pass seen)";
 	}
 
 	private void captureFrame(DhApiRenderParam param) {
@@ -123,7 +221,8 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 				toJoml(param.dhProjectionMatrix), toJoml(param.dhModelViewMatrix),
 				param.nearClipPlane, param.farClipPlane,
 				proxy.getDepthDirection() == EDhApiDepthDirection.REVERSE_Z,
-				proxy.getDepthRange() == EDhApiDepthRange.ZERO_TO_POS_ONE);
+				proxy.getDepthRange() == EDhApiDepthRange.ZERO_TO_POS_ONE,
+				opaqueTaken ? opaqueColorView : null, opaqueTaken ? opaqueDepthView : null);
 
 		if (!reportedFrame) {
 			reportedFrame = true;

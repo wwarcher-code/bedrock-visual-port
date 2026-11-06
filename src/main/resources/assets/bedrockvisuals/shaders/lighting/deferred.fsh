@@ -19,14 +19,16 @@ uniform sampler2D CausticsMap;     // Bedrock's renderer/caustics.png: frames of
 uniform sampler2D BrdfLut;         // Bedrock's renderer/brdf_lut.png (BrdfLut.java)
 uniform sampler2D CloudCoverage;   // the cloud cells' share per area, mipmapped (CloudShadows.java)
 uniform sampler2D DistantColor;    // Distant Horizons' colour and depth this frame (DistantTerrain)
-uniform sampler2D DistantDepth;
+uniform sampler2D DistantDepth;      // with DistantParams.w: DH's depth before its water (the ground)
+uniform sampler2D DistantWaterDepth; // DH's final depth, its water surface included
 uniform sampler2D PreviousScene;   // the previous frame's HDR scene (BloomPass.java), for reflections
 
 #include <bedrockvisuals:common.glsl>
 #include <bedrockvisuals:sky.glsl>
 layout(std140) uniform DistantData {
     mat4 DistantInverseProjection; // Distant Horizons' clip space to its view space
-    vec4 DistantParams;            // x: its terrain is lit here, y: reversed depth, z: [0, 1] clip depth
+    vec4 DistantParams;            // x: its terrain is lit here, y: reversed depth, z: [0, 1] clip depth,
+                                   // w: DistantDepth is the ground under DH's water (DistantHorizonsAdapter)
     vec4 DistantLightmap;          // rgb: Minecraft's lightmap at full sky light, which DH multiplied in
 };
 
@@ -431,8 +433,8 @@ vec3 viewRay(vec2 uv) {
 
 // Distance to Distant Horizons' terrain at a screen position, from its own depth and projection; negative
 // where it drew none.
-float distantDistance(vec2 uv) {
-    float d = texture(DistantDepth, uv).r;
+float distantDistanceIn(sampler2D map, vec2 uv) {
+    float d = texture(map, uv).r;
     bool cleared = DistantParams.y > 0.5 ? d <= 0.0 : d >= 1.0;
     if (cleared) {
         return -1.0;
@@ -440,6 +442,49 @@ float distantDistance(vec2 uv) {
     float z = DistantParams.z > 0.5 ? d : d * 2.0 - 1.0;
     vec4 view = DistantInverseProjection * vec4(uv * 2.0 - 1.0, z, 1.0);
     return length(view.xyz / view.w);
+}
+
+float distantDistance(vec2 uv) {
+    return distantDistanceIn(DistantDepth, uv);
+}
+
+// Distant Horizons' water, which DH draws as flat translucent colour: shaded here as the water pass shades
+// Java's (water/terrain.fsh), with the ground under it lit like other terrain. A flat surface (DH has no
+// per-texel normals out there) of water_still_grey's mean roughness 0.085 and the grey texel's F0, the
+// water's extinction along the path to the ground, its sky reflection through Bedrock's split-sum term, and
+// the sun's glint.
+vec3 distantWaterSurface(vec3 below, vec3 ray, float surface, float ground, vec3 sunDir, vec3 moonDir) {
+    vec3 n = vec3(0.0, 1.0, 0.0);
+    vec3 v = -ray;
+    float nDotV = dot(n, v);
+    if (nDotV <= 0.0) {
+        return below; // seen from below its level: a side face, left as the ground behind it
+    }
+    const float ROUGHNESS = 0.085;
+    float fresnel = 0.02 + 0.98 * pow(1.0 - nDotV, 5.0);
+    vec3 transmittance = exp(-UnderwaterMedium.rgb * max(ground - surface, 0.0));
+    // F0 = mix(0.04, grey 0.371 (linear), metalness 0.0667), as for the near water.
+    float f0 = mix(0.04, 0.371, 0.0667);
+    float specularScale;
+    if (DebugParams.z > 0.5) {
+        vec2 ab = texture(BrdfLut, vec2(nDotV, 1.0 - ROUGHNESS)).rg;
+        specularScale = f0 * ab.x + ab.y;
+    } else {
+        specularScale = (f0 + (1.0 - ROUGHNESS - f0) * pow(1.0 - nDotV, 5.0)) * (1.0 - 0.7 * ROUGHNESS);
+    }
+    vec3 mirror = reflect(ray, n);
+    // DH's terrain has full sky light: the probe at IBLParameters.z 0.5.
+    vec3 sky = AtmosphereZenith.w > 0.5 ? bedrockSkyReflection(mirror, ROUGHNESS, sunDir, moonDir)
+            : mix(SkyColor.rgb, SkyHorizonColor.rgb, 0.3);
+    vec3 glint = vec3(0.0);
+    float nDotL = dot(n, sunDir);
+    if (nDotL > 0.0) {
+        vec3 h = normalize(sunDir + v);
+        float fh = 0.02 + 0.98 * pow(1.0 - max(dot(h, v), 0.0), 5.0);
+        float geometry = smithG1(nDotV, ROUGHNESS) * smithG1(nDotL, ROUGHNESS);
+        glint = SunColor.rgb * fh * ggx(max(dot(n, h), 0.0), ROUGHNESS) * geometry / (4.0 * nDotV);
+    }
+    return specularScale * sky * 0.5 + glint + (1.0 - fresnel) * below * transmittance;
 }
 
 // Distant Horizons' terrain carries only colour and depth: the normal is rebuilt from the depth of the
@@ -471,6 +516,13 @@ void main() {
     // Distant Horizons' terrain, where vanilla terrain doesn't cover the pixel: lit here like the rest, so it
     // matches the near terrain instead of carrying its own lighting and fog.
     float distant = depth <= 0.0 && DistantParams.x > 0.5 ? distantDistance(texCoord) : -1.0;
+    // DH's water: where its final depth is nearer than the ground under it.
+    float distantWater = depth <= 0.0 && DistantParams.x > 0.5 && DistantParams.w > 0.5
+            ? distantDistanceIn(DistantWaterDepth, texCoord) : -1.0;
+    bool distantWaterHere = distantWater >= 0.0 && (distant < 0.0 || distantWater < distant - 0.25);
+    if (distantWaterHere && distant < 0.0) {
+        distant = distantWater + 64.0; // nothing drawn under it: deep water
+    }
     if (depth <= 0.0 && distant < 0.0) {
         // No terrain (reversed depth: 0 is the cleared far plane): sky.
         if (AtmosphereZenith.w > 0.5) {
@@ -622,6 +674,10 @@ void main() {
     }
     color += reflected * specularScale;
     color += albedo * emissive * 2.0;
+    if (distantWaterHere) {
+        color = distantWaterSurface(color, ray, distantWater, distant, sunDir, moonDir);
+        position = ray * distantWater;
+    }
 
     // Distance fog: like Bedrock, the terrain fades into the sky behind it towards the render distance's edge.
     float fog = AtmosphereZenith.w > 0.5 ? bedrockFogAmount(length(position)) : 0.0;

@@ -12,6 +12,8 @@ import org.joml.Matrix4fc;
  * @param material     material IDs, or null when the source doesn't output them (use a generic material)
  * @param reversedZ    whether depth runs from 1 at the near plane to 0 at the far plane
  * @param zeroToOneDepth whether clip-space depth is [0, 1] rather than [-1, 1]
+ * @param opaqueColor, opaqueDepth the same before the source drew its water and other translucent terrain, or
+ *                     null when it can't say (then {@code color} and {@code depth} hold everything)
  */
 public record DistantTerrainFrame(
 		GpuTextureView color,
@@ -23,5 +25,7 @@ public record DistantTerrainFrame(
 		float nearClip,
 		float farClip,
 		boolean reversedZ,
-		boolean zeroToOneDepth) {
+		boolean zeroToOneDepth,
+		GpuTextureView opaqueColor,
+		GpuTextureView opaqueDepth) {
 }

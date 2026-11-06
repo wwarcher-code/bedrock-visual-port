@@ -79,6 +79,8 @@ final class DiagnosticsReport {
 		line("bloom " + BloomPass.status());
 		line("local exposure " + LocalExposure.status());
 		line("weather " + Weather.status());
+		dev.bedrockvisuals.lod.DistantTerrain.source().ifPresent(source -> line("distant terrain " + source.name()
+				+ ", its water " + source.waterStatus()));
 		line("clouds " + CloudPass.status() + "; cloud shadows " + CloudShadows.status() + "; Java's Clouds setting "
 				+ minecraft.options.cloudStatus().get());
 		line("far clouds " + CloudShadows.farStatus());

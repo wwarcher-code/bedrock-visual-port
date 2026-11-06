@@ -191,8 +191,14 @@ Order: the scene beneath is attenuated by `WaterExtinction`, then `DeferredWater
   `.x` 0.38 of the wave), tilting only upward faces. Vanilla leaves it off:
   `WaterSurfaceEnabledAndExtinctionDistShift.x` is 0 in every capture.
 - **Fog:** `DeferredWater` blends the surface's own light towards the distance-fog colour times its alpha F,
-  `mix(spec, fogColour × F, fog)`, then applies the volumetric fog. The renderer does the first; the
-  volumetric fog on the surface itself isn't drawn.
+  `mix(spec, fogColour × F, fog)`, then applies the volumetric fog. The renderer does both (the water pass
+  marches the air in front of the surface in 16 steps).
+- **Distant Horizons' water:** DH draws its opaque terrain, then its translucent terrain (transparency
+  "complete", which this renderer sets for the session), each after a `DhApiBeforeRenderPassEvent`. Its
+  textures carry copy usage (15), so at the second event the colour and depth are copied: the ground under
+  the water. The lighting pass lights that ground and, where DH's final depth is nearer, shades a flat water
+  surface over it like the near water (roughness 0.085, the grey texel's F0, extinction along the path,
+  sky reflection and sun glint). Java's cloud mesh is hidden behind DH's final depth.
 - **Caustics:** a multiplier on light reaching surfaces under water:
   `(2 × tex(world XZ × scale, frame) × saturate(N·up))^power × (power + 1)`, the `(power + 1)` keeping the
   average about the same as the pattern sharpens. The texture is the engine's built-in 64-frame sheet (not

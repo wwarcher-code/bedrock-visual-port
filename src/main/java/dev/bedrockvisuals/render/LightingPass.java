@@ -61,6 +61,7 @@ public final class LightingPass {
 			.withUniform("CloudCoverage", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("DistantColor", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("DistantDepth", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("DistantWaterDepth", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("DistantData", UniformType.UNIFORM_BUFFER)
 			.withUniform("PreviousScene", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
@@ -154,7 +155,8 @@ public final class LightingPass {
 			Std140Builder distantBuilder = Std140Builder.onStack(stack, DISTANT_SIZE);
 			if (frame != null) {
 				distantBuilder.putMat4f(new Matrix4f(frame.projection()).invert())
-						.putVec4(1, frame.reversedZ() ? 1 : 0, frame.zeroToOneDepth() ? 1 : 0, 0);
+						.putVec4(1, frame.reversedZ() ? 1 : 0, frame.zeroToOneDepth() ? 1 : 0,
+								frame.opaqueDepth() != null ? 1 : 0);
 			} else {
 				distantBuilder.putMat4f(new Matrix4f()).putVec4(0, 0, 0, 0);
 			}
@@ -205,9 +207,15 @@ public final class LightingPass {
 			pass.setUniform("LightingData", data);
 			pass.setUniform("GradingData", grading);
 			pass.setUniform("AtmosphereData", atmosphere);
-			pass.setUniform("DistantColor", frame != null ? frame.color() : gbuffer.depthView(),
-					RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
-			pass.setUniform("DistantDepth", frame != null ? frame.depth() : gbuffer.depthView(), nearest);
+			// With DH's terrain from before its water (frame.opaqueColor), the terrain is lit from that and the water
+			// surface shaded over it where the final depth is nearer (DistantParams.w).
+			GpuTextureView distantColor = frame == null ? null
+					: frame.opaqueColor() != null ? frame.opaqueColor() : frame.color();
+			GpuTextureView distantGround = frame == null ? null
+					: frame.opaqueDepth() != null ? frame.opaqueDepth() : frame.depth();
+			pass.setUniform("DistantColor", distantColor != null ? distantColor : gbuffer.depthView(), nearest);
+			pass.setUniform("DistantDepth", distantGround != null ? distantGround : gbuffer.depthView(), nearest);
+			pass.setUniform("DistantWaterDepth", frame != null ? frame.depth() : gbuffer.depthView(), nearest);
 			pass.setUniform("DistantData", distant);
 			pass.setUniform("CloudCoverage", coverage,
 					RenderSystem.getSamplerCache().getRepeat(FilterMode.LINEAR, true));

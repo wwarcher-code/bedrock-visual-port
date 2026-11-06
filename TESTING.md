@@ -78,6 +78,12 @@ The capture can't show everything that moves. After F9, look at these by eye:
 - **Bloom** around glowstone and the sea lantern at midnight.
 - **Clouds** with Distant Horizons on: from a high place, they should carry on to the horizon over the
   distant terrain, with no seam where Java's cloud mesh ends.
+- **Distant water** (Distant Horizons on): oceans and lakes past Java's render distance should look like the
+  near water, reflecting the sky with a sun glint, with the sea floor fading out by depth, instead of flat
+  blue. The report's "distant terrain" line says "its water shaded here" when it's working. Look along the
+  edge of Java's render distance for a seam between the two waters.
+- **Clouds over Distant Horizons' mountains**: Java's cloud mesh should now pass behind distant hills and
+  mountains instead of being drawn over them.
 - **Water and clouds next to the sky**: neither should look brighter than the sky around them.
 
 ## Bedrock reference shots
