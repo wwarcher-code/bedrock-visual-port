@@ -40,7 +40,14 @@ float volumeShadow(vec3 p) {
     if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) || clip.z <= 0.0 || clip.z >= 1.0) {
         return 1.0;
     }
-    return clip.z >= texture(ShadowMap3, uv).r - ShadowCascadeBias[3] ? 1.0 : 0.0;
+    // Four taps a texel apart, averaged: one hard test per froxel made light shafts streak.
+    float texel = ShadowParams.y;
+    float lit = 0.0;
+    for (int i = 0; i < 4; i++) {
+        vec2 offset = (vec2(float(i & 1), float(i >> 1)) - 0.5) * texel;
+        lit += clip.z >= texture(ShadowMap3, uv + offset).r - ShadowCascadeBias[3] ? 1.0 : 0.0;
+    }
+    return lit * 0.25;
 }
 
 float cloudShadow(vec3 p, vec3 towardsLight) {
@@ -104,6 +111,12 @@ void main() {
             extinction = UnderwaterMedium.rgb;
             scattering = UnderwaterScattering.rgb;
             g = UnderwaterScattering.w;
+            if (here.x >= 0.0) {
+                // As from above: the level per block of water above the point that Minecraft took is given back.
+                float sky = min(here.x + (UnderwaterMedium.w - p.y) / 15.0, 1.0);
+                stepAmbient = (SkyColor.rgb * sky * sky + BlockLightColor.rgb * blockLightColor(here.y)) * 0.07957747;
+                stepSun = sky > 0.0001 ? 1.0 : 0.0;
+            }
         } else if (waterBelow && depthBelowWaterSurface(p) >= 0.0) {
             // Seen from above, the water between its surface and the floor is the volume's water medium
             // (PopulateVolume picks it between the water's front and back depths: WaterAlbedoExtinction, 0.112 a
@@ -115,7 +128,14 @@ void main() {
             g = UnderwaterScattering.w;
             // The sky light at the point itself where the light volume reaches (water under a ledge or an
             // overhang is dark by its own light), else its column's.
-            float columnSky = here.x >= 0.0 ? here.x : max(waterColumnSkyLight(p), 0.0);
+            // Minecraft takes a level of sky light per block of water above a point; Bedrock's sky samples
+            // don't (the volume's water medium does the dimming), so that loss is given back, up to what
+            // reaches the column's surface. Counted twice, deep water inside the light volume came out darker
+            // than beyond it: a hard edge where the volume ends.
+            float surfaceSky = max(waterColumnSkyLight(p), 0.0);
+            float columnSky = here.x >= 0.0
+                    ? min(here.x + max(depthBelowWaterSurface(p), 0.0) / 15.0, max(surfaceSky, here.x))
+                    : surfaceSky;
             stepAmbient = (SkyColor.rgb * waterSkyAccess(columnSky)
                     + BlockLightColor.rgb * blockLightColor(max(here.y, 0.0))) * 0.07957747;
             stepSun = columnSky > 0.0001 ? 1.0 : 0.0;

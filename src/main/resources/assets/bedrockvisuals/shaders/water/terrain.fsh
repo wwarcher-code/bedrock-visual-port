@@ -167,10 +167,18 @@ void surfaceTexel(out vec3 tangentNormal, out float roughness, out float metalne
     texel = clamp(texel, ivec2(0), mapSize - 1);
     // The mip level for the texels this pixel spans (the maps carry a chain down to a texel per frame), read
     // nearest within it as the base level is: far off, the ripples average out as Bedrock's do.
-    int lod = int(clamp(floor(log2(max(surfaceFootprint, 1.0))), 0.0, log2(float(frameSize))));
-    texel >>= lod;
-    tangentNormal = normalize(texelFetch(u_WaterNormal, texel, lod).xyz * 2.0 - 1.0);
-    vec4 mers = texelFetch(u_WaterMers, texel, lod);
+    // Between the two levels around it, blended, as trilinear sampling would: a whole level per pixel stepped
+    // with distance and striped distant water in bands of more and less ripple.
+    float level = clamp(log2(max(surfaceFootprint, 1.0)), 0.0, log2(float(frameSize)));
+    int lod = int(floor(level));
+    int lodUp = min(lod + 1, int(log2(float(frameSize))));
+    float blend = level - float(lod);
+    ivec2 near = texel >> lod;
+    ivec2 far = texel >> lodUp;
+    vec3 n0 = texelFetch(u_WaterNormal, near, lod).xyz * 2.0 - 1.0;
+    vec3 n1 = texelFetch(u_WaterNormal, far, lodUp).xyz * 2.0 - 1.0;
+    tangentNormal = normalize(mix(n0, n1, blend));
+    vec4 mers = mix(texelFetch(u_WaterMers, near, lod), texelFetch(u_WaterMers, far, lodUp), blend);
     roughness = mers.b;
     // Bedrock's G-buffer keeps metalness in the colour target's alpha as 0.5 + 0.498 m, which
     // DeferredIndirectSpecular reads back as saturate((a - 0.502) × 2.0079): water's 0.0706 becomes 0.0667.
