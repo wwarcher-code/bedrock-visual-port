@@ -7,6 +7,7 @@ import com.mojang.renderpearl.api.device.GpuDevice;
 import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
 import java.nio.ByteBuffer;
+import net.caffeinemc.mods.sodium.client.render.SodiumWorldRenderer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -105,7 +106,7 @@ public final class WaterColumns {
 	 * water); g the lowest water block's y above the floor (low 12 bits) and the sky light reaching the water
 	 * (high 4); b the height of the underside of the first ledge under the surface with water beneath it (0
 	 * for none; low 12 bits) and the sky light of the water just under it (high 4); a 1 where the column's
-	 * chunk is loaded (else any water is Distant Horizons' seabed under the sea, see below).
+	 * chunk is drawn by Sodium (else any water is Distant Horizons' seabed under the sea, see below).
 	 */
 	private static void encode(ByteBuffer data, ClientLevel level, BlockPos.MutableBlockPos pos, int x, int z) {
 		int surface = 0;
@@ -114,7 +115,11 @@ public final class WaterColumns {
 		int roof = 0;
 		int skyBelow = 0;
 		LevelChunk chunk = level.getChunkSource().getChunk(x >> 4, z >> 4, false);
-		if (chunk != null) {
+		// Only chunks Sodium draws: Minecraft keeps a ring of chunks loaded past those it renders, where
+		// Distant Horizons draws the water instead; mapped as Java's, DH's water there was taken for ground
+		// under Java's water (a dark band beyond the chunk border).
+		boolean rendered = chunk != null && sodiumDraws(x >> 4, level.getSeaLevel() - 1, z >> 4);
+		if (rendered) {
 			// MOTION_BLOCKING counts fluids, so the block under it is the top water block if there is one.
 			int top = chunk.getHeight(Heightmap.Types.MOTION_BLOCKING, x & 15, z & 15);
 			pos.set(x, top, z);
@@ -177,15 +182,22 @@ public final class WaterColumns {
 			int seaLevel = level.getSeaLevel();
 			if (ground != Integer.MIN_VALUE && ground < seaLevel - 1) {
 				surface = Math.max(1, Math.round((seaLevel - 1 + 8f / 9f - minY) * 16f));
-				// From the ground's own height: a floor lying on it counts as under the water either way DH
-				// measures its top (the block's or the one above it).
-				bottom = Math.max(0, ground - minY);
+				// Well below the ground: DH's heights are one column per 8 x 8 cell, and its ground elsewhere in
+				// the cell lies lower; from the cell's height, those pixels fell outside the water and showed
+				// as flickering blue specks between the near seagrass.
+				bottom = Math.max(0, ground - MAX_DEPTH / 2 - minY);
 				sky = 15;
 				any = true;
 			}
 		}
 		data.putShort((short) surface).putShort((short) ((bottom & 0xFFF) | (sky << 12)))
-				.putShort((short) ((roof & 0xFFF) | (skyBelow << 12))).putShort((short) (chunk != null ? 1 : 0));
+				.putShort((short) ((roof & 0xFFF) | (skyBelow << 12))).putShort((short) (rendered ? 1 : 0));
+	}
+
+	/** Whether Sodium has built the chunk's section at block height y (it draws only the render distance). */
+	private static boolean sodiumDraws(int chunkX, int y, int chunkZ) {
+		SodiumWorldRenderer renderer = SodiumWorldRenderer.instanceNullable();
+		return renderer == null || renderer.isSectionReady(chunkX, y >> 4, chunkZ);
 	}
 
 	private static void create() {

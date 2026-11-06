@@ -114,9 +114,15 @@ public final class SunMoon {
 	 * One vec4 for LightingData: x how much of the sun and moon shows (0 when they aren't drawn here; Java's rain
 	 * brightness, as Bedrock's SunMoonColor illuminance goes to 0 in rain), y the moon's phase (0 to 7), z and w
 	 * the sun's and moon's emissive multipliers.
+	 *
+	 * @param drawsSky whether this frame's lighting pass draws Bedrock's sky. Not {@link #drawsThem()}: the
+	 *                 renderer's sky flag is reset at the start of the frame and set only after the lighting pass,
+	 *                 so while this is written it always read false, and with Java's sun and moon skipped (they
+	 *                 follow the last frame's flag) neither was drawn.
 	 */
-	static void write(Std140Builder builder) {
-		builder.putVec4(drawsThem() ? rainBrightness : 0f, moonPhase, SUN_EMISSIVE, MOON_EMISSIVE);
+	static void write(Std140Builder builder, boolean drawsSky) {
+		boolean on = sun != null && moon != null && drawsSky;
+		builder.putVec4(on ? rainBrightness : 0f, moonPhase, SUN_EMISSIVE, MOON_EMISSIVE);
 	}
 
 	public static String status() {

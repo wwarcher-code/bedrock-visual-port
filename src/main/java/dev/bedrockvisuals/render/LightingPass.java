@@ -174,7 +174,7 @@ public final class LightingPass {
 			builder.putVec4((float) (cameraNow.x - previousCamera.x), (float) (cameraNow.y - previousCamera.y),
 					(float) (cameraNow.z - previousCamera.z), 0);
 			// Bedrock's sun and moon, drawn in the sky here (SunMoon).
-			SunMoon.write(builder);
+			SunMoon.write(builder, light.atmosphere() != null);
 			LightVolume.write(builder);
 			previousViewProjection.set(viewProjection);
 			previousCamera = cameraNow;

@@ -318,10 +318,46 @@ vec3 celestialRadiance(vec3 ray) {
 
 // The volumetric fog between the camera and the camera-relative point position (along dir, distance away):
 // read from Bedrock's coarse grid at this pixel and the point's view depth (FroxelVolume), else marched here.
-vec3 fogTo(vec3 position, vec3 dir, float distance, out vec3 transmittance) {
+//
+// With the camera above water and the point under it (or on it: atSurface), surfaceY the water's surface
+// relative to the camera: each of the four cells around the pixel is read where its own ray has gone as far
+// through the water as this pixel's has. A cell's light is integrated along the ray through its centre, which
+// far off, at a grazing angle, meets the surface tens of blocks from where the pixel's own ray does; read at
+// the pixel's depth, it held that much more or less water, alike across each row of cells: horizontal stripes
+// in the water's haze, worst towards the horizon.
+vec3 fogTo(vec3 position, vec3 dir, float distance, float surfaceY, bool atSurface, out vec3 transmittance) {
     if (FroxelParams.x > 0.5) {
-        float viewZ = dot(position, froxelForward(InverseViewProjection));
-        return froxelFog(FroxelScatter, FroxelTransmittance, texCoord, viewZ, transmittance);
+        vec3 forward = froxelForward(InverseViewProjection);
+        float viewZ = dot(position, forward);
+        if (surfaceY >= 0.0 || dir.y > -1e-3 || UnderwaterParams.x > 0.5) {
+            return froxelFog(FroxelScatter, FroxelTransmittance, texCoord, viewZ, transmittance);
+        }
+        // How far this pixel's ray runs under the surface.
+        float inWater = max(distance - surfaceY / dir.y, 0.0);
+        vec2 cells = vec2(FROXEL_CELLS);
+        vec2 g = texCoord * cells - 0.5;
+        vec2 base = floor(g);
+        vec2 f = g - base;
+        vec3 scattered = vec3(0.0);
+        transmittance = vec3(0.0);
+        for (int i = 0; i < 4; i++) {
+            vec2 corner = vec2(float(i & 1), float(i >> 1));
+            vec2 cellUv = (clamp(base + corner, vec2(0.0), cells - 1.0) + 0.5) / cells;
+            vec2 weights = mix(1.0 - f, f, corner);
+            float weight = weights.x * weights.y;
+            vec4 onRay = InverseViewProjection * vec4(cellUv * 2.0 - 1.0, 0.5, 1.0);
+            vec3 cellDir = normalize(onRay.xyz / onRay.w);
+            float along = max(dot(cellDir, forward), 0.05);
+            // Where the cell's ray meets the surface, then as far on as this pixel's runs in the water (the
+            // pixel's own depth where the cell's ray never reaches the surface).
+            float cellZ = cellDir.y < -1e-3 ? (surfaceY / cellDir.y + inWater) * along : viewZ;
+            vec3 cellTransmittance;
+            scattered += weight * (atSurface
+                    ? froxelFogInAir(FroxelScatter, FroxelTransmittance, cellUv, cellZ, cellTransmittance)
+                    : froxelFog(FroxelScatter, FroxelTransmittance, cellUv, cellZ, cellTransmittance));
+            transmittance += weight * cellTransmittance;
+        }
+        return scattered;
     }
     return volumetricFog(dir, distance, transmittance);
 }
@@ -745,7 +781,7 @@ void main() {
             sky = mix(sky, clouds.rgb, clouds.a);
             // Volumetric fog in front of the sky, out to its far plane (under water, through the water above).
             vec3 fogTransmittance;
-            vec3 fogLight = fogTo(ray * VOLUME_FAR, ray, VOLUME_FAR, fogTransmittance);
+            vec3 fogLight = fogTo(ray * VOLUME_FAR, ray, VOLUME_FAR, 1.0, false, fogTransmittance);
             sky = sky * fogTransmittance + fogLight;
             meterLuminance = vec4(-dot(sky, LUMA), 0.0, 0.0, 1.0);
             hdrColor = vec4(sky, 1.0);
@@ -958,7 +994,19 @@ void main() {
 
     vec3 viewDir = normalize(position);
     vec3 fogTransmittance;
-    vec3 fogLight = fogTo(position, viewDir, length(position), fogTransmittance);
+    // The water's surface above this point, for reading the fog grid (fogTo): DH's water at its own surface,
+    // anything under mapped water at its column's.
+    float fogSurfaceY = 1.0;
+    if (distantWaterHere) {
+        fogSurfaceY = position.y;
+    } else if (UnderwaterParams.x < 0.5) {
+        vec3 fogTest = distant >= 0.0 ? waterTestPoint(position) : waterTestPointOn(position, n);
+        WaterColumn fogColumn;
+        if (depthBelowWaterSurface(fogTest) >= 0.0 && waterColumnAt(fogTest, fogColumn)) {
+            fogSurfaceY = fogColumn.surface - WaterColumnOrigin.y;
+        }
+    }
+    vec3 fogLight = fogTo(position, viewDir, length(position), fogSurfaceY, distantWaterHere, fogTransmittance);
     // Under water, the march's water medium is Bedrock's WaterExtinction along the view, up to the surface.
     // From above water, what lies under the surface (within the water column map) is dimmed by the water
     // above it here; the water pass then leaves it alone.

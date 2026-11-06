@@ -61,4 +61,27 @@ vec3 froxelFog(sampler2D scatter, sampler2D transmittanceMap, vec2 uv, float vie
     return mix(texture(scatter, a).rgb, texture(scatter, b).rgb, w);
 }
 
+// As froxelFog, at one cell's centre (uv on it), for a depth whose stretch from the slice centre before it lies
+// in air while the next slice's centre is in water: the camera looking at a water surface. Interpolated towards
+// the next centre, the water beyond the surface leaked into the haze above it, more or less by where the
+// surface fell between two centres: bands at the slices' spacing across distant water. Extended from the
+// stretch before instead, which is air.
+vec3 froxelFogInAir(sampler2D scatter, sampler2D transmittanceMap, vec2 uv, float viewZ, out vec3 transmittance) {
+    float sl = froxelSlice(viewZ) * float(FROXEL_SLICES) - 0.5;
+    if (sl < 1.0 || sl >= float(FROXEL_SLICES - 1)) {
+        return froxelFog(scatter, transmittanceMap, uv, viewZ, transmittance);
+    }
+    int j0 = int(floor(sl));
+    vec2 a = froxelAtlasUv(uv, j0 - 1);
+    vec2 b = froxelAtlasUv(uv, j0);
+    float za = froxelDepth((float(j0) - 0.5) / float(FROXEL_SLICES));
+    float zb = froxelDepth((float(j0) + 0.5) / float(FROXEL_SLICES));
+    float k = (viewZ - zb) / max(zb - za, 1e-4);
+    vec3 ta = texture(transmittanceMap, a).rgb;
+    vec3 tb = texture(transmittanceMap, b).rgb;
+    transmittance = tb * pow(clamp(tb / max(ta, vec3(1e-4)), vec3(0.0), vec3(1.0)), vec3(k));
+    vec3 sb = texture(scatter, b).rgb;
+    return sb + max(sb - texture(scatter, a).rgb, vec3(0.0)) * k;
+}
+
 #endif
