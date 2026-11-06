@@ -42,9 +42,15 @@ public final class WaterColumns {
 	/** How far down a water body is followed; deeper water counts as this deep. */
 	private static final int MAX_DEPTH = 96;
 	/** How far below a solid top block the map looks for water (overhangs over a lake's edge). */
-	private static final int UNDER_COVER = 24;
-	/** How thick a solid ledge under the surface can be for the water below it to count (the lake's floor ends the scan). */
-	private static final int LEDGE_THICKNESS = 8;
+	private static final int UNDER_COVER = 32;
+	/**
+	 * How thick a solid ledge under the surface can be for the water below it to count (a thicker run is the
+	 * floor, which ends the scan). At 8, the seabed overhanging a hollow, often thicker, ended the scan: the
+	 * hollow's floor fell outside the body, the lighting pass left it undimmed and the water pass shaded it as
+	 * deep water (blue in the water flag view, a hard seam). Water deeper under the floor than this (a flooded
+	 * cave seen from a dry one) isn't taken for the lake's.
+	 */
+	private static final int LEDGE_THICKNESS = 32;
 
 	private static GpuTexture texture;
 	private static GpuTextureView view;
