@@ -137,6 +137,7 @@ struct WaterSurface {
     float fresnel;
     vec3 transmittance;  // along the path from the surface to the bottom
     float path;          // blocks of water from the surface to the bottom along the view
+    float beneathSky;    // the sky light of the water over what's beneath (water_columns.glsl), or -1 if unmapped
     float beneathLit;    // 1 where what's beneath is in sunlight (the outer cascade), 0 in shade
     bool scatters;       // the water's in-scattered light is this pass's to add (the lighting pass's map missed it)
     float opacity;       // what the OIT stages blend with; the same in every stage
@@ -191,12 +192,14 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
     s.path = path;
     s.scatters = UnderwaterParams.x < 0.5;
     s.beneathLit = 1.0;
+    s.beneathSky = -1.0;
     // Where the water column map puts what's beneath under this water, the lighting pass already dimmed it by
     // the water above it (and the water's in-scattered light likewise) and says so, so nothing more here:
     // exactly one of them applies it.
     if (opaque > 0.0 && path < BOTTOMLESS) {
         vec3 beneath = v_Position * (viewDistance(opaque) / max(viewDistance(gl_FragCoord.z), 1e-4));
         s.beneathLit = surfaceFogShadow(beneath);
+        s.beneathSky = waterColumnSkyLight(waterTestPoint(beneath));
         // Its own flag rather than the same test here: this pass reconstructs the point from the water's
         // geometry and the lighting pass from its matrices, and with view bobbing they differ enough to
         // disagree at a block's edge.
@@ -438,7 +441,8 @@ vec3 waterColor(WaterSurface s, float albedo) {
         transmitted += toDisplay(locallyExposed(waterInScatter(normalize(v_Position), s.path, s.beneathLit,
                 // The surface's sky light (one level up for the water block's own dimming of it), as the
                 // lighting pass takes its column's.
-                min(VolumeCamera.x, waterSkyAccess(clamp(levels.y + 1.0 / 15.0, 0.0, 1.0))))));
+                min(VolumeCamera.x, s.beneathSky >= 0.0 ? waterSkyAccess(s.beneathSky)
+                        : waterSkyAccess(clamp(levels.y + 1.0 / 15.0, 0.0, 1.0))))));
     }
     vec3 surfaceLight = specularScale * reflection + toDisplay(locallyExposed(glint));
     // DeferredWater fogs the surface's own light like terrain: towards the sky radiance (blended to the

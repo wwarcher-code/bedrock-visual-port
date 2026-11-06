@@ -63,15 +63,34 @@ vec3 waterTestPoint(vec3 p) {
     return p - normalize(p) * 0.05;
 }
 
-// The water's extinction between its surface and the surface at p, along the view from the camera (above
-// water), or 1 when p isn't under the mapped water.
-vec3 waterTransmittanceTo(vec3 p, vec3 dir) {
-    float depth = depthBelowWaterSurface(waterTestPoint(p));
+// The point a lit surface's water test is made at, with its normal n: a quarter block out from its face along
+// the face's axis (blocks' faces are axis-aligned; the snap ignores normal maps), into the water in front of
+// it. A quarter block is more than view bobbing's offset between how this renderer's passes reconstruct a
+// point (up to about a tenth of a block), which with a smaller nudge put a wall's points in the wall's own
+// column at times (no water there) and left bright edges along underwater walls while walking.
+vec3 waterTestPointOn(vec3 p, vec3 n) {
+    vec3 a = abs(n);
+    vec3 face = a.x > a.y && a.x > a.z ? vec3(sign(n.x), 0.0, 0.0)
+            : a.y > a.z ? vec3(0.0, sign(n.y), 0.0) : vec3(0.0, 0.0, sign(n.z));
+    return waterTestPoint(p) + face * 0.25;
+}
+
+// As waterTransmittanceTo, for a test point already chosen (waterTestPointOn) off the surface point p: the
+// test point says whether p is under the water, p how deep.
+vec3 waterTransmittanceAt(vec3 testPoint, vec3 p, vec3 dir) {
+    float depth = depthBelowWaterSurface(testPoint);
     if (depth < 0.0) {
         return vec3(1.0);
     }
+    depth = max(depth + testPoint.y - p.y, 0.0);
     float path = min(depth / max(-dir.y, 0.05), 64.0);
     return exp(-UnderwaterMedium.rgb * path);
+}
+
+// The water's extinction between its surface and the surface at p, along the view from the camera (above
+// water), or 1 when p isn't under the mapped water.
+vec3 waterTransmittanceTo(vec3 p, vec3 dir) {
+    return waterTransmittanceAt(waterTestPoint(p), p, dir);
 }
 
 // The light the water scatters towards the camera over `path` blocks of it below the surface, along the view

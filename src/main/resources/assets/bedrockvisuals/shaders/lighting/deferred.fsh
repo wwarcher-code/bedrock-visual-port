@@ -288,7 +288,7 @@ float causticsMultiplier(vec3 position, vec3 n) {
     if (UnderwaterParams.y < 0.0) {
         return 1.0;
     }
-    if (UnderwaterParams.x < 0.5 && !inWaterColumn(position + n * 0.05)) {
+    if (UnderwaterParams.x < 0.5 && !inWaterColumn(waterTestPointOn(position, n))) {
         return 1.0;
     }
     vec2 world = (position.xz + CameraGridOffset.xz) * UnderwaterParams.z;
@@ -790,10 +790,11 @@ void main() {
     // column for one pass and not the other (bright outlines round underwater blocks while walking).
     bool dimmedHere = false;
     if (UnderwaterParams.x < 0.5) {
-        // Nudged off the surface along its normal: the floor's top face lies exactly on the water body's
-        // bottom (as for the caustics test).
-        dimmedHere = !distantWaterHere && depthBelowWaterSurface(waterTestPoint(position)) >= 0.0;
-        color *= waterTransmittanceTo(position, viewDir);
+        // Tested a little off the surface along its face (waterTestPointOn): the floor's top face lies exactly
+        // on the water body's bottom, a wall's face on its column's edge.
+        vec3 testPoint = distant >= 0.0 ? waterTestPoint(position) : waterTestPointOn(position, n);
+        dimmedHere = !distantWaterHere && depthBelowWaterSurface(testPoint) >= 0.0;
+        color *= waterTransmittanceAt(testPoint, position, viewDir);
     }
     color = color * fogTransmittance + fogLight;
 

@@ -38,7 +38,7 @@ public final class WaterColumns {
 	/** How far down a water body is followed; deeper water counts as this deep. */
 	private static final int MAX_DEPTH = 96;
 	/** How far below a solid top block the map looks for water (overhangs over a lake's edge). */
-	private static final int UNDER_COVER = 12;
+	private static final int UNDER_COVER = 24;
 
 	private static GpuTexture texture;
 	private static GpuTextureView view;
