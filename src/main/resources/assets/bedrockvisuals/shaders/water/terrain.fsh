@@ -150,6 +150,9 @@ struct WaterSurface {
     float opacity;       // what the OIT stages blend with; the same in every stage
 };
 
+// How many of the surface map's texels one pixel spans (set in main from the UV derivatives).
+float surfaceFootprint = 1.0;
+
 // This texel's normal and MERS from Bedrock's surface maps, for the current animation frame. The water
 // sprite's UVs cover 16 texels per block (32 for the flowing sprite, which spans two).
 void surfaceTexel(out vec3 tangentNormal, out float roughness, out float metalness) {
@@ -161,16 +164,17 @@ void surfaceTexel(out vec3 tangentNormal, out float roughness, out float metalne
     ivec2 texel = ivec2(mod(floor(local * spriteTexels), float(frameSize)));
     texel.y += int(Animation.x) * frameSize;
     texel = clamp(texel, ivec2(0), mapSize - 1);
-    tangentNormal = normalize(texelFetch(u_WaterNormal, texel, 0).xyz * 2.0 - 1.0);
-    vec4 mers = texelFetch(u_WaterMers, texel, 0);
+    // The mip level for the texels this pixel spans (the maps carry a chain down to a texel per frame), read
+    // nearest within it as the base level is: far off, the ripples average out as Bedrock's do.
+    int lod = int(clamp(floor(log2(max(surfaceFootprint, 1.0))), 0.0, log2(float(frameSize))));
+    texel >>= lod;
+    tangentNormal = normalize(texelFetch(u_WaterNormal, texel, lod).xyz * 2.0 - 1.0);
+    vec4 mers = texelFetch(u_WaterMers, texel, lod);
     roughness = mers.b;
     // Bedrock's G-buffer keeps metalness in the colour target's alpha as 0.5 + 0.498 m, which
     // DeferredIndirectSpecular reads back as saturate((a - 0.502) × 2.0079): water's 0.0706 becomes 0.0667.
     metalness = clamp((0.5 + 0.498 * mers.r - 0.50196) * 2.00787, 0.0, 1.0);
 }
-
-// How many of the surface map's texels one pixel spans (set in main from the UV derivatives).
-float surfaceFootprint = 1.0;
 
 // Defined with the surface fog below: the outer cascade's shadow test at p.
 float surfaceFogShadow(vec3 p);
@@ -185,12 +189,6 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
     }
     vec3 tangentNormal;
     surfaceTexel(tangentNormal, s.roughness, s.metalness);
-    // The surface map is read texel by texel; Bedrock samples it through its mips, so far off (many texels to
-    // a pixel) its ripples average out towards flat. Without that, distant water at a grazing angle tilted
-    // most of its mirror rays up into the sky and reflected sky where it should mirror the far shore (a pale
-    // band at the edge of the render distance, beside Distant Horizons' flat water). Flattened by the texels
-    // a pixel spans, as a mip chain's average would be.
-    tangentNormal = normalize(mix(vec3(0.0, 0.0, 1.0), tangentNormal, 1.0 / max(surfaceFootprint, 1.0)));
     s.n = normalize(tangent * tangentNormal.x + bitangent * tangentNormal.y + face * tangentNormal.z);
     if (dot(s.n, v_Position) > 0.0) {
         s.n = face;

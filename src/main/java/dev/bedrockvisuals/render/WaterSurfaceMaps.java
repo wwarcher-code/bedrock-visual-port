@@ -87,23 +87,64 @@ final class WaterSurfaceMaps {
 		}
 	}
 
+	/**
+	 * Uploads the strip with its mip chain, each level a 2x2 box average of the one above (normals averaged as
+	 * encoded, so ripples flatten with distance as Bedrock's sampled surface maps do), down to one texel per
+	 * frame: the frames stay square and stacked at every level.
+	 */
 	private static GpuTextureView upload(String label, TgaImage image) {
 		GpuDevice device = RenderSystem.getDevice();
+		int width = image.width();
+		int height = image.height();
+		int levels = 1 + Integer.numberOfTrailingZeros(Integer.highestOneBit(Math.max(width, 1)));
 		GpuTexture texture = device.createTexture(() -> label,
-				GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA8_UNORM, image.width(),
-				image.height(), 1, 1);
-		ByteBuffer data = MemoryUtil.memAlloc(image.width() * image.height() * 4);
-		try {
-			for (int y = 0; y < image.height(); y++) {
-				for (int x = 0; x < image.width(); x++) {
-					int argb = image.argb(x, y);
-					data.put((byte) (argb >> 16)).put((byte) (argb >> 8)).put((byte) argb).put((byte) (argb >>> 24));
-				}
+				GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA8_UNORM, width, height, 1,
+				levels);
+		int[][] channels = new int[4][width * height];
+		for (int y = 0; y < height; y++) {
+			for (int x = 0; x < width; x++) {
+				int argb = image.argb(x, y);
+				int i = y * width + x;
+				channels[0][i] = (argb >> 16) & 255;
+				channels[1][i] = (argb >> 8) & 255;
+				channels[2][i] = argb & 255;
+				channels[3][i] = argb >>> 24;
 			}
-			data.flip();
-			device.createCommandEncoder().writeToTexture(texture, data, 0, 0, 0, 0, image.width(), image.height());
-		} finally {
-			MemoryUtil.memFree(data);
+		}
+		int w = width;
+		int h = height;
+		for (int level = 0; level < levels; level++) {
+			ByteBuffer data = MemoryUtil.memAlloc(w * h * 4);
+			try {
+				for (int i = 0; i < w * h; i++) {
+					data.put((byte) channels[0][i]).put((byte) channels[1][i]).put((byte) channels[2][i])
+							.put((byte) channels[3][i]);
+				}
+				data.flip();
+				device.createCommandEncoder().writeToTexture(texture, data, level, 0, 0, 0, w, h);
+			} finally {
+				MemoryUtil.memFree(data);
+			}
+			if (level + 1 < levels) {
+				int nw = Math.max(1, w / 2);
+				int nh = Math.max(1, h / 2);
+				int[][] next = new int[4][nw * nh];
+				for (int c = 0; c < 4; c++) {
+					for (int y = 0; y < nh; y++) {
+						for (int x = 0; x < nw; x++) {
+							int x0 = Math.min(2 * x, w - 1);
+							int x1 = Math.min(2 * x + 1, w - 1);
+							int y0 = Math.min(2 * y, h - 1);
+							int y1 = Math.min(2 * y + 1, h - 1);
+							next[c][y * nw + x] = (channels[c][y0 * w + x0] + channels[c][y0 * w + x1]
+									+ channels[c][y1 * w + x0] + channels[c][y1 * w + x1] + 2) / 4;
+						}
+					}
+				}
+				channels = next;
+				w = nw;
+				h = nh;
+			}
 		}
 		return device.createTextureView(texture);
 	}
