@@ -58,6 +58,17 @@ public final class EntityPass {
 				&& ENTITY_SHADER.equals(pipeline.getShaders().get(ShaderType.FRAGMENT));
 	}
 
+	private static final Identifier BLOB_SHADOW_SHADER = Identifier.withDefaultNamespace("core/rendertype_entity_shadow");
+
+	/**
+	 * Whether this draw is Minecraft's round blob shadow under an entity, which goes while entities cast real
+	 * shadows (Vibrant Visuals draws none).
+	 */
+	public static boolean isBlobShadow(RenderPipeline pipeline) {
+		return !failed && inLevelPass && DeferredRenderer.replacesSky() && ShadowPass.isValid()
+				&& BLOB_SHADOW_SHADER.equals(pipeline.getShaders().get(ShaderType.FRAGMENT));
+	}
+
 	/** Whether the pipeline is one of this pass's variants (mixin injectors at the same point run in any order). */
 	public static boolean isVariant(RenderPipeline pipeline) {
 		return SHADER.equals(pipeline.getShaders().get(ShaderType.FRAGMENT));

@@ -51,7 +51,7 @@ abstract class LevelRendererMixin {
 		RenderTarget main = targets.main.get();
 		EntityPass.setInLevelPass(true);
 		DeferredRenderer.beforeMainPass(chunks, main, chunkLayerSampler,
-				(TextureAtlas) textureManager.getTexture(TextureAtlas.LOCATION_BLOCKS));
+				(TextureAtlas) textureManager.getTexture(TextureAtlas.LOCATION_BLOCKS), frame::executeSolid);
 	}
 
 	@Redirect(method = "executeSolid", at = @At(value = "INVOKE",

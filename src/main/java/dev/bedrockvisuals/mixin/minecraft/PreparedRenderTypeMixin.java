@@ -3,6 +3,7 @@ package dev.bedrockvisuals.mixin.minecraft;
 import com.mojang.renderpearl.api.commands.RenderPass;
 import com.mojang.renderpearl.api.pipeline.RenderPipeline;
 import dev.bedrockvisuals.render.EntityPass;
+import dev.bedrockvisuals.render.EntityShadows;
 import net.minecraft.client.renderer.StagedVertexBuffer;
 import net.minecraft.client.renderer.rendertype.PreparedRenderType;
 import org.spongepowered.asm.mixin.Mixin;
@@ -21,9 +22,22 @@ abstract class PreparedRenderTypeMixin {
 	private static final String DRAW = "draw(Lnet/minecraft/client/renderer/StagedVertexBuffer$ExecuteInfo;"
 			+ "Lcom/mojang/renderpearl/api/commands/RenderPass;Lcom/mojang/renderpearl/api/pipeline/RenderPipeline;)V";
 
-	@Inject(method = DRAW, at = @At("HEAD"))
+	@Inject(method = DRAW, at = @At("HEAD"), cancellable = true)
 	private void bedrockvisuals$bindLighting(StagedVertexBuffer.ExecuteInfo info, RenderPass pass,
 			RenderPipeline pipeline, CallbackInfo ci) {
+		if (EntityShadows.casting()) {
+			// The entity shadow pass: entity pipelines draw their shadow variant; everything else is skipped.
+			if (EntityShadows.casts(pipeline) || EntityShadows.isVariant(pipeline)) {
+				EntityShadows.bind(pass);
+			} else {
+				ci.cancel();
+			}
+			return;
+		}
+		if (EntityPass.isBlobShadow(pipeline)) {
+			ci.cancel();
+			return;
+		}
 		if (EntityPass.appliesTo(pipeline) || EntityPass.isVariant(pipeline)) {
 			try {
 				EntityPass.bind(pass);
@@ -35,6 +49,9 @@ abstract class PreparedRenderTypeMixin {
 
 	@ModifyVariable(method = DRAW, at = @At("HEAD"), argsOnly = true)
 	private RenderPipeline bedrockvisuals$bedrockLitPipeline(RenderPipeline pipeline) {
+		if (EntityShadows.casting()) {
+			return EntityShadows.casts(pipeline) ? EntityShadows.variantOf(pipeline) : pipeline;
+		}
 		if (!EntityPass.appliesTo(pipeline)) {
 			return pipeline;
 		}

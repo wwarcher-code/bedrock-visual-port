@@ -120,6 +120,11 @@ public final class ShadowPass {
 		return VIEW_PROJECTION[cascade];
 	}
 
+	/** The cascades' shared (unused) colour attachment, or null before the first map. */
+	static GpuTextureView unusedColorView() {
+		return unusedColorView;
+	}
+
 	public static GpuTextureView depthView(int cascade) {
 		return depthView[cascade];
 	}

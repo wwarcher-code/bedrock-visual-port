@@ -54,8 +54,9 @@ public final class DeferredRenderer {
 	}
 
 	/** Called just before Minecraft opens its main render pass. */
+	/** @param solidEntities Minecraft's executeSolid for this frame's prepared entity draws (entity shadows) */
 	public static void beforeMainPass(ChunkSectionsToRender chunks, RenderTarget main, GpuSampler sampler,
-			TextureAtlas blockAtlas) {
+			TextureAtlas blockAtlas, java.util.function.Consumer<com.mojang.renderpearl.api.commands.RenderPass> solidEntities) {
 		// Before the flags reset: whether the last frame drew Bedrock's sky decides who draws the clouds.
 		CloudPass.updateDistantClouds();
 		replacedTerrain = false;
@@ -83,6 +84,8 @@ public final class DeferredRenderer {
 		if (light == null) {
 			return;
 		}
+		// Entities into the shadow cascades too, before the lighting pass reads them.
+		EntityShadows.render(solidEntities, GBufferPass.projection(), GBufferPass.modelView());
 		boolean terrain = GBufferPass.hasTerrain();
 		// With no terrain this frame the G-buffer is still cleared (all sky), so the pass still draws the sky:
 		// otherwise Java's sky would come back for a frame. Only a failed G-buffer stops it.

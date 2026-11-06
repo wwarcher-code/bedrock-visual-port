@@ -96,6 +96,11 @@ The capture can't show everything that moves. After F9, look at these by eye:
   edge of Java's render distance for a seam between the two waters.
 - **Clouds over Distant Horizons' mountains**: Java's cloud mesh should now pass behind distant hills and
   mountains instead of being drawn over them.
+- **Entities** (mobs, animals, item frames, chests, dropped items): lit like the terrain around them, darker
+  in shade and at night, warm by torches; no more round blob shadows; they cast shadows on the ground and on
+  each other at noon and low sun. Under water (swimming, or looking down into water), they should take the
+  water's colour and fade with depth like the floor beside them. The first-person hand keeps Minecraft's
+  lighting. The report's "entities" line says whether both parts are working.
 - **Water and clouds next to the sky**: neither should look brighter than the sky around them.
 
 ## Bedrock reference shots
