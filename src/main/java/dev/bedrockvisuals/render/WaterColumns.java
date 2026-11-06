@@ -36,7 +36,8 @@ import org.lwjgl.system.MemoryUtil;
  */
 public final class WaterColumns {
 	static final int SIZE = 512;
-	private static final int ROWS_PER_FRAME = 24;
+	/** A divisor of SIZE, so a band never runs past the last row. */
+	private static final int ROWS_PER_FRAME = 32;
 	/** How far down a water body is followed; deeper water counts as this deep. */
 	private static final int MAX_DEPTH = 96;
 	/** How far below a solid top block the map looks for water (overhangs over a lake's edge). */
@@ -66,11 +67,13 @@ public final class WaterColumns {
 		int cameraX = (int) Math.floor(camera.x);
 		int cameraZ = (int) Math.floor(camera.z);
 		int firstRow = nextRow;
-		nextRow = (nextRow + ROWS_PER_FRAME) % SIZE;
+		// Never past the texture's last row (writing outside it ends the game without a Java error).
+		int rows = Math.min(ROWS_PER_FRAME, SIZE - firstRow);
+		nextRow = (nextRow + rows) % SIZE;
 		ByteBuffer data = MemoryUtil.memAlloc(SIZE * ROWS_PER_FRAME * 8);
 		try {
 			BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-			for (int r = 0; r < ROWS_PER_FRAME; r++) {
+			for (int r = 0; r < rows; r++) {
 				int row = firstRow + r;
 				// The world z nearest the camera that falls on this row.
 				int z = cameraZ - SIZE / 2 + Math.floorMod(row - (cameraZ - SIZE / 2), SIZE);
@@ -81,7 +84,7 @@ public final class WaterColumns {
 			}
 			data.flip();
 			RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, data, 0, 0, 0, firstRow, SIZE,
-					ROWS_PER_FRAME);
+					rows);
 		} finally {
 			MemoryUtil.memFree(data);
 		}
