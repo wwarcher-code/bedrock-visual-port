@@ -12,12 +12,15 @@
 uniform sampler2D ShadowMap3;      // the outer shadow cascade (ShadowPass.java)
 uniform sampler2D CloudShadowMap;  // filled cloud cells (CloudShadows.java)
 uniform sampler2D WaterColumnMap;  // each column's top water body (WaterColumns.java)
+uniform sampler2D LightVolumeMap;  // sky and block light around the camera (LightVolume.java)
 
 #include <bedrockvisuals:common.glsl>
 #include <bedrockvisuals:sky.glsl>
 #define WATER_COLUMNS WaterColumnMap
 #include <bedrockvisuals:water_columns.glsl>
 #include <bedrockvisuals:froxels.glsl>
+#define LIGHT_VOLUME LightVolumeMap
+#include <bedrockvisuals:light_volume.glsl>
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 scatterOut;
@@ -87,8 +90,16 @@ void main() {
         vec3 extinction;
         vec3 scattering;
         float g;
+        // The ambient light at this point (PopulateVolume: sky ambient times the sky light there, plus the block
+        // light's base ambient times the block light there, from its sky samples), and no sun where no sky
+        // light reaches. Beyond the light volume, the camera's sky access as before.
         vec3 stepAmbient = ambient;
         float stepSun = 1.0;
+        vec2 here = lightVolumeAt(p);
+        if (here.x >= 0.0) {
+            stepAmbient = (SkyColor.rgb * here.x * here.x + BlockLightColor.rgb * blockLightColor(here.y)) * 0.07957747;
+            stepSun = here.x > 0.0001 ? 1.0 : 0.0;
+        }
         if (water && p.y < UnderwaterMedium.w) {
             extinction = UnderwaterMedium.rgb;
             scattering = UnderwaterScattering.rgb;
@@ -102,8 +113,11 @@ void main() {
             extinction = vec3(WATER_VOLUME_EXTINCTION);
             scattering = UnderwaterScattering.rgb * waterViewTransmittanceTo(p, dir);
             g = UnderwaterScattering.w;
-            float columnSky = max(waterColumnSkyLight(p), 0.0);
-            stepAmbient = SkyColor.rgb * waterSkyAccess(columnSky) * 0.07957747;
+            // The sky light at the point itself where the light volume reaches (water under a ledge or an
+            // overhang is dark by its own light), else its column's.
+            float columnSky = here.x >= 0.0 ? here.x : max(waterColumnSkyLight(p), 0.0);
+            stepAmbient = (SkyColor.rgb * waterSkyAccess(columnSky)
+                    + BlockLightColor.rgb * blockLightColor(max(here.y, 0.0))) * 0.07957747;
             stepSun = columnSky > 0.0001 ? 1.0 : 0.0;
         } else {
             float density = clamp(VolumeHeight.x * p.y + VolumeHeight.y, 0.0, 1.0) * VolumeHeight.w;

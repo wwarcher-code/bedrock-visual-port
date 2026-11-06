@@ -37,7 +37,7 @@ import org.lwjgl.system.MemoryStack;
  */
 public final class LightingPass {
 	/** std140 size of the LightingData block (include/common.glsl): three mat4s and seventeen vec4s. */
-	private static final int DATA_SIZE = 7 * 64 + 23 * 16;
+	private static final int DATA_SIZE = 7 * 64 + 24 * 16;
 	/**
 	 * Bedrock's shadow normal offset (shadow_configuration.pc.json normal_offset_strength): lookups move out along
 	 * the normal by this many blocks times (1 - N·L).
@@ -175,6 +175,7 @@ public final class LightingPass {
 					(float) (cameraNow.z - previousCamera.z), 0);
 			// Bedrock's sun and moon, drawn in the sky here (SunMoon).
 			SunMoon.write(builder);
+			LightVolume.write(builder);
 			previousViewProjection.set(viewProjection);
 			previousCamera = cameraNow;
 			encoder.writeToBuffer(data.slice(), builder.get());

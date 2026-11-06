@@ -39,6 +39,8 @@ layout(std140) uniform LightingData {
     vec4 CameraMotion;          // xyz: this frame's camera position minus the previous frame's
     vec4 SunMoonParams;         // x: how much of Bedrock's sun and moon shows (0: Java draws them), y: the moon's
                                 // phase, z, w: the sun's and moon's emissive multipliers (SunMoon.java)
+    vec4 LightVolumeOrigin;     // xyz: the camera's world position modulo the light volume's size; w: 1 when
+                                // the volume is filled (LightVolume.java)
 };
 
 // Bedrock's water extinction along a view ray from the camera (Underwater.java): the path through water is
