@@ -27,7 +27,8 @@ public final class GBufferDebugView {
 		WATER("water", null),
 		WATER_HAZE("water haze", null),
 		WATER_BENEATH("under water, no haze", null),
-		WATER_SURFACE("water surface", null);
+		WATER_SURFACE("water surface", null),
+		WATER_FLAG("water flag", null);
 
 		public final String label;
 		final GBuffer.Target target;
@@ -92,7 +93,7 @@ public final class GBufferDebugView {
 	 */
 	public static int postDebugMode() {
 		return showing == View.LOCAL_EXPOSURE ? 1 : showing == View.BLOOM ? 2 : showing == View.WATER_HAZE ? 3
-				: showing == View.WATER_BENEATH ? 4 : showing == View.WATER_SURFACE ? 5 : 0;
+				: showing == View.WATER_BENEATH ? 4 : showing == View.WATER_SURFACE ? 5 : showing == View.WATER_FLAG ? 6 : 0;
 	}
 
 	/** Called after Minecraft's main pass. */

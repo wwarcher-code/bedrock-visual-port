@@ -32,7 +32,7 @@ layout(std140) uniform LightingData {
     vec4 UnderwaterScattering;  // rgb: water scattering per block, w: water phase g
     vec4 VolumeCamera;          // x: the camera's sky access (0 to 1, for the fog's ambient light); yzw: cloud
                                 // colour under the current weather, linear (Weather.java)
-    vec4 WaterColumnOrigin;     // x, z: the camera's world x and z modulo 256, y: its height above the level's
+    vec4 WaterColumnOrigin;     // x, z: the camera's world x and z modulo 512, y: its height above the level's
                                 // floor, w: 1 when the water column map is there (WaterColumns.java)
     mat4 ViewProjection;        // camera-relative world space to clip space (InverseViewProjection's inverse)
     mat4 PreviousViewProjection; // the previous frame's, relative to its own camera position

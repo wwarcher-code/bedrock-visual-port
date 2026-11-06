@@ -233,6 +233,7 @@ public final class TestCapture {
 				addShot(row, label + " haze", View.WATER_HAZE);
 				addShot(row, label + " beneath", View.WATER_BENEATH);
 				addShot(row, label + " surface", View.WATER_SURFACE);
+				addShot(row, label + " flag", View.WATER_FLAG);
 			}
 		}
 	}

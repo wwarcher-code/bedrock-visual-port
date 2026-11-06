@@ -7,8 +7,8 @@
 #ifndef BEDROCKVISUALS_WATER_COLUMNS
 #define BEDROCKVISUALS_WATER_COLUMNS
 
-// The map covers 128 columns each way; past this a texel can hold a nearer column.
-const float WATER_COLUMN_RANGE = 120.0;
+// The map covers 256 columns each way; past this a texel can hold a nearer column.
+const float WATER_COLUMN_RANGE = 248.0;
 
 // One column of the map (WaterColumns.java), decoded: the surface's height above the level's floor (0 when
 // the column has no water), the lowest water block's, the underside of the first submerged ledge with water
@@ -27,7 +27,7 @@ bool waterColumnAt(vec3 p, out WaterColumn c) {
     if (WaterColumnOrigin.w < 0.5 || max(abs(p.x), abs(p.z)) > WATER_COLUMN_RANGE) {
         return false;
     }
-    ivec2 texel = ivec2(mod(floor(p.xz + WaterColumnOrigin.xz), 256.0));
+    ivec2 texel = ivec2(mod(floor(p.xz + WaterColumnOrigin.xz), 512.0));
     vec4 column = floor(texelFetch(WATER_COLUMNS, texel, 0) * 65535.0 + 0.5);
     c.surface = column.r / 16.0;
     c.bottom = mod(column.g, 4096.0);

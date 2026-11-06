@@ -956,6 +956,19 @@ void main() {
         // on the water body's bottom, a wall's face on its column's edge.
         vec3 testPoint = distant >= 0.0 ? waterTestPoint(position) : waterTestPointOn(position, n);
         dimmedHere = !distantWaterHere && depthBelowWaterSurface(testPoint) >= 0.0;
+        if (abs(DebugParams.w - 6.0) < 0.5) {
+            // The water flag view: green where this pass dimmed the water beneath (and flags it for the water
+            // pass), red where the plain test point says under water but the face's one doesn't, blue where
+            // the column has water but the point isn't in it, grey where no water is mapped.
+            WaterColumn flagColumn;
+            vec3 code = dimmedHere ? vec3(0.0, 0.8, 0.0)
+                    : depthBelowWaterSurface(waterTestPoint(position)) >= 0.0 ? vec3(0.9, 0.0, 0.0)
+                    : waterColumnAt(waterTestPoint(position), flagColumn) ? vec3(0.1, 0.2, 0.9) : vec3(0.35);
+            fragColor = vec4(code, 1.0);
+            meterLuminance = vec4(0.18, 0.0, 0.0, 1.0);
+            hdrColor = vec4(0.0, 0.0, 0.0, dimmedHere ? 0.5 : 1.0);
+            return;
+        }
         // With the fog grid, the water's own 0.112 a block is in its transmittance (it integrates the water
         // medium as Bedrock's does), so only WaterExtinction is applied here; without it, both.
         color *= FroxelParams.x > 0.5 ? waterViewTransmittanceAt(testPoint, position, viewDir)

@@ -28,13 +28,15 @@ import org.lwjgl.system.MemoryUtil;
  * under water, so the engine must limit that pass to the pixels behind the water surface. This renderer
  * lights the scene before Java draws the water, so it has no water depth then; this map stands in for it.
  *
- * <p>The map covers 256×256 columns and wraps on world coordinates, so a column always sits at the same
+ * <p>The map covers 512×512 columns (past any vanilla render distance this renderer is used at: with 256, the
+ * last 10 to 20 blocks of water before Distant Horizons' fell outside it, a band of water shaded by the water
+ * pass's fallback) and wraps on world coordinates, so a column always sits at the same
  * texel. It refreshes {@link #ROWS_PER_FRAME} rows a frame, covering the columns nearest the camera, so all
  * of it is redone every 16 frames.
  */
 public final class WaterColumns {
-	static final int SIZE = 256;
-	private static final int ROWS_PER_FRAME = 16;
+	static final int SIZE = 512;
+	private static final int ROWS_PER_FRAME = 24;
 	/** How far down a water body is followed; deeper water counts as this deep. */
 	private static final int MAX_DEPTH = 96;
 	/** How far below a solid top block the map looks for water (overhangs over a lake's edge). */
