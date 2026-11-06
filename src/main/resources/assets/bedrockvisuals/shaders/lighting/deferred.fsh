@@ -722,7 +722,9 @@ void main() {
     // From above water, what lies under the surface (within the water column map) is dimmed by the water
     // above it here; the water pass then leaves it alone.
     if (UnderwaterParams.x < 0.5) {
-        color *= waterTransmittanceTo(position, viewDir);
+        // Nudged off the surface along its normal: the floor's top face lies exactly on the water body's
+        // bottom (as for the caustics test).
+        color *= waterTransmittanceTo(position + n * 0.05, viewDir);
     }
     color = color * fogTransmittance + fogLight;
 
