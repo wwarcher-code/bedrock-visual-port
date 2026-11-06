@@ -34,7 +34,10 @@ layout(std140) uniform DistantData {
                                    // w: DistantDepth is the ground under DH's water (DistantHorizonsAdapter)
     vec4 DistantLightmap;          // rgb: Minecraft's lightmap at full sky light, which DH multiplied in;
                                    // w: the sea's surface height relative to the camera
+    vec4 DistantHeightOrigin;      // xz: the camera's world x, z modulo the height map's width in blocks;
+                                   // y: its height above the level's floor; w: 1 when there are heights
 };
+uniform sampler2D DistantHeightMap; // the far terrain's heights (DistantHeights.java)
 
 #define CLOUD_CELLS CloudShadowMap
 #define CLOUD_BRDF BrdfLut
@@ -156,6 +159,41 @@ bool inWaterColumn(vec3 p) {
 
 float phaseHG(float g, float cosine) {
     return (1.0 - g * g) * 0.07957747 / pow(max(1.0 + g * (2.0 * cosine + g), 1e-4), 1.5);
+}
+
+// The far terrain's shadow at p towards the light (DistantHeights.java): marched across the height map of
+// Distant Horizons' terrain (a cell of 8 blocks, the top of its highest solid block), in steps that grow with
+// the distance. Where the shadow cascades cover p, only casters beyond their reach count (they hold the near
+// ones, in full detail). Soft over a few blocks, wider farther out, as the map is coarse.
+const int HEIGHT_STEPS = 64;
+const float HEIGHT_CELL = 8.0;
+const float HEIGHT_SIZE = 1024.0;
+float distantHeightShadow(vec3 p, vec3 towardsLight, bool cascadeCovered) {
+    if (DistantHeightOrigin.w < 0.5 || towardsLight.y < 0.01) {
+        return 1.0;
+    }
+    float visibility = 1.0;
+    float t = 1.5 * HEIGHT_CELL;
+    for (int i = 0; i < HEIGHT_STEPS; i++) {
+        vec3 q = p + towardsLight * t;
+        float above = q.y + DistantHeightOrigin.y;
+        if (above > 448.0) {
+            break; // above any terrain
+        }
+        if (!cascadeCovered || dot(q.xz, q.xz) > 120.0 * 120.0) {
+            ivec2 texel = ivec2(mod(floor((q.xz + DistantHeightOrigin.xz) / HEIGHT_CELL), HEIGHT_SIZE));
+            float height = texelFetch(DistantHeightMap, texel, 0).r * 65535.0;
+            if (height > 0.0) {
+                float under = height - above;
+                visibility = min(visibility, 1.0 - clamp(under / max(t * 0.02, 2.0), 0.0, 1.0));
+                if (visibility <= 0.0) {
+                    return 0.0;
+                }
+            }
+        }
+        t += max(HEIGHT_CELL, t * 0.08);
+    }
+    return visibility;
 }
 
 float volumeShadow(vec3 p, vec3 towardsLight) {
@@ -761,6 +799,9 @@ void main() {
     vec3 snapped = snapToTexel(position, n);
     sunVisibility = min(sunVisibility, cloudShadow(snapped, sunDir));
     moonVisibility = min(moonVisibility, cloudShadow(snapped, moonDir));
+    // Far terrain beyond the cascades (Distant Horizons' hills), on near and far terrain alike.
+    sunVisibility = min(sunVisibility, distantHeightShadow(snapped, sunDir, mapped >= 0.0));
+    moonVisibility = min(moonVisibility, distantHeightShadow(snapped, moonDir, mapped >= 0.0));
 
     vec3 color = directLight(nSun, v, sunDir, SunColor.rgb * sunVisibility, diffuseColor, f0, roughness);
     color += directLight(nMoon, v, moonDir, MoonColor.rgb * moonVisibility, diffuseColor, f0, roughness);

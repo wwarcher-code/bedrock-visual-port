@@ -64,6 +64,7 @@ public final class LightingPass {
 			.withUniform("DistantWaterDepth", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("DistantFinalColor", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("DistantData", UniformType.UNIFORM_BUFFER)
+			.withUniform("DistantHeightMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("PreviousScene", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
@@ -96,7 +97,7 @@ public final class LightingPass {
 	private static GpuTextureView distantDepth;
 	private static Matrix4f previousViewProjection;
 	private static net.minecraft.world.phys.Vec3 previousCamera;
-	private static final int DISTANT_SIZE = 64 + 32;
+	private static final int DISTANT_SIZE = 64 + 48;
 	/** Biome settings ease across biome borders (SettingsBlend); the atmosphere's last vec4 follows the camera. */
 	private static final SettingsBlend GRADING_BLEND = new SettingsBlend(Integer.MAX_VALUE);
 	private static final SettingsBlend ATMOSPHERE_BLEND = new SettingsBlend(8 * 4);
@@ -194,6 +195,7 @@ public final class LightingPass {
 			double cameraY = net.minecraft.client.Minecraft.getInstance().gameRenderer.mainCamera().position().y;
 			float seaSurface = level == null ? 0f : (float) (level.getSeaLevel() - 1 + 8.0 / 9.0 - cameraY);
 			distantBuilder.putVec4(lightmap.x, lightmap.y, lightmap.z, seaSurface);
+			DistantHeights.write(distantBuilder);
 			encoder.writeToBuffer(distant.slice(), distantBuilder.get());
 			Std140Builder atmosphereBuilder = Std140Builder.onStack(stack, SkyAtmosphere.DATA_SIZE);
 			SkyAtmosphere.write(atmosphereBuilder, light.atmosphere());
@@ -250,6 +252,9 @@ public final class LightingPass {
 			pass.setUniform("DistantWaterDepth", frame != null ? frame.depth() : gbuffer.depthView(), nearest);
 			pass.setUniform("DistantFinalColor", frame != null ? frame.color() : gbuffer.depthView(), nearest);
 			pass.setUniform("DistantData", distant);
+			// The far terrain's heights, for its shadows (DistantData's last vec4 says whether there are any).
+			pass.setUniform("DistantHeightMap", DistantHeights.view() != null ? DistantHeights.view()
+					: gbuffer.depthView(), nearest);
 			pass.setUniform("CloudCoverage", coverage,
 					RenderSystem.getSamplerCache().getRepeat(FilterMode.LINEAR, true));
 			pass.draw(3, 1, 0, 0);

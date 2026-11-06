@@ -41,6 +41,18 @@ public interface DistantTerrainSource {
 	default void hideOwnClouds(boolean hide) {
 	}
 
+	/** Returned by {@link #topSolidY} where the source has no data. */
+	int NO_HEIGHT = Integer.MIN_VALUE;
+
+	/**
+	 * The height of the top of the highest solid (not air, not liquid) terrain in the column at block x, z, from
+	 * the source's own data, or {@link #NO_HEIGHT}. Called from a background thread, for the far terrain's
+	 * shadows (DistantHeights).
+	 */
+	default int topSolidY(int x, int z) {
+		return NO_HEIGHT;
+	}
+
 	/** How the source's water is drawn, for diagnostics. */
 	default String waterStatus() {
 		return "as the source draws it";

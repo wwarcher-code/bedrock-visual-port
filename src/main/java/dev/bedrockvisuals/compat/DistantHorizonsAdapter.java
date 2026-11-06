@@ -98,6 +98,37 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 		DistantTerrain.setSource(adapter);
 	}
 
+	/** For topSolidY, on the height map's worker thread only. */
+	private com.seibel.distanthorizons.api.interfaces.data.IDhApiTerrainDataCache heightCache;
+	private int heightQueries;
+
+	@Override
+	public int topSolidY(int x, int z) {
+		var level = DhApi.Delayed.worldProxy.getSinglePlayerLevel();
+		if (level == null) {
+			return NO_HEIGHT;
+		}
+		// A soft cache, renewed now and then so it doesn't hold the whole world's data.
+		if (heightCache == null || ++heightQueries % 65536 == 0) {
+			heightCache = DhApi.Delayed.terrainRepo.createSoftCache();
+		}
+		var result = DhApi.Delayed.terrainRepo.getColumnDataAtBlockPos(level, x, z, heightCache);
+		if (result == null || !result.success || result.payload == null) {
+			return NO_HEIGHT;
+		}
+		int top = NO_HEIGHT;
+		for (var point : result.payload) {
+			if (point == null || point.blockStateWrapper == null) {
+				continue;
+			}
+			var block = point.blockStateWrapper;
+			if (!block.isAir() && !block.isLiquid()) {
+				top = Math.max(top, point.topYBlockPos);
+			}
+		}
+		return top;
+	}
+
 	@Override
 	public String name() {
 		return "Distant Horizons " + DhApi.getModVersion();

@@ -71,6 +71,7 @@ public final class DeferredRenderer {
 		ownsDistantComposite = ownsDistant;
 		Underwater.update();
 		WaterColumns.update();
+		DistantHeights.update();
 		// Placeholders and buffers the water and cloud passes bind are created here, outside any render pass
 		// (uploads can't happen while one is open).
 		CloudShadows.viewOrEmpty();
