@@ -304,15 +304,18 @@ vec4 screenSpaceReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
     return vec4(0.0);
 }
 
-// Distance to Distant Horizons' terrain at a texture position (as the lighting pass reads it), or -1.
-float distantDistanceAt(vec2 uv) {
+// Distance to Distant Horizons' terrain: its depth read at texture position uv (the G-buffer's orientation),
+// unprojected at the clip position ndcXy (which runs the other way vertically when the framebuffer is
+// flipped: unprojecting at the texture position mirrored the far terrain, and the reflections found sky
+// where they should have found the far shore). -1 where DH drew nothing.
+float distantDistanceAt(vec2 uv, vec2 ndcXy) {
     float d = texture(DistantDepth, uv).r;
     bool cleared = DistantParams.y > 0.5 ? d <= 0.0 : d >= 1.0;
     if (cleared) {
         return -1.0;
     }
     float z = DistantParams.z > 0.5 ? d : d * 2.0 - 1.0;
-    vec4 view = DistantInverseProjection * vec4(uv * 2.0 - 1.0, z, 1.0);
+    vec4 view = DistantInverseProjection * vec4(ndcXy, z, 1.0);
     return length(view.xyz / view.w);
 }
 
@@ -342,7 +345,9 @@ vec4 distantReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
             sceneDistance = viewDistance(depth);
             rayDistance = screen.z;
         } else {
-            sceneDistance = distantDistanceAt((vec2(pixel) + 0.5) / size);
+            vec2 uv = (vec2(pixel) + 0.5) / size;
+            vec2 ndcXy = vec2(uv.x, flipY ? 1.0 - uv.y : uv.y) * 2.0 - 1.0;
+            sceneDistance = distantDistanceAt(uv, ndcXy);
             rayDistance = length(point);
         }
         if (sceneDistance < 0.0) {
