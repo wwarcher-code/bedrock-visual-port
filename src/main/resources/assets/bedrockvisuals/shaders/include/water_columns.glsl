@@ -92,6 +92,26 @@ vec3 waterTestPointOn(vec3 p, vec3 n) {
     return waterTestPoint(p) + face * 0.25;
 }
 
+// Bedrock's water volume (PopulateVolume's water medium, WaterAlbedoExtinction.w in the captures of the default
+// water): the light the water scatters is dimmed by the volume at this rate, every channel, before it leaves
+// the water, so deep water reaches its colour (the albedo times the light) within about nine blocks. The view
+// extinction alone (WaterExtinction, 0.041 a block in blue) let the blue keep building for some 25 blocks to
+// several times that, and a drop-off showed as a hard seam of saturated blue.
+const float WATER_VOLUME_EXTINCTION = 0.112349;
+
+vec3 waterScatterExtinction() {
+    return max(UnderwaterMedium.rgb, vec3(WATER_VOLUME_EXTINCTION));
+}
+
+// What's left of light the water scatters at p on its way out through the surface, along the view.
+vec3 waterScatterTransmittanceTo(vec3 p, vec3 dir) {
+    float depth = depthBelowWaterSurface(waterTestPoint(p));
+    if (depth < 0.0) {
+        return vec3(1.0);
+    }
+    return exp(-waterScatterExtinction() * min(depth / max(-dir.y, 0.05), 64.0));
+}
+
 // As waterTransmittanceTo, for a test point already chosen (waterTestPointOn) off the surface point p: the
 // test point says whether p is under the water, p how deep.
 vec3 waterTransmittanceAt(vec3 testPoint, vec3 p, vec3 dir) {
@@ -125,7 +145,7 @@ vec3 waterInScatter(vec3 dir, float path, float sunVisibility, float skyAccess) 
     float cosine = dot(l, -dir);
     float phase = (1.0 - g * g) * 0.07957747 / pow(max(1.0 + g * (2.0 * cosine + g), 1e-4), 1.5);
     vec3 ambient = SkyColor.rgb * skyAccess * 0.07957747;
-    vec3 sigma = max(UnderwaterMedium.rgb, vec3(1e-5));
+    vec3 sigma = waterScatterExtinction();
     return UnderwaterScattering.rgb * (ambient + light * phase * sunVisibility) * (1.0 - exp(-sigma * path)) / sigma;
 }
 

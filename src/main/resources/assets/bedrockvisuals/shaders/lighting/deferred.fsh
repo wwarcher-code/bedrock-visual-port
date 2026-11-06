@@ -199,10 +199,11 @@ vec3 volumetricFog(vec3 dir, float distance, out vec3 transmittance) {
         } else if (waterBelow && inWaterColumn(p)) {
             // Seen from above, the water between its surface and the floor scatters too (Bedrock's
             // PopulateVolume picks the water medium between the water's front and back depths), dimmed by the
-            // water above it along the view. That extinction is applied per point (waterTransmittanceTo) rather
-            // than accumulated here, so shallow water seen from far doesn't depend on the step length.
+            // water above it along the view at the volume's rate (waterScatterTransmittanceTo). That extinction
+            // is applied per point rather than accumulated here, so shallow water seen from far doesn't depend
+            // on the step length.
             extinction = vec3(0.0);
-            scattering = UnderwaterScattering.rgb * waterTransmittanceTo(p, dir);
+            scattering = UnderwaterScattering.rgb * waterScatterTransmittanceTo(p, dir);
             g = UnderwaterScattering.w;
             // Its ambient light by the sky light that reaches this water (Bedrock's per-froxel sky samples):
             // water under a ledge is dark, not lit by all the sky the camera sees. No sun where no sky light
