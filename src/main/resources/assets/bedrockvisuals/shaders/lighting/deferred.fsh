@@ -961,6 +961,15 @@ void main() {
         color *= FroxelParams.x > 0.5 ? waterViewTransmittanceAt(testPoint, position, viewDir)
                 : waterTransmittanceAt(testPoint, position, viewDir);
     }
+    // The water views (GBufferDebugView): 3 the scattered light alone, 4 what lies beneath without it, 5 black
+    // under the water surface's own light.
+    if (abs(DebugParams.w - 3.0) < 0.5 || abs(DebugParams.w - 5.0) < 0.5) {
+        color = vec3(0.0);
+    }
+    if (abs(DebugParams.w - 4.0) < 0.5 || abs(DebugParams.w - 5.0) < 0.5) {
+        fogTransmittance = vec3(1.0);
+        fogLight = vec3(0.0);
+    }
     color = color * fogTransmittance + fogLight;
 
     meterLuminance = vec4(dot(color, LUMA), 0.0, 0.0, 1.0);

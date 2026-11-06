@@ -24,7 +24,10 @@ public final class GBufferDebugView {
 		CASCADES("cascades", null),
 		LOCAL_EXPOSURE("local exposure", null),
 		BLOOM("bloom", null),
-		WATER("water", null);
+		WATER("water", null),
+		WATER_HAZE("water haze", null),
+		WATER_BENEATH("under water, no haze", null),
+		WATER_SURFACE("water surface", null);
 
 		public final String label;
 		final GBuffer.Target target;
@@ -82,9 +85,14 @@ public final class GBufferDebugView {
 		return showing == View.LOCAL_EXPOSURE;
 	}
 
-	/** DebugParams.w for the lighting data: 1 shows local exposure's factor, 2 only the bloom. */
+	/**
+	 * DebugParams.w for the lighting data: 1 shows local exposure's factor, 2 only the bloom; 3 to 5 split the
+	 * water seen from above into its parts: 3 only the scattered light (the fog grid's), 4 only what lies
+	 * beneath with the water's dimming, 5 only the surface's reflection and glint.
+	 */
 	public static int postDebugMode() {
-		return showing == View.LOCAL_EXPOSURE ? 1 : showing == View.BLOOM ? 2 : 0;
+		return showing == View.LOCAL_EXPOSURE ? 1 : showing == View.BLOOM ? 2 : showing == View.WATER_HAZE ? 3
+				: showing == View.WATER_BENEATH ? 4 : showing == View.WATER_SURFACE ? 5 : 0;
 	}
 
 	/** Called after Minecraft's main pass. */

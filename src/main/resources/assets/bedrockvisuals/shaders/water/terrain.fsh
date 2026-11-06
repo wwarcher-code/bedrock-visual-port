@@ -258,6 +258,10 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
     // for below (waterColor) non-negative; the per-channel tint goes into that color.
     float leastTransmitted = min(s.transmittance.r, min(s.transmittance.g, s.transmittance.b));
     s.opacity = clamp(1.0 - (1.0 - s.fresnel) * leastTransmitted, 0.0, 1.0);
+    // The water views that leave the surface out (GBufferDebugView 3 and 4): fully see-through.
+    if (abs(DebugParams.w - 3.0) < 0.5 || abs(DebugParams.w - 4.0) < 0.5) {
+        s.opacity = 0.0;
+    }
     return s;
 }
 
@@ -556,6 +560,9 @@ vec3 waterColor(WaterSurface s, float albedo) {
         vec3 fogTransmittance;
         vec3 fogLight = surfaceFog(normalize(v_Position), length(v_Position), fogTransmittance);
         surfaceLight = surfaceLight * fogTransmittance + toDisplay(locallyExposed(fogLight)) * s.fresnel;
+    }
+    if (abs(DebugParams.w - 5.0) < 0.5) {
+        transmitted = vec3(0.0); // the surface view: its reflection and glint alone
     }
     vec3 target = clamp(surfaceLight + (1.0 - s.fresnel) * transmitted, 0.0, 1.0);
     return clamp((target - (1.0 - s.opacity) * behind) / max(s.opacity, 1e-3), 0.0, 1.0);
