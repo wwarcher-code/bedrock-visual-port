@@ -12,6 +12,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
@@ -84,11 +85,13 @@ public final class WaterColumns {
 
 	/**
 	 * One texel: the surface height × 16 above the level's floor (r, g; 0 when there's no water), and the
-	 * lowest water block's y above the floor (b, a).
+	 * lowest water block's y above the floor (b, and a's low four bits), and the sky light reaching the water
+	 * (a's high four bits).
 	 */
 	private static void encode(ByteBuffer data, ClientLevel level, BlockPos.MutableBlockPos pos, int x, int z) {
 		int surface = 0;
 		int bottom = 0;
+		int sky = 0;
 		LevelChunk chunk = level.getChunkSource().getChunk(x >> 4, z >> 4, false);
 		if (chunk != null) {
 			// MOTION_BLOCKING counts fluids, so the block under it is the top water block if there is one.
@@ -123,10 +126,15 @@ public final class WaterColumns {
 				}
 				surface = Math.max(1, Math.round((top + height - minY) * 16f));
 				bottom = y - minY;
+				// The sky light reaching the water: over open water the light above it; under cover the water
+				// block's own, which is what spreads in from the side (the shader dims the water's ambient by it).
+				pos.setY(covered ? top : top + 1);
+				sky = level.getBrightness(LightLayer.SKY, pos);
 				any = true;
 			}
 		}
-		data.put((byte) surface).put((byte) (surface >> 8)).put((byte) bottom).put((byte) (bottom >> 8));
+		data.put((byte) surface).put((byte) (surface >> 8)).put((byte) bottom)
+				.put((byte) (((bottom >> 8) & 15) | (sky << 4)));
 	}
 
 	private static void create() {

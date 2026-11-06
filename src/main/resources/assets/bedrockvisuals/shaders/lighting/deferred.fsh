@@ -190,6 +190,8 @@ vec3 volumetricFog(vec3 dir, float distance, out vec3 transmittance) {
         vec3 extinction;
         vec3 scattering;
         float g;
+        vec3 stepAmbient = ambient;
+        float stepSun = 1.0;
         if (water && p.y < UnderwaterMedium.w) {
             extinction = UnderwaterMedium.rgb;
             scattering = UnderwaterScattering.rgb;
@@ -202,6 +204,12 @@ vec3 volumetricFog(vec3 dir, float distance, out vec3 transmittance) {
             extinction = vec3(0.0);
             scattering = UnderwaterScattering.rgb * waterTransmittanceTo(p, dir);
             g = UnderwaterScattering.w;
+            // Its ambient light by the sky light that reaches this water (Bedrock's per-froxel sky samples):
+            // water under a ledge is dark, not lit by all the sky the camera sees. No sun where no sky light
+            // reaches (PopulateVolume's DirectionalLightSkyLightHeuristicToggles.y test).
+            float columnSky = max(waterColumnSkyLight(p), 0.0);
+            stepAmbient = SkyColor.rgb * waterSkyAccess(columnSky) * 0.07957747;
+            stepSun = columnSky > 0.0001 ? 1.0 : 0.0;
         } else {
             float density = clamp(VolumeHeight.x * p.y + VolumeHeight.y, 0.0, 1.0) * VolumeHeight.w;
             extinction = vec3(VolumeAir.w * density);
@@ -209,8 +217,8 @@ vec3 volumetricFog(vec3 dir, float distance, out vec3 transmittance) {
             g = VolumeHeight.z;
         }
         scattering *= 1.0 - bedrockFogAmount(t);
-        float visibility = volumeShadow(p, l) * cloudShadow(p, l);
-        vec3 source = scattering * (ambient + light * phaseHG(g, cosine) * visibility);
+        float visibility = volumeShadow(p, l) * cloudShadow(p, l) * stepSun;
+        vec3 source = scattering * (stepAmbient + light * phaseHG(g, cosine) * visibility);
         vec3 stepTransmittance = exp(-extinction * stepLength);
         // ∫ e^(-σt) dt over the step: (1 - e^(-σ step)) / σ, which tends to the step length as σ goes to 0
         // (the water from above, whose extinction waterTransmittanceTo applies per point instead; clamping σ
@@ -501,7 +509,7 @@ vec3 distantWaterSurface(vec3 below, vec3 ray, float surface, float ground, vec3
     }
     float path = max(ground - surface, 0.0);
     return specularScale * sky * 0.5 + glint
-            + (1.0 - fresnel) * (below * transmittance + waterInScatter(ray, min(path, 64.0), 1.0));
+            + (1.0 - fresnel) * (below * transmittance + waterInScatter(ray, min(path, 64.0), 1.0, VolumeCamera.x));
 }
 
 // Distant Horizons' terrain carries only colour and depth: the normal is rebuilt from the depth of the
@@ -776,15 +784,21 @@ void main() {
     // Under water, the march's water medium is Bedrock's WaterExtinction along the view, up to the surface.
     // From above water, what lies under the surface (within the water column map) is dimmed by the water
     // above it here; the water pass then leaves it alone.
+    // hdrColor's alpha tells the water pass which pixels this pass dimmed (0.5) so that it leaves exactly those
+    // alone: the water pass reconstructs the point from its own geometry, and with view bobbing the two
+    // reconstructions differ by up to a tenth of a block, enough to put a block's edge in the neighbouring
+    // column for one pass and not the other (bright outlines round underwater blocks while walking).
+    bool dimmedHere = false;
     if (UnderwaterParams.x < 0.5) {
         // Nudged off the surface along its normal: the floor's top face lies exactly on the water body's
         // bottom (as for the caustics test).
+        dimmedHere = !distantWaterHere && depthBelowWaterSurface(waterTestPoint(position)) >= 0.0;
         color *= waterTransmittanceTo(position, viewDir);
     }
     color = color * fogTransmittance + fogLight;
 
     meterLuminance = vec4(dot(color, LUMA), 0.0, 0.0, 1.0);
-    hdrColor = vec4(color, 1.0);
+    hdrColor = vec4(color, dimmedHere ? 0.5 : 1.0);
     // The local exposure debug view: mid-grey, which the local exposure pass multiplies by its factor.
     fragColor = abs(DebugParams.w - 1.0) < 0.5 ? vec4(vec3(0.5), 1.0) : vec4(toDisplay(color), 1.0);
 }

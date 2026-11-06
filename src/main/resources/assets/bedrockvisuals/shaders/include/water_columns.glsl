@@ -24,12 +24,36 @@ float depthBelowWaterSurface(vec3 p) {
     if (surface <= 0.0) {
         return -1.0;
     }
-    float bottom = column.b + column.a * 256.0;
+    float bottom = column.b + mod(floor(column.a + 0.5), 16.0) * 256.0;
     float y = p.y + WaterColumnOrigin.y;
     // Positions come from the view (with view bobbing's sway, up to about 0.1 blocks) and the height from the
     // camera without it, so floors lying exactly on the body's bottom get some slack: without it they flickered
     // in and out of the water while walking.
     return y >= bottom - 0.3 && y < surface ? max(surface - y, 0.0) : -1.0;
+}
+
+// The sky light (0 to 1) reaching the top water body of p's column (WaterColumns.java): full over open water,
+// less under a ledge or a tree, by Minecraft's sky light beside it. -1 outside the map or where it has no water.
+float waterColumnSkyLight(vec3 p) {
+    if (WaterColumnOrigin.w < 0.5 || max(abs(p.x), abs(p.z)) > WATER_COLUMN_RANGE) {
+        return -1.0;
+    }
+    ivec2 texel = ivec2(mod(floor(p.xz + WaterColumnOrigin.xz), 256.0));
+    vec4 column = texelFetch(WATER_COLUMNS, texel, 0) * 255.0;
+    if (column.r + column.g <= 0.0) {
+        return -1.0;
+    }
+    return floor(floor(column.a + 0.5) / 16.0) / 15.0;
+}
+
+// How much of the sky ambient light reaches water with sky light s (0 to 1). Bedrock lights its volume's
+// ambient by per-froxel sky samples (PopulateVolume: SkyAmbientLightColorIntensity × the s_SkyAmbientSamples
+// texture, or CameraAmbientContribution where those are off); this stands in with Minecraft's sky light,
+// through the same curve as the terrain's sky ambient (lighting/deferred.fsh), so water under a ledge darkens
+// as the ledge's floor does. 1 over open water, as before.
+float waterSkyAccess(float s) {
+    float cameraSky = sqrt(VolumeCamera.x) * 15.0 / 16.0;
+    return s * mix(pow(s, 4.0), s * s, cameraSky);
 }
 
 // The point a visible surface's water test is made at: nudged back towards the camera, into the water in
@@ -54,15 +78,17 @@ vec3 waterTransmittanceTo(vec3 p, vec3 dir) {
 // direction dir: what the lighting pass's march adds within the map (sky ambient over 4π and the sun or moon
 // through the water's phase function, dimmed by the water in front of each point along the view), in closed
 // form for a uniform layer, for water the map doesn't cover (farther out, and Distant Horizons' water). The
-// sun's share is scaled by sunVisibility (whether what's beneath is in shade). This renderer's units, before exposure.
-vec3 waterInScatter(vec3 dir, float path, float sunVisibility) {
+// sun's share is scaled by sunVisibility (whether what's beneath is in shade), the sky's by skyAccess (the
+// camera's VolumeCamera.x, or waterSkyAccess where the water's sky light is known). This renderer's units,
+// before exposure.
+vec3 waterInScatter(vec3 dir, float path, float sunVisibility, float skyAccess) {
     bool moon = ShadowParams.w > 0.5;
     vec3 l = normalize(moon ? MoonDirection.xyz : SunDirection.xyz);
     vec3 light = moon ? MoonColor.rgb : SunColor.rgb;
     float g = UnderwaterScattering.w;
     float cosine = dot(l, -dir);
     float phase = (1.0 - g * g) * 0.07957747 / pow(max(1.0 + g * (2.0 * cosine + g), 1e-4), 1.5);
-    vec3 ambient = SkyColor.rgb * VolumeCamera.x * 0.07957747;
+    vec3 ambient = SkyColor.rgb * skyAccess * 0.07957747;
     vec3 sigma = max(UnderwaterMedium.rgb, vec3(1e-5));
     return UnderwaterScattering.rgb * (ambient + light * phase * sunVisibility) * (1.0 - exp(-sigma * path)) / sigma;
 }

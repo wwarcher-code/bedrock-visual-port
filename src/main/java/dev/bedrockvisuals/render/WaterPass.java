@@ -37,6 +37,7 @@ public final class WaterPass {
 	static final BindGroupLayout INPUTS = LocalExposure.withInputs(BindGroupLayout.builder()
 			.withUniform("u_GBufferDepth", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("u_SceneColor", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("u_LitFlags", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("WaterData", UniformType.UNIFORM_BUFFER)
@@ -148,6 +149,9 @@ public final class WaterPass {
 		GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
 		pass.setUniform("u_GBufferDepth", gbuffer.depthView(), nearest);
 		pass.setUniform("u_SceneColor", sceneView, nearest);
+		// The lighting pass's HDR scene, whose alpha marks what it dimmed under water (without it, the scene copy:
+		// alpha 1 everywhere, so this pass dims all of it).
+		pass.setUniform("u_LitFlags", BloomPass.hdrView() != null ? BloomPass.hdrView() : sceneView, nearest);
 		pass.setUniform("LightingData", LightingPass.lightingData());
 		pass.setUniform("GradingData", LightingPass.gradingData());
 		pass.setUniform("WaterData", data);
