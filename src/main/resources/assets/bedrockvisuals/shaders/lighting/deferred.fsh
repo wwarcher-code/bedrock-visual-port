@@ -477,6 +477,54 @@ float distantDistance(vec2 uv) {
 // per-texel normals out there) of water_still_grey's mean roughness 0.085 and the grey texel's F0, the
 // water's extinction along the path to the ground, its sky reflection through Bedrock's split-sum term, and
 // the sun's glint.
+// Screen-space reflection for Distant Horizons' water: the mirror ray marched against both Java's depth and
+// DH's (terrainReflection sees only Java's, and its steps are sized for nearby surfaces), in steps that grow
+// with the distance from the camera. The hit is read from the previous frame's image, as for terrain.
+const int DISTANT_SSR_STEPS = 40;
+vec4 distantReflection(vec3 origin, vec3 direction) {
+    float stepLength = max(length(origin) * 0.01, 0.5);
+    float travelled = 0.0;
+    for (int i = 0; i < DISTANT_SSR_STEPS; i++) {
+        travelled += stepLength;
+        stepLength *= 1.15;
+        vec3 p = origin + direction * travelled;
+        vec4 clip = ViewProjection * vec4(p, 1.0);
+        if (clip.w <= 0.0) {
+            return vec4(0.0);
+        }
+        vec3 ndc = clip.xyz / clip.w;
+        vec2 uv = ndc.xy * 0.5 + 0.5;
+        if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
+            return vec4(0.0);
+        }
+        float sceneDistance = -1.0;
+        float sceneDepth = texture(Depth, uv).r;
+        if (sceneDepth > 0.0) {
+            vec4 scene = InverseViewProjection * vec4(ndc.xy, sceneDepth, 1.0);
+            sceneDistance = length(scene.xyz / scene.w);
+        } else if (DistantParams.x > 0.5) {
+            sceneDistance = distantDistance(uv);
+        }
+        if (sceneDistance < 0.0) {
+            continue;
+        }
+        float rayDistance = length(p);
+        if (rayDistance > sceneDistance && rayDistance - sceneDistance < max(stepLength * 2.0, 1.0)) {
+            vec4 previousClip = PreviousViewProjection * vec4(p + CameraMotion.xyz, 1.0);
+            if (previousClip.w <= 0.0) {
+                return vec4(0.0);
+            }
+            vec2 previousUv = previousClip.xy / previousClip.w * 0.5 + 0.5;
+            if (any(lessThan(previousUv, vec2(0.0))) || any(greaterThan(previousUv, vec2(1.0)))) {
+                return vec4(0.0);
+            }
+            vec2 edge = min(min(uv, 1.0 - uv), min(previousUv, 1.0 - previousUv));
+            return vec4(texture(PreviousScene, previousUv).rgb, smoothstep(0.0, 0.1, min(edge.x, edge.y)));
+        }
+    }
+    return vec4(0.0);
+}
+
 vec3 distantWaterSurface(vec3 below, vec3 ray, float surface, float ground, vec3 sunDir, vec3 moonDir) {
     vec3 n = vec3(0.0, 1.0, 0.0);
     vec3 v = -ray;
@@ -509,7 +557,12 @@ vec3 distantWaterSurface(vec3 below, vec3 ray, float surface, float ground, vec3
         glint = SunColor.rgb * fh * ggx(max(dot(n, h), 0.0), ROUGHNESS) * geometry / (4.0 * nDotV);
     }
     float path = max(ground - surface, 0.0);
-    return specularScale * sky * 0.5 + glint
+    // The probe at IBLParameters.z 0.5, replaced by SSR where that hits (Bedrock's is mirror-only, and this
+    // flat water's roughness is under its 0.3 cut-off), as for the near water.
+    vec3 reflection = sky * 0.5;
+    vec4 traced = distantReflection(ray * surface + n * 0.05, mirror);
+    reflection = mix(reflection, traced.rgb, traced.a);
+    return specularScale * reflection + glint
             + (1.0 - fresnel) * (below * transmittance + waterInScatter(ray, min(path, 64.0), 1.0, VolumeCamera.x));
 }
 

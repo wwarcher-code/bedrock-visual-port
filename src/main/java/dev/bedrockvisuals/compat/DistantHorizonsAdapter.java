@@ -175,6 +175,9 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 				entry.setWithoutSaving(savedFade);
 				savedFade = null;
 			}
+			BedrockVisualsClient.LOGGER.info("[distant] Distant Horizons' vanilla fade {} ({}; now {})",
+					on ? "restored" : "turned off for the session",
+					entry.getAllowApiOverride() ? "as an API value" : "in memory", entry.get());
 		} catch (RuntimeException | LinkageError e) {
 			BedrockVisualsClient.LOGGER.warn("[distant] couldn't {} Distant Horizons' vanilla fade", on ? "restore" : "turn off", e);
 		}

@@ -111,6 +111,14 @@ public final class ShadowPass {
 		return disabled;
 	}
 
+	/**
+	 * The direction towards the light of the last shadow map, while shadows are on (for Sodium's culling, which
+	 * keeps sections out of view whose shadows fall into it); null otherwise.
+	 */
+	public static Vector3f casterDirection() {
+		return valid && !disabled ? heldDirection : null;
+	}
+
 	/** Whether the map was cast from the moon rather than the sun. */
 	public static boolean fromMoon() {
 		return fromMoon;

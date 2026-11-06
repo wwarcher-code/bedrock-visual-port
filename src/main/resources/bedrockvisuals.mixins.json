@@ -12,7 +12,8 @@
 		"minecraft.PreparedRenderTypeMixin",
 		"minecraft.QuadParticleFeatureRendererMixin",
 		"minecraft.SkyRendererMixin",
-		"sodium.DefaultChunkRendererMixin"
+		"sodium.DefaultChunkRendererMixin",
+		"sodium.ViewportMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
