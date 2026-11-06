@@ -37,7 +37,7 @@ import org.lwjgl.system.MemoryStack;
  */
 public final class LightingPass {
 	/** std140 size of the LightingData block (include/common.glsl): three mat4s and seventeen vec4s. */
-	private static final int DATA_SIZE = 6 * 64 + 21 * 16;
+	private static final int DATA_SIZE = 7 * 64 + 22 * 16;
 	/**
 	 * Bedrock's shadow normal offset (shadow_configuration.pc.json normal_offset_strength): lookups move out along
 	 * the normal by this many blocks times (1 - N·L).
@@ -94,6 +94,8 @@ public final class LightingPass {
 	private static GpuBuffer distant;
 	/** This frame's Distant Horizons depth, or null when its terrain isn't lit here. */
 	private static GpuTextureView distantDepth;
+	private static Matrix4f previousViewProjection;
+	private static net.minecraft.world.phys.Vec3 previousCamera;
 	private static final int DISTANT_SIZE = 64 + 32;
 	/** Biome settings ease across biome borders (SettingsBlend); the atmosphere's last vec4 follows the camera. */
 	private static final SettingsBlend GRADING_BLEND = new SettingsBlend(Integer.MAX_VALUE);
@@ -153,7 +155,21 @@ public final class LightingPass {
 			CloudShadows.write(builder, light.atmosphere() != null);
 			Underwater.write(builder, light.sunIlluminance());
 			WaterColumns.write(builder);
-			builder.putMat4f(new Matrix4f(projection).mul(modelView));
+			Matrix4f viewProjection = new Matrix4f(projection).mul(modelView);
+			builder.putMat4f(viewProjection);
+			// The previous frame's camera, for reflections that read the previous frame's image (view bobbing
+			// and movement otherwise shift what they pick up).
+			net.minecraft.world.phys.Vec3 cameraNow = net.minecraft.client.Minecraft.getInstance().gameRenderer
+					.mainCamera().position();
+			if (previousViewProjection == null || previousCamera == null) {
+				previousViewProjection = new Matrix4f(viewProjection);
+				previousCamera = cameraNow;
+			}
+			builder.putMat4f(previousViewProjection);
+			builder.putVec4((float) (cameraNow.x - previousCamera.x), (float) (cameraNow.y - previousCamera.y),
+					(float) (cameraNow.z - previousCamera.z), 0);
+			previousViewProjection.set(viewProjection);
+			previousCamera = cameraNow;
 			encoder.writeToBuffer(data.slice(), builder.get());
 			Std140Builder gradingBuilder = Std140Builder.onStack(stack, ColorGrading.DATA_SIZE);
 			ColorGrading.write(gradingBuilder, ColorGrading.current());

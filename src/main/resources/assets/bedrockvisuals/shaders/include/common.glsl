@@ -35,6 +35,8 @@ layout(std140) uniform LightingData {
     vec4 WaterColumnOrigin;     // x, z: the camera's world x and z modulo 256, y: its height above the level's
                                 // floor, w: 1 when the water column map is there (WaterColumns.java)
     mat4 ViewProjection;        // camera-relative world space to clip space (InverseViewProjection's inverse)
+    mat4 PreviousViewProjection; // the previous frame's, relative to its own camera position
+    vec4 CameraMotion;          // xyz: this frame's camera position minus the previous frame's
 };
 
 // Bedrock's water extinction along a view ray from the camera (Underwater.java): the path through water is

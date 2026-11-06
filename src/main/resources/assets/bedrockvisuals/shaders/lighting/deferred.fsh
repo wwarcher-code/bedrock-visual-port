@@ -248,10 +248,21 @@ vec4 terrainReflection(vec3 origin, vec3 direction) {
         float sceneDistance = length(scene.xyz / scene.w);
         float rayDistance = length(p);
         if (rayDistance > sceneDistance && rayDistance - sceneDistance < max(stepLength * 2.0, 0.5)) {
+            // The hit is read from the previous frame's image, so where it was on screen then: reprojected through
+            // the previous frame's camera (view bobbing and movement otherwise shift what's picked up, which
+            // showed as bright outlines along block edges).
+            vec4 previousClip = PreviousViewProjection * vec4(p + CameraMotion.xyz, 1.0);
+            if (previousClip.w <= 0.0) {
+                return vec4(0.0);
+            }
+            vec2 previousUv = previousClip.xy / previousClip.w * 0.5 + 0.5;
+            if (any(lessThan(previousUv, vec2(0.0))) || any(greaterThan(previousUv, vec2(1.0)))) {
+                return vec4(0.0);
+            }
             // Fade near the screen's edges (fading_distance), where the reflected scene runs out.
-            vec2 edge = min(uv, 1.0 - uv);
+            vec2 edge = min(min(uv, 1.0 - uv), min(previousUv, 1.0 - previousUv));
             float fade = smoothstep(0.0, 0.1, min(edge.x, edge.y));
-            return vec4(texture(PreviousScene, uv).rgb, fade);
+            return vec4(texture(PreviousScene, previousUv).rgb, fade);
         }
     }
     return vec4(0.0);
