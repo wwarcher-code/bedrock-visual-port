@@ -323,10 +323,22 @@ vec3 waterColor(WaterSurface s, float albedo) {
         vec2 self = toScreen(v_Position, size, false).xy;
         bool flipY = abs(self.y - gl_FragCoord.y) > abs(size.y - self.y - gl_FragCoord.y);
         vec3 behind = texelFetch(u_SceneColor, ivec2(gl_FragCoord.xy), 0).rgb;
-        // The reflection is of the water below: screen-space where the mirror ray finds it, else dark water.
-        vec4 traced = screenSpaceReflection(v_Position + s.n * 0.02, reflect(-s.v, s.n), size, flipY);
+        // The reflection is of the water below: screen-space where the mirror ray finds it, else what Bedrock's
+        // indirect specular falls back to, the sky probe in the mirror direction. Under water that probe is the
+        // underwater atmosphere (SkyAtmosphere.underwater), so the totally reflecting surface outside Snell's
+        // window shows the teal of the water, not black. Faded in by sky light at IBLParameters.z 0.5, as
+        // above water.
+        vec3 mirror = reflect(-s.v, s.n);
+        vec4 traced = screenSpaceReflection(v_Position + s.n * 0.02, mirror, size, flipY);
         vec3 toSurface = exp(-UnderwaterMedium.rgb * length(v_Position));
-        vec3 reflection = traced.rgb * traced.a * toSurface;
+        vec3 probe = vec3(0.0);
+        if (AtmosphereZenith.w > 0.5) {
+            float skyLevel = clamp((v_LightCoord.y * 256.0 - 8.0) / 240.0, 0.0, 1.0);
+            float iblFade = pow(clamp((skyLevel * 15.0 - 12.0) / 3.0, 0.0, 1.0), 3.0) * 0.5;
+            probe = toDisplay(locallyExposed(bedrockSkyReflection(mirror, s.roughness, normalize(SunDirection.xyz),
+                    normalize(MoonDirection.xyz)) * iblFade));
+        }
+        vec3 reflection = mix(probe, traced.rgb * toSurface, traced.a);
         vec3 target = clamp(s.fresnel * reflection + (1.0 - s.fresnel) * behind, 0.0, 1.0);
         return clamp((target - (1.0 - s.opacity) * behind) / max(s.opacity, 1e-3), 0.0, 1.0);
     }
