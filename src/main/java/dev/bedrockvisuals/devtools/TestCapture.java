@@ -52,6 +52,9 @@ public final class TestCapture {
 	private static final float HORIZON_PITCH = -10f;
 	private static final int TICKS_AFTER_TIME_CHANGE = 15;
 	private static final int TICKS_AFTER_VIEW_CHANGE = 3;
+	/** Whole frames drawn after a view change before its screenshot. */
+	private static final int FRAMES_AFTER_VIEW_CHANGE = 4;
+	private static long minFrame;
 	/** Rain's level rises 0.01 a tick: 100 ticks to full, and a little more. */
 	private static final int RAIN_FADE_TICKS = 110;
 
@@ -251,6 +254,7 @@ public final class TestCapture {
 			DeferredRenderer.setEnabled(view != null);
 			GBufferDebugView.setView(view == null ? View.OFF : view);
 			wait = TICKS_AFTER_VIEW_CHANGE;
+			minFrame = DeferredRenderer.totalFrames() + FRAMES_AFTER_VIEW_CHANGE;
 		});
 		STEPS.add(() -> shoot(folder.resolve(file)));
 	}
@@ -258,6 +262,11 @@ public final class TestCapture {
 	private static void step() {
 		if (wait > 0) {
 			wait--;
+			return;
+		}
+		// Ticks alone aren't enough when frames are slow (high up with Distant Horizons, a vanilla shot came
+		// out lit): a change must also have been drawn in a few whole frames.
+		if (DeferredRenderer.totalFrames() < minFrame) {
 			return;
 		}
 		Runnable next = STEPS.poll();

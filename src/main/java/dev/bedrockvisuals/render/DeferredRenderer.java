@@ -61,6 +61,7 @@ public final class DeferredRenderer {
 		replacedTerrain = false;
 		replacedSky = false;
 		frames++;
+		totalFrames++;
 		// While this renderer lights Distant Horizons' terrain, DH's own composite (its lit colour and fog onto
 		// the frame) is cancelled; with lighting off (F8) DH draws itself again. DH draws before this, so the
 		// change takes effect from the next frame.
@@ -141,6 +142,13 @@ public final class DeferredRenderer {
 
 	public static boolean isEnabled() {
 		return enabled;
+	}
+
+	private static long totalFrames;
+
+	/** Frames drawn since the game started (lit or not); the test capture waits on it. */
+	public static long totalFrames() {
+		return totalFrames;
 	}
 
 	public static void setEnabled(boolean on) {
