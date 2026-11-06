@@ -30,6 +30,10 @@ of minutes.
      `/bv spot ocean remove` forgets it. Saved spots are kept per world in `run\config\bedrockvisuals\spots.json`.
 3. Press **F9** from anywhere and keep your hands off the controls. The mod hides the HUD, clears the
    weather, and:
+   - first, where you stand (about 20 seconds; face some Distant Horizons terrain): the far terrain's
+     flicker test. The lit view and each input to the far terrain's lighting (its colour, depth, rebuilt
+     normal and shadow) are shot a dozen times with nothing changed. The report says how much of the far
+     terrain changes in each, and the sheet's second row shows where (bright: changed; dark blue: steady);
    - at the test scene: screenshots at noon, afternoon, low sun and midnight (lit, vanilla, shadow test,
      material), the debug rows at noon (albedo, normal, light, local exposure; then bloom, shadow cascades and
      the water map), horizon shots at noon and low sun, a shot from inside the pool, and rain;

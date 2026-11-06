@@ -28,7 +28,11 @@ public final class GBufferDebugView {
 		WATER_HAZE("water haze", null),
 		WATER_BENEATH("under water, no haze", null),
 		WATER_SURFACE("water surface", null),
-		WATER_FLAG("water flag", null);
+		WATER_FLAG("water flag", null),
+		DISTANT_COLOR("far colour", null),
+		DISTANT_DEPTH("far depth", null),
+		DISTANT_NORMAL("far normal", null),
+		DISTANT_SHADOW("far shadow", null);
 
 		public final String label;
 		final GBuffer.Target target;
@@ -89,11 +93,14 @@ public final class GBufferDebugView {
 	/**
 	 * DebugParams.w for the lighting data: 1 shows local exposure's factor, 2 only the bloom; 3 to 5 split the
 	 * water seen from above into its parts: 3 only the scattered light (the fog grid's), 4 only what lies
-	 * beneath with the water's dimming, 5 only the surface's reflection and glint.
+	 * beneath with the water's dimming, 5 only the surface's reflection and glint; 6 the water flag; 7 to 10
+	 * Distant Horizons' terrain's colour, depth, rebuilt normal and sun visibility (the flicker test's).
 	 */
 	public static int postDebugMode() {
 		return showing == View.LOCAL_EXPOSURE ? 1 : showing == View.BLOOM ? 2 : showing == View.WATER_HAZE ? 3
-				: showing == View.WATER_BENEATH ? 4 : showing == View.WATER_SURFACE ? 5 : showing == View.WATER_FLAG ? 6 : 0;
+				: showing == View.WATER_BENEATH ? 4 : showing == View.WATER_SURFACE ? 5 : showing == View.WATER_FLAG ? 6
+				: showing == View.DISTANT_COLOR ? 7 : showing == View.DISTANT_DEPTH ? 8
+				: showing == View.DISTANT_NORMAL ? 9 : showing == View.DISTANT_SHADOW ? 10 : 0;
 	}
 
 	/** Called after Minecraft's main pass. */

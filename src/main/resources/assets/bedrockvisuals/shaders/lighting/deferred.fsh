@@ -766,6 +766,13 @@ void main() {
     if (distantWaterHere && distant < 0.0) {
         distant = distantWater + 64.0; // nothing drawn under it: deep water
     }
+    if (depth <= 0.0 && distant < 0.0 && DebugParams.w > 6.5) {
+        // The far terrain views (7 to 10, the flicker test's): only Distant Horizons' terrain shows.
+        fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        meterLuminance = vec4(0.18, 0.0, 0.0, 1.0);
+        hdrColor = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
     if (depth <= 0.0 && distant < 0.0) {
         // No terrain (reversed depth: 0 is the cleared far plane): sky.
         if (AtmosphereZenith.w > 0.5) {
@@ -860,6 +867,32 @@ void main() {
     vec3 nCaster = moonCasts ? nMoon : nSun;
     float mapped = shadowVisibility(snapToTexel(position, n), nCaster, moonCasts ? moonDir : sunDir, edgeFade);
     float casterVisibility = mapped < 0.0 ? skyFallback : mix(skyFallback, mapped * skyGuard, edgeFade);
+    if (DebugParams.w > 6.5) {
+        // The far terrain views (GBufferDebugView; the flicker test compares frames of each): each input to
+        // Distant Horizons' terrain's lighting alone, black elsewhere. 7 DH's colour as it hands it over;
+        // 8 its depth (red: the distance's fraction of a block, green: of 16 blocks, blue: out to 2048);
+        // 9 the normal rebuilt from its depth; 10 the sun's visibility (red: the shadow cascades, grey 0.5
+        // outside them; green: the far terrain's heights; blue: both, as lit).
+        vec3 shown = vec3(0.0);
+        if (distant >= 0.0) {
+            int mode = int(DebugParams.w + 0.5);
+            if (mode == 7) {
+                shown = texture(DistantColor, texCoord).rgb;
+            } else if (mode == 8) {
+                shown = vec3(fract(distant), fract(distant / 16.0), clamp(distant / 2048.0, 0.0, 1.0));
+            } else if (mode == 9) {
+                shown = n * 0.5 + 0.5;
+            } else {
+                vec3 towards = moonCasts ? moonDir : sunDir;
+                float heights = distantHeightShadow(snapToTexel(position, n), towards, mapped >= 0.0);
+                shown = vec3(mapped < 0.0 ? 0.5 : mapped, heights, casterVisibility * heights);
+            }
+        }
+        fragColor = vec4(shown, 1.0);
+        meterLuminance = vec4(0.18, 0.0, 0.0, 1.0);
+        hdrColor = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
     if (DebugParams.x > 2.5) {
         // The water view: what the water column map says about this pixel's surface. Blue: the column has
         // mapped water but the point isn't under it (depth beyond the colour shows how far above); cyan to

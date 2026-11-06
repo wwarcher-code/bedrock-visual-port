@@ -267,7 +267,8 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
     float leastTransmitted = min(s.transmittance.r, min(s.transmittance.g, s.transmittance.b));
     s.opacity = clamp(1.0 - (1.0 - s.fresnel) * leastTransmitted, 0.0, 1.0);
     // The water views that leave the surface out (GBufferDebugView 3 and 4): fully see-through.
-    if (abs(DebugParams.w - 3.0) < 0.5 || abs(DebugParams.w - 4.0) < 0.5) {
+    // And the far terrain views (7 to 10), which show only what's under it.
+    if (abs(DebugParams.w - 3.0) < 0.5 || abs(DebugParams.w - 4.0) < 0.5 || DebugParams.w > 6.5) {
         s.opacity = 0.0;
     }
     // The water flag view (6): see-through to the lighting pass's codes, but yellow where this pass shades

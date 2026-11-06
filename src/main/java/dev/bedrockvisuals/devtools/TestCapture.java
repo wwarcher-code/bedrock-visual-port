@@ -121,7 +121,7 @@ public final class TestCapture {
 		viewBefore = GBufferDebugView.view();
 		lightingBefore = DeferredRenderer.isEnabled();
 		timeBefore = minecraft.level.getDefaultClockTime();
-		message("Capturing test views; stand still for about ten seconds.");
+		message("Capturing test views; stand still. It starts with a 20-second flicker test of the far terrain.");
 
 		STEPS.clear();
 		TestSpots.Spot here = TestSpots.here().orElseThrow();
@@ -132,6 +132,9 @@ public final class TestCapture {
 			}
 			command("weather clear");
 		});
+		// Before anything moves the camera or the time: the far terrain's flicker test, from where the player
+		// stands.
+		addFlickerShots();
 		java.util.Map<String, TestSpots.Spot> spots = TestSpots.all();
 		TestSpots.Spot scene = spots.get(TestSpots.SCENE);
 		boolean sceneRows = only == null || only.equals(TestSpots.SCENE);
@@ -151,6 +154,47 @@ public final class TestCapture {
 		}
 		STEPS.add(TestCapture::restore);
 		STEPS.add(TestCapture::finishWhenSaved);
+	}
+
+	/**
+	 * The far terrain's flicker test (FlickerTest): each of its views shot a dozen times with nothing changed,
+	 * then a row of the first shots and a row of the difference images the comparison writes.
+	 */
+	private static void addFlickerShots() {
+		FlickerTest.reset();
+		List<ContactSheet.Cell> shots = new ArrayList<>();
+		List<ContactSheet.Cell> differences = new ArrayList<>();
+		sheet.add(shots);
+		sheet.add(differences);
+		STEPS.add(() -> {
+			AutoExposure.settle();
+			wait = TICKS_AFTER_VIEW_CHANGE;
+		});
+		for (View view : FlickerTest.VIEWS) {
+			String label = FlickerTest.label(view);
+			shots.add(new ContactSheet.Cell(FlickerTest.frame(folder, view, 0), "flicker - " + label));
+			differences.add(new ContactSheet.Cell(FlickerTest.difference(folder, view), "flicker - " + label
+					+ " changes"));
+			STEPS.add(() -> {
+				DeferredRenderer.setEnabled(true);
+				GBufferDebugView.setView(view);
+				wait = TICKS_AFTER_VIEW_CHANGE;
+				minFrame = DeferredRenderer.totalFrames() + FRAMES_AFTER_VIEW_CHANGE;
+			});
+			for (int k = 0; k < FlickerTest.FRAMES; k++) {
+				int shot = k;
+				int ticks = FlickerTest.TICKS_BEFORE[k];
+				if (ticks > 1) {
+					STEPS.add(() -> wait = ticks - 1);
+				}
+				STEPS.add(() -> {
+					FlickerTest.record(view);
+					shoot(FlickerTest.frame(folder, view, shot));
+					// The next shot only once another frame is drawn.
+					minFrame = DeferredRenderer.totalFrames() + 1;
+				});
+			}
+		}
 	}
 
 	/** Goes to a saved spot and waits for its chunks (and Distant Horizons' terrain) to come in. */
@@ -392,11 +436,13 @@ public final class TestCapture {
 		running = false;
 		Minecraft minecraft = Minecraft.getInstance();
 		report.logExcerpt(minecraft.gameDirectory.toPath());
-		String text = report.text();
-		minecraft.keyboardHandler.setClipboard(text);
+		String reportText = report.text();
 		Path captureFolder = folder;
 		List<List<ContactSheet.Cell>> cells = sheet;
 		Util.ioPool().execute(() -> {
+			// The flicker test's comparison first: its difference images go on the sheet, its results in the report.
+			String text = reportText + FlickerTest.analyse(captureFolder);
+			minecraft.execute(() -> minecraft.keyboardHandler.setClipboard(text));
 			try {
 				Files.writeString(captureFolder.resolve("report.txt"), text, StandardCharsets.UTF_8);
 				ContactSheet.write(cells, captureFolder.resolve("contact-sheet.png"));
