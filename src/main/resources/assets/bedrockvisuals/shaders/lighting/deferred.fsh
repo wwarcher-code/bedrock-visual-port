@@ -914,7 +914,10 @@ void main() {
         // on the water body's bottom, a wall's face on its column's edge.
         vec3 testPoint = distant >= 0.0 ? waterTestPoint(position) : waterTestPointOn(position, n);
         dimmedHere = !distantWaterHere && depthBelowWaterSurface(testPoint) >= 0.0;
-        color *= waterTransmittanceAt(testPoint, position, viewDir);
+        // With the fog grid, the water's own 0.112 a block is in its transmittance (it integrates the water
+        // medium as Bedrock's does), so only WaterExtinction is applied here; without it, both.
+        color *= FroxelParams.x > 0.5 ? waterViewTransmittanceAt(testPoint, position, viewDir)
+                : waterTransmittanceAt(testPoint, position, viewDir);
     }
     color = color * fogTransmittance + fogLight;
 

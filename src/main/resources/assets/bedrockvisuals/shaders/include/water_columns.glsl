@@ -114,6 +114,27 @@ vec3 waterScatterTransmittanceTo(vec3 p, vec3 dir) {
     return exp(-waterScatterExtinction() * min(depth / max(-dir.y, 0.05), 64.0));
 }
 
+// The view's extinction alone (WaterExtinction) over the water above the point at p along the view: what
+// DeferredWater applies to what lies under the surface, the volume's own 0.112 a block being the fog grid's
+// (FroxelVolume) to apply as it integrates.
+vec3 waterViewTransmittanceTo(vec3 p, vec3 dir) {
+    float depth = depthBelowWaterSurface(waterTestPoint(p));
+    if (depth < 0.0) {
+        return vec3(1.0);
+    }
+    return exp(-UnderwaterMedium.rgb * min(depth / max(-dir.y, 0.05), 64.0));
+}
+
+// As waterViewTransmittanceTo for a lit surface's chosen test point (waterTestPointOn) off the point p.
+vec3 waterViewTransmittanceAt(vec3 testPoint, vec3 p, vec3 dir) {
+    float depth = depthBelowWaterSurface(testPoint);
+    if (depth < 0.0) {
+        return vec3(1.0);
+    }
+    depth = max(depth + testPoint.y - p.y, 0.0);
+    return exp(-UnderwaterMedium.rgb * min(depth / max(-dir.y, 0.05), 64.0));
+}
+
 // As waterTransmittanceTo, for a test point already chosen (waterTestPointOn) off the surface point p: the
 // test point says whether p is under the water, p how deep.
 vec3 waterTransmittanceAt(vec3 testPoint, vec3 p, vec3 dir) {

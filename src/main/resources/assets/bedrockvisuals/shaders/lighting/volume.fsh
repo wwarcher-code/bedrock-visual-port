@@ -94,12 +94,13 @@ void main() {
             scattering = UnderwaterScattering.rgb;
             g = UnderwaterScattering.w;
         } else if (waterBelow && depthBelowWaterSurface(p) >= 0.0) {
-            // Seen from above, the water between its surface and the floor (PopulateVolume picks the water
-            // medium between the water's front and back depths), dimmed by the water above it along the view
-            // at the volume's rate, per point; its ambient light by the sky light reaching that water, and no
-            // sun where none reaches.
-            extinction = vec3(0.0);
-            scattering = UnderwaterScattering.rgb * waterScatterTransmittanceTo(p, dir);
+            // Seen from above, the water between its surface and the floor is the volume's water medium
+            // (PopulateVolume picks it between the water's front and back depths: WaterAlbedoExtinction, 0.112 a
+            // block in every channel, integrated here like the air's). What it scatters then passes up through
+            // the water above it, which DeferredWater dims by WaterExtinction: applied per point here. Its
+            // ambient light by the sky light reaching that water, and no sun where none reaches.
+            extinction = vec3(WATER_VOLUME_EXTINCTION);
+            scattering = UnderwaterScattering.rgb * waterViewTransmittanceTo(p, dir);
             g = UnderwaterScattering.w;
             float columnSky = max(waterColumnSkyLight(p), 0.0);
             stepAmbient = SkyColor.rgb * waterSkyAccess(columnSky) * 0.07957747;
