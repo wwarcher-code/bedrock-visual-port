@@ -67,7 +67,16 @@ def main(sodium_jar, minecraft_jar=None):
         stage = "vert" if shader.suffix == ".vsh" else "frag"
         terrain = shader.stem == "terrain"
         variants = [TERRAIN_DEFINES, TERRAIN_DEFINES + ["ALPHA_CUTOUT 0.5"]] if terrain else [[]]
-        if shader.parent.name in ("water", "clouds"):
+        if shader.parent.name == "entity":
+            if not minecraft_jar:
+                print(f"skip  {shader.relative_to(ASSETS)} (needs the Minecraft client jar)")
+                continue
+            # Minecraft's entity pipelines (RenderPipelines) switch the one shader by these defines.
+            variants = [[], ["ALPHA_CUTOUT 0.1"], ["EMISSIVE"], ["NO_OVERLAY", "NO_CARDINAL_LIGHTING"],
+                        ["PER_FACE_LIGHTING"], ["GLINT", "APPLY_TEXTURE_MATRIX"], ["DISSOLVE", "ALPHA_CUTOUT 0.1"],
+                        ["EMISSIVE", "NO_OVERLAY", "ALPHA_CUTOUT 0.1"]] \
+                + [OIT_DEFINES + s for s in OIT_STAGES] + [OIT_DEFINES + ["OIT_ADDITIVE"] + OIT_STAGES[2]]
+        elif shader.parent.name in ("water", "clouds"):
             if not minecraft_jar:
                 print(f"skip  {shader.relative_to(ASSETS)} (needs the Minecraft client jar)")
                 continue

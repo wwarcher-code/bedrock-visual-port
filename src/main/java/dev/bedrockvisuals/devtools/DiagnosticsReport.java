@@ -75,6 +75,7 @@ final class DiagnosticsReport {
 				+ "; " + ShadowPass.CASCADES + " cascades of " + ShadowPass.RESOLUTION + "x" + ShadowPass.RESOLUTION
 				+ " out to " + (int) ShadowPass.RANGE + " blocks");
 		line("materials " + MaterialAtlas.status());
+		line("entities " + dev.bedrockvisuals.render.EntityPass.status());
 		line("water " + WaterPass.status() + "; " + Underwater.status() + "; columns " + WaterColumns.status());
 		line("bloom " + BloomPass.status());
 		line("local exposure " + LocalExposure.status());

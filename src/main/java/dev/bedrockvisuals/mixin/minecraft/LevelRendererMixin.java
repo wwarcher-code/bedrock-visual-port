@@ -6,6 +6,7 @@ import com.mojang.renderpearl.api.commands.RenderPass;
 import com.mojang.renderpearl.api.textures.GpuSampler;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
 import dev.bedrockvisuals.render.DeferredRenderer;
+import dev.bedrockvisuals.render.EntityPass;
 import dev.bedrockvisuals.render.GBufferDebugView;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.LevelTargetBundle;
@@ -48,6 +49,7 @@ abstract class LevelRendererMixin {
 	private void bedrockvisuals$renderGBuffer(GpuBufferSlice fog, boolean arg1, ChunkSectionsToRender chunks,
 			FeatureRenderDispatcher.PreparedFrame frame, boolean arg4, boolean arg5, CallbackInfo ci) {
 		RenderTarget main = targets.main.get();
+		EntityPass.setInLevelPass(true);
 		DeferredRenderer.beforeMainPass(chunks, main, chunkLayerSampler,
 				(TextureAtlas) textureManager.getTexture(TextureAtlas.LOCATION_BLOCKS));
 	}
@@ -72,6 +74,7 @@ abstract class LevelRendererMixin {
 	@Inject(method = "lambda$addMainPass$0", at = @At("TAIL"))
 	private void bedrockvisuals$showDebugView(GpuBufferSlice fog, boolean arg1, ChunkSectionsToRender chunks,
 			FeatureRenderDispatcher.PreparedFrame frame, boolean arg4, boolean arg5, CallbackInfo ci) {
+		EntityPass.setInLevelPass(false);
 		GBufferDebugView.apply(targets.main.get());
 	}
 }
