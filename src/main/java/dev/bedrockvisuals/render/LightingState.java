@@ -109,19 +109,50 @@ public record LightingState(
 						Underwater.secondsSubmerged(), blocks));
 			}
 		}
+		// Bedrock sends the sun and moon colours as sRGB/255, not linearised (the captures' SunColor is
+		// (1, 0.890196, 0.843137) for the keyframe 255, 227, 215).
+		Vector3f sun = srgb(Weather.sky(lighting.sun().color().sample(time))).mul(sunIlluminance * UNIT);
+		Vector3f moon = srgb(Weather.sky(lighting.moon().color().sample(time))).mul(moonIlluminance * UNIT);
+		Vector3f skyLight = skyAmbientColor.mul(skyAmbient * UNIT);
+		Vector3f skyHorizon = linear(horizon).mul(skyIntensity * 0.25f);
+		Vector3f ambient = linear(lighting.ambientColor()).mul(ambientIlluminance * UNIT);
+		// The biome's light eases across biome borders like its grading and sky (SettingsBlend): the sun's and
+		// moon's colour and strength (and so their bloom) flashed to the new biome's at once.
+		var camera = Minecraft.getInstance().gameRenderer.mainCamera().position();
+		SettingsBlend.noteFrame(dayTime, camera.x, camera.y, camera.z);
+		float[] eased = ease(new float[] {sun.x, sun.y, sun.z, moon.x, moon.y, moon.z, skyLight.x, skyLight.y,
+				skyLight.z, skyHorizon.x, skyHorizon.y, skyHorizon.z, ambient.x, ambient.y, ambient.z, sunIlluminance},
+				Underwater.submerged());
 		return new LightingState(
 				sunDirection,
-				// Bedrock sends the sun and moon colours as sRGB/255, not linearised (the captures' SunColor is
-				// (1, 0.890196, 0.843137) for the keyframe 255, 227, 215).
-				srgb(Weather.sky(lighting.sun().color().sample(time))).mul(sunIlluminance * UNIT),
+				new Vector3f(eased[0], eased[1], eased[2]),
 				new Vector3f(sunDirection).negate(),
-				srgb(Weather.sky(lighting.moon().color().sample(time))).mul(moonIlluminance * UNIT),
-				skyAmbientColor.mul(skyAmbient * UNIT),
-				linear(horizon).mul(skyIntensity * 0.25f),
-				linear(lighting.ambientColor()).mul(ambientIlluminance * UNIT),
+				new Vector3f(eased[3], eased[4], eased[5]),
+				new Vector3f(eased[6], eased[7], eased[8]),
+				new Vector3f(eased[9], eased[10], eased[11]),
+				new Vector3f(eased[12], eased[13], eased[14]),
 				new Vector3f(BLOCK_LIGHT).mul(BLOCK_LIGHT_INTENSITY * UNIT),
 				sky,
-				sunIlluminance);
+				eased[15]);
+	}
+
+	private static final SettingsBlend LIGHT_BLEND = new SettingsBlend(Integer.MAX_VALUE);
+	private static boolean lastSubmerged;
+
+	/** Eases the biome's light values (SettingsBlend), snapping when the camera goes into or out of water. */
+	private static float[] ease(float[] values, boolean submerged) {
+		boolean snap = submerged != lastSubmerged;
+		lastSubmerged = submerged;
+		java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(values.length * 4).order(java.nio.ByteOrder.nativeOrder());
+		for (float v : values) {
+			buffer.putFloat(v);
+		}
+		buffer.flip();
+		LIGHT_BLEND.blend(buffer, snap);
+		for (int i = 0; i < values.length; i++) {
+			values[i] = buffer.getFloat(i * 4);
+		}
+		return values;
 	}
 
 	/**

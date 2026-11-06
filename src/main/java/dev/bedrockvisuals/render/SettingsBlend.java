@@ -8,10 +8,39 @@ import java.nio.ByteOrder;
  * values instead of switching at once. Bedrock blends biome settings rather than snapping when the player
  * crosses a biome border; without this the colour grading (warmish in savanna, default over the ocean, 4800 K
  * against 6500 K) and the sky changed abruptly at the border. TUNE: Bedrock's own blend rate for these wasn't
- * traced; this eases exponentially with a one-second time constant (about 95% there after three seconds).
+ * traced; this eases exponentially with a 1.8-second time constant (about 95% there after five and a half
+ * seconds). A jump in the time of day (/time set) or a teleport snaps every blend at once (noteFrame), so those
+ * don't drift over seconds.
  */
 final class SettingsBlend {
-	private static final double TIME_CONSTANT_SECONDS = 1.0;
+	private static final double TIME_CONSTANT_SECONDS = 1.8;
+	/** Ticks of day time between frames above which the time was set rather than passed. */
+	private static final long TIME_JUMP_TICKS = 20;
+	/** Blocks the camera moves between frames above which it was teleported. */
+	private static final double TELEPORT_BLOCKS = 24;
+
+	private static long snapUntilNanos;
+	private static long lastDayTime = Long.MIN_VALUE;
+	private static double lastX;
+	private static double lastY;
+	private static double lastZ;
+
+	/**
+	 * Once a frame: when the day time jumped or the camera was teleported since the last frame, every blend
+	 * takes its new values at once for this frame.
+	 */
+	static void noteFrame(long dayTime, double x, double y, double z) {
+		boolean jumped = lastDayTime != Long.MIN_VALUE && (Math.abs(dayTime - lastDayTime) > TIME_JUMP_TICKS
+				|| (x - lastX) * (x - lastX) + (y - lastY) * (y - lastY) + (z - lastZ) * (z - lastZ)
+						> TELEPORT_BLOCKS * TELEPORT_BLOCKS);
+		lastDayTime = dayTime;
+		lastX = x;
+		lastY = y;
+		lastZ = z;
+		if (jumped) {
+			snapUntilNanos = System.nanoTime() + 100_000_000L;
+		}
+	}
 
 	private final int excludedFrom;
 	private float[] current;
@@ -31,6 +60,7 @@ final class SettingsBlend {
 		int start = floats.position();
 		int count = (floats.limit() - start) / 4;
 		long now = System.nanoTime();
+		snap |= now < snapUntilNanos;
 		if (current == null || current.length != count) {
 			current = new float[count];
 			snap = true;

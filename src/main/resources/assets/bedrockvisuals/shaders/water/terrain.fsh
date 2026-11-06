@@ -168,6 +168,9 @@ void surfaceTexel(out vec3 tangentNormal, out float roughness, out float metalne
     metalness = clamp((0.5 + 0.498 * mers.r - 0.50196) * 2.00787, 0.0, 1.0);
 }
 
+// How many of the surface map's texels one pixel spans (set in main from the UV derivatives).
+float surfaceFootprint = 1.0;
+
 // Defined with the surface fog below: the outer cascade's shadow test at p.
 float surfaceFogShadow(vec3 p);
 
@@ -179,6 +182,12 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
     }
     vec3 tangentNormal;
     surfaceTexel(tangentNormal, s.roughness, s.metalness);
+    // The surface map is read texel by texel; Bedrock samples it through its mips, so far off (many texels to
+    // a pixel) its ripples average out towards flat. Without that, distant water at a grazing angle tilted
+    // most of its mirror rays up into the sky and reflected sky where it should mirror the far shore (a pale
+    // band at the edge of the render distance, beside Distant Horizons' flat water). Flattened by the texels
+    // a pixel spans, as a mip chain's average would be.
+    tangentNormal = normalize(mix(vec3(0.0, 0.0, 1.0), tangentNormal, 1.0 / max(surfaceFootprint, 1.0)));
     s.n = normalize(tangent * tangentNormal.x + bitangent * tangentNormal.y + face * tangentNormal.z);
     if (dot(s.n, v_Position) > 0.0) {
         s.n = face;
@@ -537,6 +546,8 @@ void main() {
     // Tangent frame from position and UV derivatives: the directions the texture's u and v run on this face.
     vec2 duvx = dFdx(v_TexCoord);
     vec2 duvy = dFdy(v_TexCoord);
+    // The water sprite holds 16 texels per block: in surface-map texels, the larger of the pixel's two axes.
+    surfaceFootprint = max(length(duvx), length(duvy)) / max(u_TexelSize.x, 1e-9);
     vec3 tangent = normalize(dpx * duvy.y - dpy * duvx.y + vec3(1e-9));
     vec3 bitangent = normalize(dpy * duvx.x - dpx * duvy.x + vec3(1e-9));
     vec4 color = u_UseRGSS ? sampleRGSS(u_BlockTex, v_TexCoord, u_TexelSize) : sampleNearest(u_BlockTex, v_TexCoord, u_TexelSize);
