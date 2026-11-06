@@ -149,6 +149,8 @@ struct WaterSurface {
     float beneathLit;    // 1 where what's beneath is in sunlight (the outer cascade), 0 in shade
     bool scatters;       // the water's in-scattered light is this pass's to add (the lighting pass's map missed it)
     float opacity;       // what the OIT stages blend with; the same in every stage
+    bool flagged;        // the lighting pass dimmed what's beneath (its HDR alpha says so)
+    bool bottomless;     // nothing drawn beneath it, neither Java's terrain nor Distant Horizons'
 };
 
 // How many of the surface map's texels one pixel spans (set in main from the UV derivatives).
@@ -208,6 +210,7 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
 
     float opaque = texelFetch(u_GBufferDepth, ivec2(gl_FragCoord.xy), 0).r;
     float path = BOTTOMLESS;
+    s.bottomless = opaque <= 0.0;
     if (opaque > 0.0) {
         // The bottom lies on the same view ray, this much farther along the view axis.
         float ratio = viewDistance(opaque) / max(viewDistance(gl_FragCoord.z), 1e-4);
@@ -219,6 +222,7 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
         vec4 clip = u_ProjectionMatrix * u_ModelViewMatrix * vec4(v_Position, 1.0);
         float ground = distantDistanceAt(gl_FragCoord.xy / vec2(textureSize(u_GBufferDepth, 0)), clip.xy / clip.w);
         if (ground > 0.0) {
+            s.bottomless = false;
             path = min(max(ground - length(v_Position), 0.0), BOTTOMLESS);
         }
     }
@@ -237,14 +241,16 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
         vec3 beneath = v_Position * (viewDistance(opaque) / max(viewDistance(gl_FragCoord.z), 1e-4));
         s.beneathLit = surfaceFogShadow(beneath);
         s.beneathSky = waterColumnSkyLight(waterTestPoint(beneath));
-        // Its own flag rather than the same test here: this pass reconstructs the point from the water's
-        // geometry and the lighting pass from its matrices, and with view bobbing they differ enough to
-        // disagree at a block's edge.
-        float flag = texelFetch(u_LitFlags, ivec2(gl_FragCoord.xy), 0).a;
-        if (flag > 0.25 && flag < 0.75) {
-            s.transmittance = vec3(1.0);
-            s.scatters = false;
-        }
+    }
+    // Its own flag rather than the same test here: this pass reconstructs the point from the water's geometry
+    // and the lighting pass from its matrices, and with view bobbing they differ enough to disagree at a
+    // block's edge. Read over Distant Horizons' ground too, which the lighting pass dims and flags the same
+    // way (read only over Java's terrain, DH's ground seen through the near water was dimmed by both passes).
+    float flag = texelFetch(u_LitFlags, ivec2(gl_FragCoord.xy), 0).a;
+    s.flagged = flag > 0.25 && flag < 0.75;
+    if (s.flagged) {
+        s.transmittance = vec3(1.0);
+        s.scatters = false;
     }
     if (UnderwaterParams.x > 0.5) {
         // Seen from under water (DeferredWater's underwater branch): what lies beyond is in air, and the
@@ -261,8 +267,13 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
     float leastTransmitted = min(s.transmittance.r, min(s.transmittance.g, s.transmittance.b));
     s.opacity = clamp(1.0 - (1.0 - s.fresnel) * leastTransmitted, 0.0, 1.0);
     // The water views that leave the surface out (GBufferDebugView 3 and 4): fully see-through.
-    if (abs(DebugParams.w - 3.0) < 0.5 || abs(DebugParams.w - 4.0) < 0.5 || abs(DebugParams.w - 6.0) < 0.5) {
+    if (abs(DebugParams.w - 3.0) < 0.5 || abs(DebugParams.w - 4.0) < 0.5) {
         s.opacity = 0.0;
+    }
+    // The water flag view (6): see-through to the lighting pass's codes, but yellow where this pass shades
+    // the water itself with nothing at all beneath it (its deep-water fallback).
+    if (abs(DebugParams.w - 6.0) < 0.5) {
+        s.opacity = !s.flagged && s.bottomless && UnderwaterParams.x < 0.5 ? 1.0 : 0.0;
     }
     return s;
 }
@@ -601,7 +612,8 @@ void main() {
         #else
         // The water texel's grey (untinted: Bedrock's G-buffer gets water_still_grey's colour), linear.
         float albedo = toLinear(vec3(dot(color.rgb, vec3(0.2126, 0.7152, 0.0722)))).r;
-        fragColor = calculateFinalColor(vec4(waterColor(surface, albedo), surface.opacity));
+        vec3 shaded = abs(DebugParams.w - 6.0) < 0.5 ? vec3(0.95, 0.85, 0.0) : waterColor(surface, albedo);
+        fragColor = calculateFinalColor(vec4(shaded, surface.opacity));
         #endif
         return;
     }

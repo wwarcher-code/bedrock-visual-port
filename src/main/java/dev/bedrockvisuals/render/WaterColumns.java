@@ -13,6 +13,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
@@ -50,6 +51,8 @@ public final class WaterColumns {
 	private static int nextRow;
 	private static boolean any;
 	private static int minY;
+	/** Whether unloaded columns may take Distant Horizons' seabed with water to sea level (the overworld). */
+	private static boolean seaFallback;
 
 	private WaterColumns() {
 	}
@@ -63,6 +66,7 @@ public final class WaterColumns {
 		}
 		create();
 		minY = level.getMinY();
+		seaFallback = level.dimensionType().skybox() == DimensionType.Skybox.OVERWORLD;
 		Vec3 camera = minecraft.gameRenderer.mainCamera().position();
 		int cameraX = (int) Math.floor(camera.x);
 		int cameraZ = (int) Math.floor(camera.z);
@@ -94,7 +98,8 @@ public final class WaterColumns {
 	 * One texel, 16 bits a channel: r the surface height × 16 above the level's floor (0 when there's no
 	 * water); g the lowest water block's y above the floor (low 12 bits) and the sky light reaching the water
 	 * (high 4); b the height of the underside of the first ledge under the surface with water beneath it (0
-	 * for none; low 12 bits) and the sky light of the water just under it (high 4).
+	 * for none; low 12 bits) and the sky light of the water just under it (high 4); a 1 where the column's
+	 * chunk is loaded (else any water is Distant Horizons' seabed under the sea, see below).
 	 */
 	private static void encode(ByteBuffer data, ClientLevel level, BlockPos.MutableBlockPos pos, int x, int z) {
 		int surface = 0;
@@ -155,9 +160,26 @@ public final class WaterColumns {
 				sky = level.getBrightness(LightLayer.SKY, pos);
 				any = true;
 			}
+		} else if (seaFallback) {
+			// Not loaded: past the loaded chunks' edge, where Distant Horizons draws the terrain. The view from
+			// the near water runs on under the surface past that edge to DH's ground, which with no water mapped
+			// here wasn't dimmed by the water above it (nor did the fog grid hold water there): the water pass
+			// shaded it as deep water, a blue wall hanging under the chunk border. DH's seabed, where it lies
+			// under the sea, has water above it up to the sea's surface (as the lighting pass assumes for DH's
+			// own water).
+			int ground = DistantHeights.topAt(x, z);
+			int seaLevel = level.getSeaLevel();
+			if (ground != Integer.MIN_VALUE && ground < seaLevel - 1) {
+				surface = Math.max(1, Math.round((seaLevel - 1 + 8f / 9f - minY) * 16f));
+				// From the ground's own height: a floor lying on it counts as under the water either way DH
+				// measures its top (the block's or the one above it).
+				bottom = Math.max(0, ground - minY);
+				sky = 15;
+				any = true;
+			}
 		}
 		data.putShort((short) surface).putShort((short) ((bottom & 0xFFF) | (sky << 12)))
-				.putShort((short) ((roof & 0xFFF) | (skyBelow << 12))).putShort((short) 0);
+				.putShort((short) ((roof & 0xFFF) | (skyBelow << 12))).putShort((short) (chunk != null ? 1 : 0));
 	}
 
 	private static void create() {

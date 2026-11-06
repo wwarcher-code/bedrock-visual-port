@@ -711,6 +711,22 @@ void main() {
             distantTranslucent = false;
         }
     }
+    // Seen through the near water: past the loaded chunks' edge the view from Java's water runs on under the
+    // sea's surface to DH's ground, crossing DH's side faces there (DH closes its water off at its LODs'
+    // edge), which read as DH's water at the sea's surface: a deep-water wall hanging under the chunk border.
+    // Where the view crosses the sea's surface over a loaded column with water, what's beyond is under Java's
+    // water: DH's ground, dimmed below by the water above it (the water column map carries DH's seabed there).
+    bool throughNearWater = false;
+    if (distant >= 0.0 && UnderwaterParams.x < 0.5 && DistantLightmap.w < 0.0 && ray.y < -1e-3) {
+        float seaDistance = DistantLightmap.w / ray.y;
+        WaterColumn crossed;
+        throughNearWater = seaDistance < distant && waterColumnAt(ray * (seaDistance + 0.05), crossed)
+                && crossed.loaded;
+        if (throughNearWater) {
+            distantWaterHere = false;
+            distantTranslucent = false;
+        }
+    }
     if (distantWaterHere && distant < 0.0) {
         distant = distantWater + 64.0; // nothing drawn under it: deep water
     }
@@ -955,7 +971,12 @@ void main() {
         // Tested a little off the surface along its face (waterTestPointOn): the floor's top face lies exactly
         // on the water body's bottom, a wall's face on its column's edge.
         vec3 testPoint = distant >= 0.0 ? waterTestPoint(position) : waterTestPointOn(position, n);
-        dimmedHere = !distantWaterHere && depthBelowWaterSurface(testPoint) >= 0.0;
+        // DH's ground is dimmed only seen through Java's water (or in a loaded column): DH's own water seen
+        // from above is its surface, shaded by distantWaterSurface.
+        WaterColumn testColumn;
+        bool nearColumn = distant < 0.0 || throughNearWater
+                || (waterColumnAt(testPoint, testColumn) && testColumn.loaded);
+        dimmedHere = !distantWaterHere && nearColumn && depthBelowWaterSurface(testPoint) >= 0.0;
         if (abs(DebugParams.w - 6.0) < 0.5) {
             // The water flag view: green where this pass dimmed the water beneath (and flags it for the water
             // pass), red where the plain test point says under water but the face's one doesn't, blue where
@@ -971,8 +992,10 @@ void main() {
         }
         // With the fog grid, the water's own 0.112 a block is in its transmittance (it integrates the water
         // medium as Bedrock's does), so only WaterExtinction is applied here; without it, both.
-        color *= FroxelParams.x > 0.5 ? waterViewTransmittanceAt(testPoint, position, viewDir)
-                : waterTransmittanceAt(testPoint, position, viewDir);
+        if (dimmedHere) {
+            color *= FroxelParams.x > 0.5 ? waterViewTransmittanceAt(testPoint, position, viewDir)
+                    : waterTransmittanceAt(testPoint, position, viewDir);
+        }
     }
     // The water views (GBufferDebugView): 3 the scattered light alone, 4 what lies beneath without it, 5 black
     // under the water surface's own light.

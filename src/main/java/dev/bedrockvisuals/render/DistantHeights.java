@@ -162,6 +162,20 @@ public final class DistantHeights {
 		}
 	}
 
+	/**
+	 * The top of the highest solid block (exclusive of liquids) Distant Horizons holds for the cell around
+	 * world column x, z, as a world y; {@link Integer#MIN_VALUE} where it has none yet or the map is off. Read on
+	 * the render thread while the worker writes: a cell read mid-update is one frame stale at worst.
+	 */
+	static int topAt(int x, int z) {
+		if (failed || !any || worker == null || !DeferredRenderer.ownsDistantComposite()) {
+			return Integer.MIN_VALUE;
+		}
+		int index = Math.floorMod(Math.floorDiv(z, CELL), SIZE) * SIZE + Math.floorMod(Math.floorDiv(x, CELL), SIZE);
+		int value = heights[index] & 0xFFFF;
+		return value == 0 ? Integer.MIN_VALUE : value + minY;
+	}
+
 	/** The map, or null before there is one. */
 	static GpuTextureView view() {
 		return view;

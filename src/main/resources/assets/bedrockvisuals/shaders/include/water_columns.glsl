@@ -20,10 +20,11 @@ struct WaterColumn {
     float roof;
     float sky;
     float skyUnder;
+    bool loaded;  // Java's chunk is loaded (else its water is DH's seabed under the sea: WaterColumns.java)
 };
 
 bool waterColumnAt(vec3 p, out WaterColumn c) {
-    c = WaterColumn(0.0, 0.0, 0.0, 0.0, 0.0);
+    c = WaterColumn(0.0, 0.0, 0.0, 0.0, 0.0, false);
     if (WaterColumnOrigin.w < 0.5 || max(abs(p.x), abs(p.z)) > WATER_COLUMN_RANGE) {
         return false;
     }
@@ -34,6 +35,7 @@ bool waterColumnAt(vec3 p, out WaterColumn c) {
     c.sky = floor(column.g / 4096.0) / 15.0;
     c.roof = mod(column.b, 4096.0);
     c.skyUnder = floor(column.b / 4096.0) / 15.0;
+    c.loaded = column.a > 0.5;
     return c.surface > 0.0;
 }
 
