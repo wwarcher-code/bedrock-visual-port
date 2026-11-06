@@ -83,7 +83,9 @@ processResources {
 }
 
 // .\gradlew.bat runClient -PquickPlay=BVTest loads straight into that singleplayer world (test.cmd does this).
+// The game gets 16 GB of heap; -PgameMemory=12G (or any -Xmx size) overrides it.
 tasks.named('runClient') {
+	maxHeapSize = providers.gradleProperty('gameMemory').getOrElse('16G')
 	def world = providers.gradleProperty('quickPlay')
 	if (world.isPresent()) {
 		args '--quickPlaySingleplayer', world.get()
