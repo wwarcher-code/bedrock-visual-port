@@ -38,6 +38,8 @@ layout(std140) uniform DistantData {
                                    // y: its height above the level's floor; w: 1 when there are heights
     vec4 FroxelParams;             // x: 1 when this frame's froxel volume is there (FroxelVolume.java)
 };
+uniform sampler2D SunTexture;         // Bedrock's textures/environment/sun (SunMoon.java)
+uniform sampler2D MoonTexture;        // and moon_phases: 4 across, 2 down
 uniform sampler2D FroxelScatter;      // Bedrock's coarse fog grid: in-scattered light to each slice
 uniform sampler2D FroxelTransmittance; // and the transmittance (froxels.glsl)
 #include <bedrockvisuals:froxels.glsl>
@@ -274,6 +276,43 @@ vec3 volumetricFog(vec3 dir, float distance, out vec3 transmittance) {
         transmittance *= stepTransmittance;
     }
     return inScattered;
+}
+
+// Where the view ray meets a square quad facing the camera towards a body of the sky (Java's sun and moon
+// quads: half-size 0.3 and 0.2 at distance 1), edges along the orbit's axis; uv 0 to 1 across it, or < 0 off it.
+vec2 celestialUv(vec3 ray, vec3 towards, float halfSize) {
+    float facing = dot(ray, towards);
+    if (facing <= 0.0) {
+        return vec2(-1.0);
+    }
+    vec3 axis = vec3(0.0, 0.0, 1.0);
+    vec3 a = normalize(axis - towards * dot(axis, towards));
+    vec3 b = cross(towards, a);
+    vec3 q = ray / facing;
+    vec2 uv = vec2(dot(q, b), dot(q, a)) / halfSize;
+    return any(greaterThan(abs(uv), vec2(1.0))) ? vec2(-1.0) : uv * 0.5 + 0.5;
+}
+
+// Bedrock's sun and moon (its SunMoon shader): the texture, linearised, times the body's colour and illuminance,
+// times one plus its emissive multiplier, before exposure (SunMoon.java). Nothing where Java draws them.
+vec3 celestialRadiance(vec3 ray) {
+    if (SunMoonParams.x <= 0.0) {
+        return vec3(0.0);
+    }
+    vec3 radiance = vec3(0.0);
+    vec2 sunUv = celestialUv(ray, normalize(SunDirection.xyz), 0.3);
+    if (sunUv.x >= 0.0) {
+        vec4 texel = texture(SunTexture, sunUv);
+        radiance += toLinear(texel.rgb) * texel.a * SunColor.rgb * (1.0 + SunMoonParams.z);
+    }
+    vec2 moonUv = celestialUv(ray, normalize(MoonDirection.xyz), 0.2);
+    if (moonUv.x >= 0.0) {
+        float phase = floor(SunMoonParams.y + 0.5);
+        vec2 cell = vec2(mod(phase, 4.0), floor(phase / 4.0));
+        vec4 texel = texture(MoonTexture, (cell + moonUv) / vec2(4.0, 2.0));
+        radiance += toLinear(texel.rgb) * texel.a * MoonColor.rgb * (1.0 + SunMoonParams.w);
+    }
+    return radiance * SunMoonParams.x;
 }
 
 // The volumetric fog between the camera and the camera-relative point position (along dir, distance away):
@@ -682,6 +721,8 @@ void main() {
             // premultiplied blend.
             vec3 sky = bedrockSkyRadiance(ray, normalize(SunDirection.xyz), normalize(MoonDirection.xyz))
                     * AtmosphereHorizon.w;
+            // Bedrock's sun and moon, in the sky's HDR so they bloom; behind the far clouds and the fog.
+            sky += celestialRadiance(ray);
             // Clouds beyond Java's cloud mesh, in front of the sky (and of Java's sun, moon and stars).
             vec4 clouds = farClouds(ray, 1e9, footprint);
             sky = mix(sky, clouds.rgb, clouds.a);

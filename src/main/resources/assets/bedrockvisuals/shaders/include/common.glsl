@@ -37,6 +37,8 @@ layout(std140) uniform LightingData {
     mat4 ViewProjection;        // camera-relative world space to clip space (InverseViewProjection's inverse)
     mat4 PreviousViewProjection; // the previous frame's, relative to its own camera position
     vec4 CameraMotion;          // xyz: this frame's camera position minus the previous frame's
+    vec4 SunMoonParams;         // x: how much of Bedrock's sun and moon shows (0: Java draws them), y: the moon's
+                                // phase, z, w: the sun's and moon's emissive multipliers (SunMoon.java)
 };
 
 // Bedrock's water extinction along a view ray from the camera (Underwater.java): the path through water is

@@ -37,7 +37,7 @@ import org.lwjgl.system.MemoryStack;
  */
 public final class LightingPass {
 	/** std140 size of the LightingData block (include/common.glsl): three mat4s and seventeen vec4s. */
-	private static final int DATA_SIZE = 7 * 64 + 22 * 16;
+	private static final int DATA_SIZE = 7 * 64 + 23 * 16;
 	/**
 	 * Bedrock's shadow normal offset (shadow_configuration.pc.json normal_offset_strength): lookups move out along
 	 * the normal by this many blocks times (1 - N·L).
@@ -65,6 +65,8 @@ public final class LightingPass {
 			.withUniform("DistantFinalColor", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("DistantData", UniformType.UNIFORM_BUFFER)
 			.withUniform("DistantHeightMap", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("SunTexture", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("MoonTexture", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("FroxelScatter", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("FroxelTransmittance", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("PreviousScene", UniformType.COMBINED_IMAGE_SAMPLER)
@@ -170,6 +172,8 @@ public final class LightingPass {
 			builder.putMat4f(previousViewProjection);
 			builder.putVec4((float) (cameraNow.x - previousCamera.x), (float) (cameraNow.y - previousCamera.y),
 					(float) (cameraNow.z - previousCamera.z), 0);
+			// Bedrock's sun and moon, drawn in the sky here (SunMoon).
+			SunMoon.write(builder);
 			previousViewProjection.set(viewProjection);
 			previousCamera = cameraNow;
 			encoder.writeToBuffer(data.slice(), builder.get());
@@ -201,6 +205,7 @@ public final class LightingPass {
 					SkyAtmosphere.cameraRelative(atmosphereBuilder.get()));
 		}
 
+		SunMoon.prepare();
 		// Bedrock's coarse fog grid for this frame, before the lighting pass reads it.
 		FroxelVolume.render(encoder, data, atmosphere, gbuffer.depthView());
 		froxelTried = true;
@@ -255,6 +260,9 @@ public final class LightingPass {
 			pass.setUniform("DistantFinalColor", frame != null ? frame.color() : gbuffer.depthView(), nearest);
 			pass.setUniform("DistantData", distant);
 			GpuSampler linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
+			pass.setUniform("SunTexture", SunMoon.sunView() != null ? SunMoon.sunView() : gbuffer.depthView(), nearest);
+			pass.setUniform("MoonTexture", SunMoon.moonView() != null ? SunMoon.moonView() : gbuffer.depthView(),
+					nearest);
 			pass.setUniform("FroxelScatter", FroxelVolume.scatterView() != null ? FroxelVolume.scatterView()
 					: gbuffer.depthView(), linear);
 			pass.setUniform("FroxelTransmittance", FroxelVolume.transmittanceView() != null

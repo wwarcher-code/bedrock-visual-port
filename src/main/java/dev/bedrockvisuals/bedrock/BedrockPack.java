@@ -39,10 +39,18 @@ public final class BedrockPack {
 		}
 	}
 
+	private PackFiles files;
+
+	/** The pack's image file for a path without extension (textures/environment/sun), highest pack first. */
+	public java.util.Optional<java.nio.file.Path> image(String pathWithoutExtension) {
+		return files == null ? java.util.Optional.empty() : files.image(pathWithoutExtension);
+	}
+
 	/** @param packRoots resource pack folders (each holding manifest.json), lowest priority first */
 	public static BedrockPack load(List<Path> packRoots) {
 		BedrockPack pack = new BedrockPack();
 		PackFiles files = PackFiles.of(packRoots, pack.problems);
+		pack.files = files;
 		pack.read(files);
 		pack.resolveSettings();
 		return pack;
