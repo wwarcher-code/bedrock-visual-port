@@ -137,6 +137,24 @@ final class PackFiles {
 		return Optional.empty();
 	}
 
+	/**
+	 * The image for a path without extension, loose or from an archive (newer installs keep some images in
+	 * their .brarchive files), with the name it was found under; empty when no pack has one.
+	 */
+	Optional<java.util.Map.Entry<String, byte[]>> imageBytes(String pathWithoutExtension) {
+		for (String extension : IMAGE_EXTENSIONS) {
+			Source source = files.get(pathWithoutExtension + extension);
+			if (source != null) {
+				try {
+					return Optional.of(java.util.Map.entry(pathWithoutExtension + extension, source.read()));
+				} catch (IOException e) {
+					return Optional.empty();
+				}
+			}
+		}
+		return Optional.empty();
+	}
+
 	int size() {
 		return files.size();
 	}

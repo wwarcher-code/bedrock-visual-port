@@ -41,6 +41,11 @@ public final class BedrockPack {
 
 	private PackFiles files;
 
+	/** The pack's image for a path without extension, loose or archived, with the name it was found under. */
+	public java.util.Optional<java.util.Map.Entry<String, byte[]>> imageBytes(String pathWithoutExtension) {
+		return files == null ? java.util.Optional.empty() : files.imageBytes(pathWithoutExtension);
+	}
+
 	/** The pack's image file for a path without extension (textures/environment/sun), highest pack first. */
 	public java.util.Optional<java.nio.file.Path> image(String pathWithoutExtension) {
 		return files == null ? java.util.Optional.empty() : files.image(pathWithoutExtension);

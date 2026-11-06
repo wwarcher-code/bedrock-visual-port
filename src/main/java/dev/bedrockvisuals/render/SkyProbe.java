@@ -40,6 +40,8 @@ public final class SkyProbe {
 	private static final BindGroupLayout BASE_LAYOUT = BindGroupLayout.builder()
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("AtmosphereData", UniformType.UNIFORM_BUFFER)
+			// Declared by common.glsl, which the shader includes; every declared block must be bound.
+			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
 			.build();
 	private static final BindGroupLayout FILTER_LAYOUT = BindGroupLayout.builder()
 			.withUniform("ProbeBase", UniformType.COMBINED_IMAGE_SAMPLER)
@@ -92,6 +94,7 @@ public final class SkyProbe {
 				pass.setPipeline(RenderSystem.getCompiledPipeline(BASE));
 				pass.setUniform("LightingData", lightingData);
 				pass.setUniform("AtmosphereData", atmosphereData);
+				pass.setUniform("GradingData", LightingPass.gradingData());
 			});
 			for (int m = 0; m < MIPS; m++) {
 				int mip = m;

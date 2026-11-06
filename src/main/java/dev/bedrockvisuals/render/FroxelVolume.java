@@ -41,6 +41,8 @@ public final class FroxelVolume {
 			.withUniform("LightVolumeMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("AtmosphereData", UniformType.UNIFORM_BUFFER)
+			// Declared by common.glsl, which the shader includes; every declared block must be bound.
+			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
 			.build();
 
 	private static final RenderPipeline PIPELINE = RenderPipeline.builder()
@@ -94,6 +96,7 @@ public final class FroxelVolume {
 				pass.setUniform("LightVolumeMap", LightVolume.view() != null ? LightVolume.view() : fallback, nearest);
 				pass.setUniform("LightingData", lightingData);
 				pass.setUniform("AtmosphereData", atmosphereData);
+				pass.setUniform("GradingData", LightingPass.gradingData());
 				pass.draw(3, 1, 0, 0);
 			}
 			drawn = true;

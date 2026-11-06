@@ -11,7 +11,6 @@ import dev.bedrockvisuals.bedrock.BedrockInputs;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.file.Path;
 import javax.imageio.ImageIO;
 import org.lwjgl.system.MemoryUtil;
 
@@ -54,18 +53,29 @@ public final class SunMoon {
 			return;
 		}
 		loaded = true;
-		sun = load("textures/environment/sun", "sun");
-		moon = load("textures/environment/moon_phases", "moon phases");
+		// Vibrant Visuals has its own sun texture (sun_vv) beside the classic one.
+		sun = load("sun", "textures/environment/sun_vv", "textures/environment/sun");
+		moon = load("moon phases", "textures/environment/moon_phases");
 	}
 
-	private static GpuTextureView load(String path, String name) {
-		Path file = BedrockInputs.pack().flatMap(pack -> pack.image(path)).orElse(null);
-		if (file == null) {
-			BedrockVisualsClient.LOGGER.warn("[sky] no {} in the Bedrock packs; Java's sun and moon stay", path);
+	private static GpuTextureView load(String name, String... paths) {
+		java.util.Map.Entry<String, byte[]> found = null;
+		for (String path : paths) {
+			found = BedrockInputs.pack().flatMap(pack -> pack.imageBytes(path)).orElse(null);
+			if (found != null) {
+				break;
+			}
+		}
+		if (found == null) {
+			BedrockVisualsClient.LOGGER.warn("[sky] no {} in the Bedrock packs; Java's sun and moon stay",
+					String.join(" or ", paths));
 			return null;
 		}
 		try {
-			BufferedImage image = ImageIO.read(file.toFile());
+			BufferedImage image = ImageIO.read(new java.io.ByteArrayInputStream(found.getValue()));
+			if (image == null) {
+				throw new IOException("not an image ImageIO can read");
+			}
 			int width = image.getWidth();
 			int height = image.getHeight();
 			GpuDevice device = RenderSystem.getDevice();
@@ -84,10 +94,10 @@ public final class SunMoon {
 			} finally {
 				MemoryUtil.memFree(data);
 			}
-			BedrockVisualsClient.LOGGER.info("[sky] {} {}x{} from {}", name, width, height, file);
+			BedrockVisualsClient.LOGGER.info("[sky] {} {}x{} from {}", name, width, height, found.getKey());
 			return device.createTextureView(texture);
 		} catch (IOException | RuntimeException e) {
-			BedrockVisualsClient.LOGGER.warn("[sky] could not load {}", file, e);
+			BedrockVisualsClient.LOGGER.warn("[sky] could not load {}", found.getKey(), e);
 			return null;
 		}
 	}
