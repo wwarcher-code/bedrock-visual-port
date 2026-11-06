@@ -52,6 +52,10 @@ public final class TestCapture {
 	private static final float HORIZON_PITCH = -10f;
 	private static final int TICKS_AFTER_TIME_CHANGE = 15;
 	private static final int TICKS_AFTER_VIEW_CHANGE = 3;
+	/** After a teleport: chunks, Sodium's meshes and Distant Horizons' terrain need a few seconds. */
+	private static final int TICKS_AFTER_TELEPORT = 100;
+	/** Where the player stood when the capture started; put back there at the end. */
+	private static TestSpots.Spot returnTo;
 	/** Whole frames drawn after a view change before its screenshot. */
 	private static final int FRAMES_AFTER_VIEW_CHANGE = 4;
 	private static long minFrame;
@@ -88,6 +92,11 @@ public final class TestCapture {
 	}
 
 	public static void start() {
+		start(null);
+	}
+
+	/** @param only a saved spot's name to capture alone ("scene" for the test scene), or null for all */
+	public static void start(String only) {
 		Minecraft minecraft = Minecraft.getInstance();
 		if (running) {
 			cancel();
@@ -115,12 +124,48 @@ public final class TestCapture {
 		message("Capturing test views; stand still for about ten seconds.");
 
 		STEPS.clear();
+		TestSpots.Spot here = TestSpots.here().orElseThrow();
+		returnTo = here;
 		STEPS.add(() -> {
 			if (!minecraft.gui.hud.isHidden()) {
 				minecraft.gui.hud.toggle();
 			}
 			command("weather clear");
 		});
+		java.util.Map<String, TestSpots.Spot> spots = TestSpots.all();
+		TestSpots.Spot scene = spots.get(TestSpots.SCENE);
+		boolean sceneRows = only == null || only.equals(TestSpots.SCENE);
+		if (sceneRows) {
+			// At the saved test scene (or, with none saved, from where the player stands).
+			TestSpots.Spot base = scene != null ? scene : here;
+			if (scene != null) {
+				teleport(scene);
+			}
+			addSceneShots(base);
+		}
+		for (java.util.Map.Entry<String, TestSpots.Spot> spot : spots.entrySet()) {
+			if (spot.getKey().equals(TestSpots.SCENE) || (only != null && !only.equals(spot.getKey()))) {
+				continue;
+			}
+			addSpotShots(spot.getKey(), spot.getValue());
+		}
+		STEPS.add(TestCapture::restore);
+		STEPS.add(TestCapture::finishWhenSaved);
+	}
+
+	/** Goes to a saved spot and waits for its chunks (and Distant Horizons' terrain) to come in. */
+	private static void teleport(TestSpots.Spot spot) {
+		STEPS.add(() -> {
+			command(spot.teleport());
+			wait = TICKS_AFTER_TELEPORT;
+		});
+	}
+
+	/**
+	 * The test scene's rows from its camera: four times of day (lit, vanilla, shadows, material), the debug
+	 * rows at noon, the horizon shots, the underwater shots and rain.
+	 */
+	private static void addSceneShots(TestSpots.Spot base) {
 		for (int t = 0; t < TIMES.length; t++) {
 			long time = TIMES[t];
 			String timeLabel = TIME_LABELS[t];
@@ -154,26 +199,52 @@ public final class TestCapture {
 				sheet.add(extras2);
 			}
 		}
-		addHorizonShots();
-		addUnderwaterShots();
+		addHorizonShots(base);
+		addUnderwaterShots(base);
 		addRainShots();
-		STEPS.add(TestCapture::restore);
-		STEPS.add(TestCapture::finishWhenSaved);
+	}
+
+	/**
+	 * A saved spot (an ocean view, say): at noon lit, vanilla and the water view, then at low sun lit and
+	 * vanilla, from exactly the saved camera.
+	 */
+	private static void addSpotShots(String name, TestSpots.Spot spot) {
+		teleport(spot);
+		long[] times = {6000, 11500};
+		String[] labels = {"noon", "low sun"};
+		for (int i = 0; i < times.length; i++) {
+			long time = times[i];
+			String label = name + " " + labels[i];
+			List<ContactSheet.Cell> row = new ArrayList<>();
+			sheet.add(row);
+			STEPS.add(() -> {
+				command("time set " + time);
+				wait = TICKS_AFTER_TIME_CHANGE;
+			});
+			STEPS.add(() -> {
+				AutoExposure.settle();
+				wait = TICKS_AFTER_VIEW_CHANGE;
+			});
+			STEPS.add(() -> report.lightingAt(label + " (" + time + ")"));
+			addShot(row, label, View.OFF);
+			addShot(row, label, null);
+			if (i == 0) {
+				addShot(row, label, View.WATER);
+			}
+		}
 	}
 
 	/**
 	 * At noon, from inside the test scene's pool, looking up through the surface (caustics, the water's
 	 * extinction and Snell's window), then back to where the player stood.
 	 */
-	private static void addUnderwaterShots() {
-		Minecraft minecraft = Minecraft.getInstance();
-		var player = minecraft.player;
-		String back = String.format(java.util.Locale.ROOT, "tp @s %.3f %.3f %.3f %.2f %.2f", player.getX(), player.getY(),
-				player.getZ(), player.getYRot(), player.getXRot());
+	private static void addUnderwaterShots(TestSpots.Spot base) {
+		String back = base.teleport();
 		List<ContactSheet.Cell> row = new ArrayList<>();
 		sheet.add(row);
 		STEPS.add(() -> {
 			command("time set 6000");
+			command(back);
 			command("tp @s " + TestScene.UNDERWATER_VIEW);
 			wait = TICKS_AFTER_TIME_CHANGE + 10;
 		});
@@ -215,13 +286,10 @@ public final class TestCapture {
 	 * (Java's mesh near, the far clouds beyond it) against vanilla (Distant Horizons' own clouds, when it's
 	 * installed, show how far its terrain reaches).
 	 */
-	private static void addHorizonShots() {
-		Minecraft minecraft = Minecraft.getInstance();
-		var player = minecraft.player;
-		String back = String.format(java.util.Locale.ROOT, "tp @s %.3f %.3f %.3f %.2f %.2f", player.getX(), player.getY(),
-				player.getZ(), player.getYRot(), player.getXRot());
-		String up = String.format(java.util.Locale.ROOT, "tp @s %.3f %.3f %.3f %.2f %.2f", player.getX(), player.getY(),
-				player.getZ(), player.getYRot(), HORIZON_PITCH);
+	private static void addHorizonShots(TestSpots.Spot base) {
+		String back = base.teleport();
+		String up = new TestSpots.Spot(base.dimension(), base.x(), base.y(), base.z(), base.yaw(), HORIZON_PITCH)
+				.teleport();
 		List<ContactSheet.Cell> row = new ArrayList<>();
 		sheet.add(row);
 		long[] times = {6000, 11500};
@@ -302,6 +370,9 @@ public final class TestCapture {
 		DeferredRenderer.setEnabled(lightingBefore);
 		GBufferDebugView.setView(viewBefore);
 		command("time set " + timeBefore);
+		if (returnTo != null) {
+			command(returnTo.teleport());
+		}
 		if (minecraft.gui.hud.isHidden() != hudWasHidden) {
 			minecraft.gui.hud.toggle();
 		}

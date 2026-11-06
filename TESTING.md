@@ -20,17 +20,23 @@ of minutes.
    ```
 
    It pulls Claude's latest push and starts the game in BVTest. If the pull fails, it stops and says so.
-2. Type `/bv scene`. It builds the test scene north of you (a row of material samples, a pool of water, a
-   pillar with a torch, a roofed overhang that casts shade, and a tree) and turns you to face it, so every
-   capture uses the same camera. Run it before each capture, after a pull, or after you've moved.
-3. Press **F9** and stand still for about ten seconds. The mod hides the HUD, clears the weather,
-   and takes screenshots at noon, afternoon, low sun and midnight, each with deferred lighting, vanilla,
-   the shadow test and the material view. At noon it adds two debug rows: albedo, normal, light and local
-   exposure; then bloom and shadow cascades. Next come horizon shots at noon and low sun, lit and vanilla,
-   looking 10° up at the clouds, and a noon shot from inside the pool looking up (caustics, the water's
-   extinction, Snell's window, the teal underwater fog). Last, it turns on rain at noon, waits about five
-   seconds for it to fade in, takes a lit and a vanilla shot, and clears the weather. Then it puts you back,
-   restores the time, view and HUD, and opens the folder. It now takes about 20 seconds.
+2. **Once per world** (any world; use your normal one, so the scene and the ocean are in the same place):
+   - Stand on flat ground and type `/bv scene build`. It builds the test scene north of you (a row of
+     material samples, a pool of water, a pillar with a torch, a roofed overhang and a tree) and remembers
+     the camera spot. From then on `/bv scene` just takes you there; `/bv scene build` again moves it.
+   - Go to each other view you want tested, look the way you want the shot, and save it with a name:
+     `/bv spot ocean` (any one-word name). `/bv spots` lists them, `/bv go ocean` takes you there,
+     `/bv spot ocean remove` forgets it. Saved spots are kept per world in `run\config\bedrockvisuals\spots.json`.
+3. Press **F9** from anywhere and keep your hands off the controls. The mod hides the HUD, clears the
+   weather, and:
+   - at the test scene: screenshots at noon, afternoon, low sun and midnight (lit, vanilla, shadow test,
+     material), the debug rows at noon (albedo, normal, light, local exposure; then bloom, shadow cascades and
+     the water map), horizon shots at noon and low sun, a shot from inside the pool, and rain;
+   - at each saved spot: noon lit, vanilla and the water map, then low sun lit and vanilla.
+
+   Each teleport waits about five seconds for the terrain to load. Afterwards it puts you back where you
+   were, restores the time, view and HUD, and opens the folder. `/bv capture ocean` shoots one spot alone,
+   `/bv capture scene` the scene alone.
 4. Send Claude **`contact-sheet.png`** from the folder that opened, and paste the clipboard (Ctrl+V): it
    holds the diagnostics report (build commit, mod versions, GPU, pass status, Bedrock data, biome,
    lighting per time and recent errors). The individual screenshots are in the same folder if Claude asks
@@ -45,6 +51,10 @@ Captures are kept under `run\bedrock-visuals-captures\<date and time>\`.
   than the sky. Plain grey means local exposure isn't reaching the image.
 - **Bloom.** Only what bloom adds, 20 times over, on black. Expect a faint glow around bright things
   (glowstone, the sea lantern, the sky's brightest part). All black means bloom isn't reaching the image.
+- **Water map.** What the water column map says about each surface: cyan to dark green, under mapped
+  water (darker is deeper); blue, the column has water but the surface isn't under it; grey, no water in
+  the column; dark red, outside the map (about 120 blocks). Sea floors and pool floors should be cyan to
+  green.
 - **Cascades.** The shadow test tinted by Bedrock's four shadow cascades: white within about 21 blocks, then
   yellow to 43, cyan to 64 and magenta to 128. Shadows fade out over the last 8 blocks. Dark grey is
   beyond the shadows.
