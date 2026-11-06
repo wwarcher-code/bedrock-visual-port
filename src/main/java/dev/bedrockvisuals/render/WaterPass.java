@@ -46,6 +46,7 @@ public final class WaterPass {
 			.withUniform("u_BrdfLut", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("u_ShadowMap3", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("u_CloudShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("WaterColumnMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			).build();
 	/** std140 size of WaterData in water/terrain.fsh: five vec4s. */
 	private static final int DATA_SIZE = 5 * 16;
@@ -159,6 +160,7 @@ public final class WaterPass {
 		pass.setUniform("u_ShadowMap3", outer != null ? outer : gbuffer.depthView(), nearest);
 		pass.setUniform("u_CloudShadowMap", CloudShadows.view() != null ? CloudShadows.view() : gbuffer.depthView(),
 				RenderSystem.getSamplerCache().getRepeat(FilterMode.NEAREST));
+		pass.setUniform("WaterColumnMap", WaterColumns.view() != null ? WaterColumns.view() : gbuffer.depthView(), nearest);
 		LocalExposure.bind(pass);
 	}
 

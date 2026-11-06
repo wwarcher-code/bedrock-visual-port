@@ -38,6 +38,10 @@ layout(std140) uniform WaterData {
 
 // Bedrock's split-sum BRDF table (BrdfLut.java), read as DeferredIndirectSpecular reads it.
 uniform sampler2D u_BrdfLut;
+// The water column map (WaterColumns.java): which surfaces the lighting pass dimmed for the water above them.
+uniform sampler2D WaterColumnMap;
+#define WATER_COLUMNS WaterColumnMap
+#include <bedrockvisuals:water_columns.glsl>
 // The outer shadow cascade and the cloud cells, for the volumetric fog in front of the surface.
 uniform sampler2D u_ShadowMap3;
 uniform sampler2D u_CloudShadowMap;
@@ -175,11 +179,14 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
         path = min(length(v_Position) * max(ratio - 1.0, 0.0), BOTTOMLESS);
     }
     s.transmittance = exp(-(Absorption.rgb + Scattering.rgb) * path);
-    // Within the water column map's range the lighting pass already dimmed what's beneath by the water above
-    // each point (and dimmed the water's in-scattered light by the water above it), so nothing more here.
-    // WATER_COLUMN_RANGE in lighting/deferred.fsh.
-    if (WaterColumnOrigin.w > 0.5 && max(abs(v_Position.x), abs(v_Position.z)) <= 120.0) {
-        s.transmittance = vec3(1.0);
+    // Where the water column map puts what's beneath under this water, the lighting pass already dimmed it by
+    // the water above it (and the water's in-scattered light likewise), so nothing more here. The same test
+    // on the same point as the lighting pass (water_columns.glsl), so exactly one of them applies it.
+    if (opaque > 0.0 && path < BOTTOMLESS) {
+        vec3 beneath = v_Position * (viewDistance(opaque) / max(viewDistance(gl_FragCoord.z), 1e-4));
+        if (depthBelowWaterSurface(waterTestPoint(beneath)) >= 0.0) {
+            s.transmittance = vec3(1.0);
+        }
     }
     if (UnderwaterParams.x > 0.5) {
         // Seen from under water (DeferredWater's underwater branch): what lies beyond is in air, and the

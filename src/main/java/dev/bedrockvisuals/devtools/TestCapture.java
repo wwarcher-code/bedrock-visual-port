@@ -47,7 +47,7 @@ public final class TestCapture {
 	private static final View[] VIEWS = {View.OFF, null, View.SHADOWS, View.MATERIAL};
 	/** Views captured once, at the first time, in two rows. */
 	private static final View[] EXTRA_VIEWS = {View.ALBEDO, View.NORMAL, View.LIGHT, View.LOCAL_EXPOSURE};
-	private static final View[] EXTRA_VIEWS_2 = {View.BLOOM, View.CASCADES};
+	private static final View[] EXTRA_VIEWS_2 = {View.BLOOM, View.CASCADES, View.WATER};
 	/** Pitch for the horizon shots: looking 10° up, at the clouds out to the horizon. */
 	private static final float HORIZON_PITCH = -10f;
 	private static final int TICKS_AFTER_TIME_CHANGE = 15;

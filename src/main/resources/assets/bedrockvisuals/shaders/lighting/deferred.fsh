@@ -25,6 +25,8 @@ uniform sampler2D PreviousScene;   // the previous frame's HDR scene (BloomPass.
 
 #include <bedrockvisuals:common.glsl>
 #include <bedrockvisuals:sky.glsl>
+#define WATER_COLUMNS WaterColumnMap
+#include <bedrockvisuals:water_columns.glsl>
 layout(std140) uniform DistantData {
     mat4 DistantInverseProjection; // Distant Horizons' clip space to its view space
     vec4 DistantParams;            // x: its terrain is lit here, y: reversed depth, z: [0, 1] clip depth,
@@ -137,44 +139,12 @@ float cloudShadow(vec3 position, vec3 towardsLight) {
 // cloud shadows (Henyey-Greenstein), integrated front to back. Out to 250 blocks (volumetric_fog
 // far_plane), and faded out where the distance fog takes over, as Bedrock does.
 const int VOLUME_STEPS = 48;
-// Must match water/terrain.fsh, which leaves the extinction inside this range to the lighting pass.
-const float WATER_COLUMN_RANGE = 120.0;
 const float VOLUME_FAR = 250.0;
 
 // Whether the camera-relative point p is in the top water body of its column (WaterColumns.java). It stands
 // in for Bedrock's water front and back depths with the camera above water.
-// How far below the water's surface the camera-relative point p is (blocks), or -1 when it isn't in the top
-// water body of its column (WaterColumns.java). It stands in for Bedrock's water front and back depths with
-// the camera above water.
-float depthBelowWaterSurface(vec3 p) {
-    // The map covers 128 columns each way; past that a texel holds a nearer column.
-    if (WaterColumnOrigin.w < 0.5 || max(abs(p.x), abs(p.z)) > WATER_COLUMN_RANGE) {
-        return -1.0;
-    }
-    ivec2 texel = ivec2(mod(floor(p.xz + WaterColumnOrigin.xz), 256.0));
-    vec4 column = texelFetch(WaterColumnMap, texel, 0) * 255.0;
-    float surface = (column.r + column.g * 256.0) / 16.0;
-    if (surface <= 0.0) {
-        return -1.0;
-    }
-    float bottom = column.b + column.a * 256.0;
-    float y = p.y + WaterColumnOrigin.y;
-    return y >= bottom && y < surface ? surface - y : -1.0;
-}
-
 bool inWaterColumn(vec3 p) {
     return depthBelowWaterSurface(p) >= 0.0;
-}
-
-// The water's extinction between its surface and p along the view direction dir (the camera above water),
-// which this pass applies within the water column map's range; the water pass leaves those pixels to it.
-vec3 waterTransmittanceTo(vec3 p, vec3 dir) {
-    float depth = depthBelowWaterSurface(p);
-    if (depth < 0.0) {
-        return vec3(1.0);
-    }
-    float path = min(depth / max(-dir.y, 0.05), 64.0);
-    return exp(-UnderwaterMedium.rgb * path);
 }
 
 float phaseHG(float g, float cosine) {
@@ -623,6 +593,31 @@ void main() {
     float edgeFade;
     float mapped = shadowVisibility(snapToTexel(position, n), n, moonCasts ? moonDir : sunDir, edgeFade);
     float casterVisibility = mapped < 0.0 ? skyFallback : mix(skyFallback, mapped * skyGuard, edgeFade);
+    if (DebugParams.x > 2.5) {
+        // The water view: what the water column map says about this pixel's surface. Blue: the column has
+        // mapped water but the point isn't under it (depth beyond the colour shows how far above); cyan to
+        // dark green: under the water, by depth (0 to 8 blocks); grey: no water mapped in the column; dark red:
+        // outside the map's range.
+        vec3 tp = waterTestPoint(position);
+        vec3 shown = vec3(0.35);
+        if (WaterColumnOrigin.w < 0.5 || max(abs(tp.x), abs(tp.z)) > WATER_COLUMN_RANGE) {
+            shown = vec3(0.35, 0.0, 0.0);
+        } else {
+            ivec2 texel = ivec2(mod(floor(tp.xz + WaterColumnOrigin.xz), 256.0));
+            vec4 column = texelFetch(WaterColumnMap, texel, 0) * 255.0;
+            float surface = (column.r + column.g * 256.0) / 16.0;
+            float underBy = depthBelowWaterSurface(tp);
+            if (underBy >= 0.0) {
+                shown = mix(vec3(0.0, 1.0, 1.0), vec3(0.0, 0.3, 0.0), clamp(underBy / 8.0, 0.0, 1.0));
+            } else if (surface > 0.0) {
+                shown = vec3(0.1, 0.2, 1.0);
+            }
+        }
+        fragColor = vec4(shown, 1.0);
+        meterLuminance = vec4(0.18, 0.0, 0.0, 1.0);
+        hdrColor = vec4(0.0);
+        return;
+    }
     if (DebugParams.x > 0.5) {
         vec3 shown = mapped < 0.0 ? vec3(1.0, 0.0, 0.0) : vec3(mapped);
         if (DebugParams.x > 1.5) {
@@ -724,7 +719,7 @@ void main() {
     if (UnderwaterParams.x < 0.5) {
         // Nudged off the surface along its normal: the floor's top face lies exactly on the water body's
         // bottom (as for the caustics test).
-        color *= waterTransmittanceTo(position + n * 0.05, viewDir);
+        color *= waterTransmittanceTo(position, viewDir);
     }
     color = color * fogTransmittance + fogLight;
 
