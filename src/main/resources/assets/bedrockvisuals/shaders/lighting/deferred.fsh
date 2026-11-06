@@ -626,7 +626,14 @@ void main() {
     // Distance fog: like Bedrock, the terrain fades into the sky behind it towards the render distance's edge.
     float fog = AtmosphereZenith.w > 0.5 ? bedrockFogAmount(length(position)) : 0.0;
     if (fog > 0.0) {
-        color = mix(color, bedrockSkyRadiance(normalize(position), sunDir, moonDir) * AtmosphereHorizon.w, fog);
+        // SurfaceRadianceUpscalePass fogs towards mix(UndergroundFogColor, sky, max(camera sky light, the
+        // pixel's sky light)): enclosed spaces fog into the underground colour. Captured UndergroundFogColor:
+        // 0 in air, (0, 0.016, 0.016) under water, scaled like the sky radiance (TUNE: its units weren't traced;
+        // either way it is close to black).
+        vec3 underground = UnderwaterParams.x > 0.5 ? vec3(0.0, 0.016, 0.016) * AtmosphereHorizon.w : vec3(0.0);
+        float open = max(cameraSky, skyLight);
+        vec3 fogColor = mix(underground, bedrockSkyRadiance(normalize(position), sunDir, moonDir) * AtmosphereHorizon.w, open);
+        color = mix(color, fogColor, fog);
     }
     // Far clouds in front of the terrain (Distant Horizons' reaches past Java's cloud mesh).
     vec4 clouds = farClouds(ray, length(position), footprint);
