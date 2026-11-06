@@ -175,6 +175,12 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
         path = min(length(v_Position) * max(ratio - 1.0, 0.0), BOTTOMLESS);
     }
     s.transmittance = exp(-(Absorption.rgb + Scattering.rgb) * path);
+    // Within the water column map's range the lighting pass already dimmed what's beneath by the water above
+    // each point (and dimmed the water's in-scattered light by the water above it), so nothing more here.
+    // WATER_COLUMN_RANGE in lighting/deferred.fsh.
+    if (WaterColumnOrigin.w > 0.5 && max(abs(v_Position.x), abs(v_Position.z)) <= 120.0) {
+        s.transmittance = vec3(1.0);
+    }
     if (UnderwaterParams.x > 0.5) {
         // Seen from under water (DeferredWater's underwater branch): what lies beyond is in air, and the
         // lighting pass already attenuated it along the path to this surface. Outside Snell's window

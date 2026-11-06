@@ -137,24 +137,44 @@ float cloudShadow(vec3 position, vec3 towardsLight) {
 // cloud shadows (Henyey-Greenstein), integrated front to back. Out to 250 blocks (volumetric_fog
 // far_plane), and faded out where the distance fog takes over, as Bedrock does.
 const int VOLUME_STEPS = 48;
+// Must match water/terrain.fsh, which leaves the extinction inside this range to the lighting pass.
+const float WATER_COLUMN_RANGE = 120.0;
 const float VOLUME_FAR = 250.0;
 
 // Whether the camera-relative point p is in the top water body of its column (WaterColumns.java). It stands
 // in for Bedrock's water front and back depths with the camera above water.
-bool inWaterColumn(vec3 p) {
+// How far below the water's surface the camera-relative point p is (blocks), or -1 when it isn't in the top
+// water body of its column (WaterColumns.java). It stands in for Bedrock's water front and back depths with
+// the camera above water.
+float depthBelowWaterSurface(vec3 p) {
     // The map covers 128 columns each way; past that a texel holds a nearer column.
-    if (WaterColumnOrigin.w < 0.5 || max(abs(p.x), abs(p.z)) > 120.0) {
-        return false;
+    if (WaterColumnOrigin.w < 0.5 || max(abs(p.x), abs(p.z)) > WATER_COLUMN_RANGE) {
+        return -1.0;
     }
     ivec2 texel = ivec2(mod(floor(p.xz + WaterColumnOrigin.xz), 256.0));
     vec4 column = texelFetch(WaterColumnMap, texel, 0) * 255.0;
     float surface = (column.r + column.g * 256.0) / 16.0;
     if (surface <= 0.0) {
-        return false;
+        return -1.0;
     }
     float bottom = column.b + column.a * 256.0;
     float y = p.y + WaterColumnOrigin.y;
-    return y >= bottom && y < surface;
+    return y >= bottom && y < surface ? surface - y : -1.0;
+}
+
+bool inWaterColumn(vec3 p) {
+    return depthBelowWaterSurface(p) >= 0.0;
+}
+
+// The water's extinction between its surface and p along the view direction dir (the camera above water),
+// which this pass applies within the water column map's range; the water pass leaves those pixels to it.
+vec3 waterTransmittanceTo(vec3 p, vec3 dir) {
+    float depth = depthBelowWaterSurface(p);
+    if (depth < 0.0) {
+        return vec3(1.0);
+    }
+    float path = min(depth / max(-dir.y, 0.05), 64.0);
+    return exp(-UnderwaterMedium.rgb * path);
 }
 
 float phaseHG(float g, float cosine) {
@@ -199,11 +219,11 @@ vec3 volumetricFog(vec3 dir, float distance, out vec3 transmittance) {
             g = UnderwaterScattering.w;
         } else if (waterBelow && inWaterColumn(p)) {
             // Seen from above, the water between its surface and the floor scatters too (Bedrock's
-            // PopulateVolume picks the water medium between the water's front and back depths). The water
-            // pass dims everything behind the surface by the whole path's extinction afterwards, so it isn't
-            // applied here as well.
+            // PopulateVolume picks the water medium between the water's front and back depths), dimmed by the
+            // water above it along the view. That extinction is applied per point (waterTransmittanceTo) rather
+            // than accumulated here, so shallow water seen from far doesn't depend on the step length.
             extinction = vec3(0.0);
-            scattering = UnderwaterScattering.rgb;
+            scattering = UnderwaterScattering.rgb * waterTransmittanceTo(p, dir);
             g = UnderwaterScattering.w;
         } else {
             float density = clamp(VolumeHeight.x * p.y + VolumeHeight.y, 0.0, 1.0) * VolumeHeight.w;
@@ -699,6 +719,11 @@ void main() {
     vec3 fogTransmittance;
     vec3 fogLight = volumetricFog(viewDir, length(position), fogTransmittance);
     // Under water, the march's water medium is Bedrock's WaterExtinction along the view, up to the surface.
+    // From above water, what lies under the surface (within the water column map) is dimmed by the water
+    // above it here; the water pass then leaves it alone.
+    if (UnderwaterParams.x < 0.5) {
+        color *= waterTransmittanceTo(position, viewDir);
+    }
     color = color * fogTransmittance + fogLight;
 
     meterLuminance = vec4(dot(color, LUMA), 0.0, 0.0, 1.0);

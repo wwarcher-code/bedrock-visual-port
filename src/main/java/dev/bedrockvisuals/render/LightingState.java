@@ -133,7 +133,7 @@ public record LightingState(
 	 */
 	private static Vector4f distanceFog(FogSettings fog) {
 		float blocks = Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f;
-		int distant = DeferredRenderer.ownsDistantComposite()
+		int distant = DeferredRenderer.isEnabled() && !DeferredRenderer.lightingFailed()
 				? DistantTerrain.source().map(source -> source.renderDistanceBlocks()).orElse(0) : 0;
 		if (distant > 0) {
 			blocks = Math.max(blocks, distant);
