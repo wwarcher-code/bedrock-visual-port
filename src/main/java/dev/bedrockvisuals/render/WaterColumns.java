@@ -39,6 +39,8 @@ public final class WaterColumns {
 	private static final int MAX_DEPTH = 96;
 	/** How far below a solid top block the map looks for water (overhangs over a lake's edge). */
 	private static final int UNDER_COVER = 24;
+	/** How thick a solid ledge under the surface can be for the water below it to count (the lake's floor ends the scan). */
+	private static final int LEDGE_THICKNESS = 8;
 
 	private static GpuTexture texture;
 	private static GpuTextureView view;
@@ -115,14 +117,22 @@ public final class WaterColumns {
 			if (fluid.is(FluidTags.WATER)) {
 				// Under cover the water fills its block up to the block above (the ledge's underside is in it).
 				float height = covered ? 1f : fluid.getHeight(level, pos);
+				// Down to the lowest water under it, through solid blocks in the water (a ledge under the surface
+				// has water beneath it, seen from the side: it was left out and shaded as open water, bright
+				// blue). Air ends the body: a cave under a lake isn't under its water.
 				int y = top;
 				int lowest = top - MAX_DEPTH;
-				while (y > lowest && y > minY) {
-					pos.setY(y - 1);
-					if (!chunk.getFluidState(pos).is(FluidTags.WATER)) {
+				int solidRun = 0;
+				for (int below = top - 1; below > lowest && below > minY && solidRun < LEDGE_THICKNESS; below--) {
+					pos.setY(below);
+					if (chunk.getFluidState(pos).is(FluidTags.WATER)) {
+						y = below;
+						solidRun = 0;
+					} else if (chunk.getBlockState(pos).isAir()) {
 						break;
+					} else {
+						solidRun++;
 					}
-					y--;
 				}
 				surface = Math.max(1, Math.round((top + height - minY) * 16f));
 				bottom = y - minY;
