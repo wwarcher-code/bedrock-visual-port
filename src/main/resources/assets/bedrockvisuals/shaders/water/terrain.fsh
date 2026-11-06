@@ -34,6 +34,7 @@ layout(std140) uniform WaterData {
     vec4 Absorption;  // per block, linear RGB
     vec4 Scattering;  // per block, linear RGB; w: 1 when water shading is on
     vec4 Animation;   // x: current frame of the surface maps, y: frames in them; z: 1 when u_BrdfLut is Bedrock's
+    vec4 OverlayRect; // the same for water_overlay: water's side faces against see-through blocks (leaves, glass)
 };
 
 // Bedrock's split-sum BRDF table (BrdfLut.java), read as DeferredIndirectSpecular reads it.
@@ -117,7 +118,8 @@ bool inRect(vec2 uv, vec4 rect) {
 }
 
 bool isWater() {
-    return Scattering.w > 0.5 && (inRect(v_TexCoord, StillRect) || inRect(v_TexCoord, FlowRect));
+    return Scattering.w > 0.5 && (inRect(v_TexCoord, StillRect) || inRect(v_TexCoord, FlowRect)
+            || inRect(v_TexCoord, OverlayRect));
 }
 
 // Distance from the camera along the view axis, from a depth value. With w = -z, depth = (P22 z + P32) / -z,
@@ -134,6 +136,7 @@ struct WaterSurface {
     float fresnel;
     vec3 transmittance;  // along the path from the surface to the bottom
     float path;          // blocks of water from the surface to the bottom along the view
+    float beneathLit;    // 1 where what's beneath is in sunlight (the outer cascade), 0 in shade
     bool scatters;       // the water's in-scattered light is this pass's to add (the lighting pass's map missed it)
     float opacity;       // what the OIT stages blend with; the same in every stage
 };
@@ -141,7 +144,7 @@ struct WaterSurface {
 // This texel's normal and MERS from Bedrock's surface maps, for the current animation frame. The water
 // sprite's UVs cover 16 texels per block (32 for the flowing sprite, which spans two).
 void surfaceTexel(out vec3 tangentNormal, out float roughness, out float metalness) {
-    vec4 rect = inRect(v_TexCoord, StillRect) ? StillRect : FlowRect;
+    vec4 rect = inRect(v_TexCoord, StillRect) ? StillRect : inRect(v_TexCoord, FlowRect) ? FlowRect : OverlayRect;
     vec2 local = (v_TexCoord - rect.xy) / max(rect.zw - rect.xy, vec2(1e-6));
     float spriteTexels = max(round((rect.z - rect.x) / u_TexelSize.x), 1.0);
     ivec2 mapSize = textureSize(u_WaterNormal, 0);
@@ -156,6 +159,9 @@ void surfaceTexel(out vec3 tangentNormal, out float roughness, out float metalne
     // DeferredIndirectSpecular reads back as saturate((a - 0.502) × 2.0079): water's 0.0706 becomes 0.0667.
     metalness = clamp((0.5 + 0.498 * mers.r - 0.50196) * 2.00787, 0.0, 1.0);
 }
+
+// Defined with the surface fog below: the outer cascade's shadow test at p.
+float surfaceFogShadow(vec3 p);
 
 WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
     WaterSurface s;
@@ -183,11 +189,13 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
     s.transmittance = exp(-(Absorption.rgb + Scattering.rgb) * path);
     s.path = path;
     s.scatters = UnderwaterParams.x < 0.5;
+    s.beneathLit = 1.0;
     // Where the water column map puts what's beneath under this water, the lighting pass already dimmed it by
     // the water above it (and the water's in-scattered light likewise), so nothing more here. The same test
     // on the same point as the lighting pass (water_columns.glsl), so exactly one of them applies it.
     if (opaque > 0.0 && path < BOTTOMLESS) {
         vec3 beneath = v_Position * (viewDistance(opaque) / max(viewDistance(gl_FragCoord.z), 1e-4));
+        s.beneathLit = surfaceFogShadow(beneath);
         if (depthBelowWaterSurface(waterTestPoint(beneath)) >= 0.0) {
             s.transmittance = vec3(1.0);
             s.scatters = false;
@@ -422,7 +430,7 @@ vec3 waterColor(WaterSurface s, float albedo) {
     vec3 transmitted = behind * s.transmittance;
     if (s.scatters) {
         // Beyond the water column map, the water's own scattered light (the lighting pass adds it within).
-        transmitted += toDisplay(locallyExposed(waterInScatter(normalize(v_Position), s.path)));
+        transmitted += toDisplay(locallyExposed(waterInScatter(normalize(v_Position), s.path, s.beneathLit)));
     }
     vec3 surfaceLight = specularScale * reflection + toDisplay(locallyExposed(glint));
     // DeferredWater fogs the surface's own light like terrain: towards the sky radiance (blended to the

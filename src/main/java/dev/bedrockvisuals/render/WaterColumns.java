@@ -98,17 +98,20 @@ public final class WaterColumns {
 			// Under an overhang (a ledge, a lily pad's block, a tree over the shore) the top block is solid and
 			// the water lies below it: look down a little way for it, so water in the shade counts as water (it
 			// was left to the water pass's unshadowed estimate and came out bright blue).
+			boolean covered = false;
 			for (int below = 1; below <= UNDER_COVER && !fluid.is(FluidTags.WATER) && top - below > minY; below++) {
 				pos.setY(top - below);
 				FluidState under = chunk.getFluidState(pos);
 				if (under.is(FluidTags.WATER)) {
 					top -= below;
 					fluid = under;
+					covered = true;
 				}
 			}
 			pos.setY(top);
 			if (fluid.is(FluidTags.WATER)) {
-				float height = fluid.getHeight(level, pos);
+				// Under cover the water fills its block up to the block above (the ledge's underside is in it).
+				float height = covered ? 1f : fluid.getHeight(level, pos);
 				int y = top;
 				int lowest = top - MAX_DEPTH;
 				while (y > lowest && y > minY) {

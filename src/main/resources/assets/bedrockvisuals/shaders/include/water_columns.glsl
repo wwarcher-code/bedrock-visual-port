@@ -26,7 +26,10 @@ float depthBelowWaterSurface(vec3 p) {
     }
     float bottom = column.b + column.a * 256.0;
     float y = p.y + WaterColumnOrigin.y;
-    return y >= bottom && y < surface ? surface - y : -1.0;
+    // Positions come from the view (with view bobbing's sway, up to about 0.1 blocks) and the height from the
+    // camera without it, so floors lying exactly on the body's bottom get some slack: without it they flickered
+    // in and out of the water while walking.
+    return y >= bottom - 0.3 && y < surface ? max(surface - y, 0.0) : -1.0;
 }
 
 // The point a visible surface's water test is made at: nudged back towards the camera, into the water in
@@ -50,9 +53,9 @@ vec3 waterTransmittanceTo(vec3 p, vec3 dir) {
 // The light the water scatters towards the camera over `path` blocks of it below the surface, along the view
 // direction dir: what the lighting pass's march adds within the map (sky ambient over 4π and the sun or moon
 // through the water's phase function, dimmed by the water in front of each point along the view), in closed
-// form for a uniform layer, for water the map doesn't cover (farther out, and Distant Horizons' water). No
-// shadows. This renderer's units, before exposure.
-vec3 waterInScatter(vec3 dir, float path) {
+// form for a uniform layer, for water the map doesn't cover (farther out, and Distant Horizons' water). The
+// sun's share is scaled by sunVisibility (whether what's beneath is in shade). This renderer's units, before exposure.
+vec3 waterInScatter(vec3 dir, float path, float sunVisibility) {
     bool moon = ShadowParams.w > 0.5;
     vec3 l = normalize(moon ? MoonDirection.xyz : SunDirection.xyz);
     vec3 light = moon ? MoonColor.rgb : SunColor.rgb;
@@ -61,7 +64,7 @@ vec3 waterInScatter(vec3 dir, float path) {
     float phase = (1.0 - g * g) * 0.07957747 / pow(max(1.0 + g * (2.0 * cosine + g), 1e-4), 1.5);
     vec3 ambient = SkyColor.rgb * VolumeCamera.x * 0.07957747;
     vec3 sigma = max(UnderwaterMedium.rgb, vec3(1e-5));
-    return UnderwaterScattering.rgb * (ambient + light * phase) * (1.0 - exp(-sigma * path)) / sigma;
+    return UnderwaterScattering.rgb * (ambient + light * phase * sunVisibility) * (1.0 - exp(-sigma * path)) / sigma;
 }
 
 #endif

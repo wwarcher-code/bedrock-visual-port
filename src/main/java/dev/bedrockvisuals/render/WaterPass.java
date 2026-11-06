@@ -49,7 +49,7 @@ public final class WaterPass {
 			.withUniform("WaterColumnMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			).build();
 	/** std140 size of WaterData in water/terrain.fsh: five vec4s. */
-	private static final int DATA_SIZE = 5 * 16;
+	private static final int DATA_SIZE = 6 * 16;
 
 	/*
 	 * Bedrock's water extinction per block, per channel (WaterExtinctionCoefficients in GPU captures of the
@@ -105,6 +105,9 @@ public final class WaterPass {
 				long ticks = level == null ? 0 : level.getGameTime();
 				int frames = WaterSurfaceMaps.frames();
 				builder.putVec4((float) ((ticks / 2) % frames), frames, BrdfLut.view() != null ? 1 : 0, 0);
+				// Water's side faces against see-through blocks (leaves, glass, seagrass) use water_overlay;
+				// without it they were drawn as plain tinted texture, bright blue.
+				putRect(builder, blockAtlas.getSprite(Identifier.withDefaultNamespace("block/water_overlay")));
 				RenderSystem.getDevice().createCommandEncoder().writeToBuffer(data.slice(), builder.get());
 			}
 			ready = true;

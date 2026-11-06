@@ -496,7 +496,7 @@ vec3 distantWaterSurface(vec3 below, vec3 ray, float surface, float ground, vec3
     }
     float path = max(ground - surface, 0.0);
     return specularScale * sky * 0.5 + glint
-            + (1.0 - fresnel) * (below * transmittance + waterInScatter(ray, min(path, 64.0)));
+            + (1.0 - fresnel) * (below * transmittance + waterInScatter(ray, min(path, 64.0), 1.0));
 }
 
 // Distant Horizons' terrain carries only colour and depth: the normal is rebuilt from the depth of the
