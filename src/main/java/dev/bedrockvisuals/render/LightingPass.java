@@ -37,7 +37,7 @@ import org.lwjgl.system.MemoryStack;
  */
 public final class LightingPass {
 	/** std140 size of the LightingData block (include/common.glsl): three mat4s and seventeen vec4s. */
-	private static final int DATA_SIZE = 6 * 64 + 20 * 16;
+	private static final int DATA_SIZE = 6 * 64 + 21 * 16;
 	/**
 	 * Bedrock's shadow normal offset (shadow_configuration.pc.json normal_offset_strength): lookups move out along
 	 * the normal by this many blocks times (1 - N·L).
@@ -129,6 +129,8 @@ public final class LightingPass {
 			builder.putVec4(ShadowPass.isValid() ? 1 : 0, 1f / ShadowPass.RESOLUTION, NORMAL_OFFSET_STRENGTH,
 							ShadowPass.fromMoon() ? 1 : 0)
 					.putVec4(ShadowPass.bias(0), ShadowPass.bias(1), ShadowPass.bias(2), ShadowPass.bias(3))
+					.putVec4(ShadowPass.slopeBias(0), ShadowPass.slopeBias(1), ShadowPass.slopeBias(2),
+							ShadowPass.slopeBias(3))
 					.putVec4(GBufferDebugView.shadowDebugMode(), LightingState.METER_SKY_SCALE,
 							BrdfLut.view() != null ? 1 : 0, GBufferDebugView.postDebugMode());
 			putVec4(builder, light.skyHorizon(), 0);

@@ -54,7 +54,7 @@ snapped point, so every texel gets one value and shadow edges follow the texel g
 
 ## Shadows
 
-Cascaded shadow maps, up to 8 cascades (`CascadesShadowProj[8]`, `CascadesParameters[8]`). The lookup point
+Cascaded shadow maps, up to 8 cascades (one `CascadesShadowProj`, `CascadesParameters[8]`). The lookup point
 is the snapped texel centre pushed along the normal, with a slope bias of `tan(acos(N·L))` times a per-cascade
 factor. Filtering is a square PCF kernel of 1x1 to 9x9 gathers (per-cascade width), each gather bilinearly
 weighted. Cloud shadows and a separate first-person player shadow map exist.
@@ -518,8 +518,10 @@ In the shader:
 
 The renderer matches the single hard tap, the normal offset, the 0.2° steps, the cloud contribution, the four
 2048² cascades (1/6, 1/3, 1/2 and all of 128 blocks, the darkest of those a point falls in) and the fade over
-the last 8 blocks. The depth biases are in blocks (TUNE: Bedrock's are in its own depth units), and the
-volumetric fog reads the outer cascade. Sodium hands each cascade only the chunks the camera sees, so
+the last 8 blocks. Every cascade is looked up through the one `CascadesShadowProj`, whose depth row is the
+light direction at 0.0057868 per block (capture 1), so Bedrock's depth unit is 172.8 blocks: the depth biases
+are 0.048, 0.26, 0.48 and 0.52 blocks and the slope biases 0.0017 to 0.0104 blocks per tan θ, with
+`NdLFloor` 0.04. The renderer uses those. The volumetric fog reads the outer cascade. Sodium hands each cascade only the chunks the camera sees, so
 terrain out of view casts no shadows into it.
 
 ## Cloud shadows

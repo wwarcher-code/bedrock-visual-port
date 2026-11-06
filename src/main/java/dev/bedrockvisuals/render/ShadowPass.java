@@ -45,10 +45,22 @@ public final class ShadowPass {
 	/** Blocks each cascade covers around the camera: 1/6, 1/3, 1/2 and all of the range. */
 	static final float[] HALF_EXTENTS = {RANGE / 6, RANGE / 3, RANGE / 2, RANGE};
 	/**
-	 * Depth bias per cascade, in blocks (TUNE: Bedrock's 0.000275 to 0.003 are in its own depth units): about two
-	 * of the cascade's texels.
+	 * Blocks per unit of Bedrock's shadow depth. Every cascade is looked up through the one CascadesShadowProj
+	 * (GPU capture 1), whose depth row is the light direction at 0.0057868 per block.
 	 */
-	static final float[] BIAS_BLOCKS = {0.1f, 0.15f, 0.2f, 0.3f};
+	static final float BEDROCK_DEPTH_BLOCKS = 1f / 0.0057868f;
+	/**
+	 * Depth bias per cascade, in blocks: Bedrock's CascadesParameters.y (0.000275, 0.0015, 0.00275, 0.003, the
+	 * PC ultra configuration, as captured) in its depth units.
+	 */
+	static final float[] BIAS_BLOCKS = {0.000275f * BEDROCK_DEPTH_BLOCKS, 0.0015f * BEDROCK_DEPTH_BLOCKS,
+			0.00275f * BEDROCK_DEPTH_BLOCKS, 0.003f * BEDROCK_DEPTH_BLOCKS};
+	/**
+	 * Slope bias per cascade, in blocks per tan(acos(max(N·L, NdLFloor 0.04))): CascadesParameters.z (1e-5,
+	 * 2e-5, 4e-5, 6e-5) in Bedrock's depth units.
+	 */
+	static final float[] SLOPE_BIAS_BLOCKS = {1e-5f * BEDROCK_DEPTH_BLOCKS, 2e-5f * BEDROCK_DEPTH_BLOCKS,
+			4e-5f * BEDROCK_DEPTH_BLOCKS, 6e-5f * BEDROCK_DEPTH_BLOCKS};
 	public static final float DEPTH_RANGE = 256;
 	/** Below this height above the horizon the light grazes the terrain too flatly to shadow usefully. */
 	private static final float MIN_ELEVATION = 0.03f;
@@ -115,6 +127,11 @@ public final class ShadowPass {
 	/** Each cascade's depth bias in the map's depth units. */
 	static float bias(int cascade) {
 		return BIAS_BLOCKS[cascade] / (2 * DEPTH_RANGE);
+	}
+
+	/** Each cascade's slope bias in the map's depth units, per tan of the light's angle to the normal. */
+	static float slopeBias(int cascade) {
+		return SLOPE_BIAS_BLOCKS[cascade] / (2 * DEPTH_RANGE);
 	}
 
 	public static void render(ChunkSectionsToRender chunks, GpuSampler sampler, GpuTextureView blockAtlas,

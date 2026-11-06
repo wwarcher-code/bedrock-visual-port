@@ -59,14 +59,16 @@ vec3 directLight(vec3 n, vec3 v, vec3 l, vec3 radiance, vec3 diffuseColor, vec3 
 
 // One cascade's test: 1 lit, 0 shadowed, -1 when the point is outside it. Depth is reversed in the maps: larger
 // values are nearer the light, so a point is lit when nothing nearer the light was stored.
-float cascadeTest(sampler2D map, int cascade, vec3 p) {
+float cascadeTest(sampler2D map, int cascade, vec3 p, float slope) {
     vec4 clip = ShadowViewProjection[cascade] * vec4(p, 1.0);
     vec2 uv = clip.xy * 0.5 + 0.5;
     if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) || clip.z <= 0.0 || clip.z >= 1.0) {
         return -1.0;
     }
     // One tap: with the lookup snapped to the texel grid, Bedrock's shadow edges are crisp per texel.
-    return clip.z >= texture(map, uv).r - ShadowCascadeBias[cascade] ? 1.0 : 0.0;
+    // Bedrock's bias: depth bias plus tan(acos(max(N·L, NdLFloor))) times the slope bias.
+    float bias = ShadowCascadeBias[cascade] + slope * ShadowCascadeSlope[cascade];
+    return clip.z >= texture(map, uv).r - bias ? 1.0 : 0.0;
 }
 
 // The nearest cascade a point falls in, or -1 (for the cascade debug view).
@@ -92,12 +94,15 @@ float shadowVisibility(vec3 position, vec3 n, vec3 towardsLight, out float edgeF
     // Bedrock's normal offset: out along the normal by normal_offset_strength x (1 - N.L) blocks.
     float grazing = clamp(1.0 - dot(n, towardsLight), 0.0, 1.0);
     vec3 p = position + n * ShadowParams.z * grazing;
+    // NdLFloor 0.04 (captured) caps the slope term at tan(acos(0.04)), about 25.
+    float nDotL = max(dot(n, towardsLight), 0.04);
+    float slope = sqrt(1.0 - nDotL * nDotL) / nDotL;
     float visibility = 2.0;
     float t;
-    t = cascadeTest(ShadowMap0, 0, p); if (t >= 0.0) visibility = min(visibility, t);
-    t = cascadeTest(ShadowMap1, 1, p); if (t >= 0.0) visibility = min(visibility, t);
-    t = cascadeTest(ShadowMap2, 2, p); if (t >= 0.0) visibility = min(visibility, t);
-    t = cascadeTest(ShadowMap3, 3, p); if (t >= 0.0) visibility = min(visibility, t);
+    t = cascadeTest(ShadowMap0, 0, p, slope); if (t >= 0.0) visibility = min(visibility, t);
+    t = cascadeTest(ShadowMap1, 1, p, slope); if (t >= 0.0) visibility = min(visibility, t);
+    t = cascadeTest(ShadowMap2, 2, p, slope); if (t >= 0.0) visibility = min(visibility, t);
+    t = cascadeTest(ShadowMap3, 3, p, slope); if (t >= 0.0) visibility = min(visibility, t);
     if (visibility > 1.5) {
         return -1.0;
     }
@@ -159,7 +164,7 @@ float volumeShadow(vec3 p, vec3 towardsLight) {
         return 1.0;
     }
     // The outer cascade: the fog reaches past the inner ones.
-    float t = cascadeTest(ShadowMap3, 3, p);
+    float t = cascadeTest(ShadowMap3, 3, p, 0.0);
     return t < 0.0 ? 1.0 : t;
 }
 

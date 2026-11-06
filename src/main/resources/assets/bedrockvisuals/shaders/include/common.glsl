@@ -16,6 +16,7 @@ layout(std140) uniform LightingData {
     mat4 ShadowViewProjection[4]; // per cascade: camera-relative world space to shadow clip space (ShadowPass.java)
     vec4 ShadowParams;          // x: maps valid, y: texel size in UV, z: normal offset in blocks, w: cast by the moon
     vec4 ShadowCascadeBias;     // each cascade's depth bias, in its depth units
+    vec4 ShadowCascadeSlope;    // each cascade's slope bias, in its depth units per tan(acos(N·L))
     vec4 DebugParams;           // x: draw the shadow test instead of lit color; y: sky radiance scale for metering;
                                 // z: 1 when Bedrock's BRDF table is bound (BrdfLut.java); w: 1 to show local
                                 // exposure's factor, 2 only the bloom (GBufferDebugView)
