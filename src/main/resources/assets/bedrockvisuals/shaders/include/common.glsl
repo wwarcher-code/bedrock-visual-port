@@ -60,9 +60,12 @@ layout(std140) uniform GradingData {
     vec4 ShadowContrast, ShadowGain, ShadowOffset, ShadowSaturation;
     vec4 HighContrast, HighGain, HighOffset, HighSaturation;
     vec4 Gamma;        // final encoding, after tone mapping
-    vec4 Temperature;  // per-channel multiplier
-    vec4 Bands;        // x: shadows enabled, y: shadow max, z: highlights enabled, w: highlight min
-    vec4 ToneMapping;  // x: operator (ColorGradingSettings.ToneMapping order), y: average luminance
+    vec4 TemperatureRow0;  // Bedrock's white balance matrix by rows (w of the first: 1 when on)
+    vec4 TemperatureRow1;
+    vec4 TemperatureRow2;
+    vec4 Bands;        // x: shadows enabled, y: shadowsMax, z: highlights enabled, w: highlightsMin (x average)
+    vec4 ToneMapping;  // x: operator (ColorGradingSettings.ToneMapping order), y: average luminance,
+                       // z: 1 when the midtones are enabled
 };
 
 const float PI = 3.14159265;
@@ -73,31 +76,52 @@ vec3 toLinear(vec3 srgb) {
 
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 
-// One set of grading parameters, around the scene's average luminance as Bedrock's documentation describes:
-// saturation about the pixel's luminance, contrast about the average, then gain and an offset scaled by it.
-vec3 gradeWith(vec3 c, vec3 contrast, vec3 gain, vec3 offset, vec3 saturation, float average) {
-    c = max(mix(vec3(dot(c, LUMA)), c, saturation), 0.0);
-    c = pow(c / average, contrast) * average;
-    return max(c * gain + offset * average, 0.0);
+// Bedrock's ColorPostProcessing grading. Each parameter (contrast, saturation, gain, offset) is chosen by the
+// pixel's luminance against the scene's average: the highlights' at or above highlightsMin x average, the
+// shadows' at or below shadowsMax x average, and between them a straight blend from the shadows' through the
+// midtones' (at the average) to the highlights'; a band that is off leaves the midtones' (or, with the
+// midtones off too, no change). Then, in order: contrast about the average, saturation about the pixel's
+// luminance, gain, and an offset scaled by the average. Bedrock grades before exposing, about the measured
+// average; this renderer grades after, about 0.18, where exposure puts that average: the same result, as each
+// step scales with it.
+vec3 gradeBand(vec3 mid, vec3 shadow, vec3 high, vec3 identity, float luminance, float average) {
+    bool shadowsOn = Bands.x > 0.5;
+    bool highlightsOn = Bands.z > 0.5;
+    float highLimit = Bands.w * average;
+    float lowLimit = Bands.y * average;
+    if (highlightsOn && luminance >= highLimit) {
+        return high;
+    }
+    bool inShadows = shadowsOn && luminance <= lowLimit;
+    if (inShadows || ToneMapping.z < 0.5) {
+        return inShadows ? shadow : identity;
+    }
+    if (shadowsOn && luminance < average) {
+        return mix(shadow, mid, (luminance - lowLimit) / (average - lowLimit));
+    }
+    if (highlightsOn && luminance > average) {
+        return mix(mid, high, (luminance - average) / (highLimit - average));
+    }
+    return mid;
 }
 
 vec3 grade(vec3 c) {
-    c *= Temperature.rgb;
     float average = ToneMapping.y;
+    // The bands go by the luminance before the white balance, as Bedrock's do.
     float luminance = dot(c, LUMA);
-    vec3 graded = gradeWith(c, MidContrast.rgb, MidGain.rgb, MidOffset.rgb, MidSaturation.rgb, average);
-    // Shadow and highlight bands replace the midtones below and above their thresholds, blended softly.
-    if (Bands.x > 0.5) {
-        float limit = Bands.y * average;
-        float weight = 1.0 - smoothstep(limit * 0.8, limit * 1.25, luminance);
-        graded = mix(graded, gradeWith(c, ShadowContrast.rgb, ShadowGain.rgb, ShadowOffset.rgb, ShadowSaturation.rgb, average), weight);
+    if (TemperatureRow0.w > 0.5) {
+        c = vec3(dot(TemperatureRow0.xyz, c), dot(TemperatureRow1.xyz, c), dot(TemperatureRow2.xyz, c));
     }
-    if (Bands.z > 0.5) {
-        float limit = Bands.w * average;
-        float weight = smoothstep(limit * 0.8, limit * 1.25, luminance);
-        graded = mix(graded, gradeWith(c, HighContrast.rgb, HighGain.rgb, HighOffset.rgb, HighSaturation.rgb, average), weight);
-    }
-    return graded;
+    vec3 contrast = gradeBand(MidContrast.rgb, ShadowContrast.rgb, HighContrast.rgb, vec3(1.0), luminance, average);
+    c = max(exp2(log2(max(c, 0.0) / average) * contrast) * average, 0.0);
+    vec3 saturation = gradeBand(MidSaturation.rgb, ShadowSaturation.rgb, HighSaturation.rgb, vec3(1.0), luminance,
+            average);
+    float graded = dot(c, LUMA);
+    c = max(graded + (c - graded) * saturation, 0.0);
+    c = max(c * gradeBand(MidGain.rgb, ShadowGain.rgb, HighGain.rgb, vec3(1.0), luminance, average), 0.0);
+    c = max(c + gradeBand(MidOffset.rgb, ShadowOffset.rgb, HighOffset.rgb, vec3(0.0), luminance, average) * average,
+            0.0);
+    return c;
 }
 
 vec3 aces(vec3 c) {
