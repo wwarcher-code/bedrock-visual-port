@@ -326,8 +326,20 @@ vec3 waterColor(WaterSurface s, float albedo) {
     vec3 behind = texelFetch(u_SceneColor, ivec2(gl_FragCoord.xy), 0).rgb;
     // Bedrock's water only absorbs (WaterExtinction); light scattered in the water comes from volumetric fog.
     vec3 transmitted = behind * s.transmittance;
-    vec3 target = clamp(specularScale * reflection + (1.0 - s.fresnel) * transmitted + toDisplay(locallyExposed(glint)),
-            0.0, 1.0);
+    vec3 surfaceLight = specularScale * reflection + toDisplay(locallyExposed(glint));
+    // DeferredWater fogs the surface's own light like terrain: towards the sky radiance (blended to the
+    // underground colour where sky light is low) times its alpha F, by the distance fog. What shows through
+    // was fogged by the lighting pass already.
+    if (AtmosphereZenith.w > 0.5) {
+        float fog = bedrockFogAmount(length(v_Position));
+        if (fog > 0.0) {
+            float open = max(sqrt(VolumeCamera.x) * 15.0 / 16.0, levels.y);
+            vec3 fogColor = toDisplay(locallyExposed(
+                    bedrockSkyRadiance(normalize(v_Position), sunDir, moonDir) * AtmosphereHorizon.w * open));
+            surfaceLight = mix(surfaceLight, fogColor * s.fresnel, fog);
+        }
+    }
+    vec3 target = clamp(surfaceLight + (1.0 - s.fresnel) * transmitted, 0.0, 1.0);
     return clamp((target - (1.0 - s.opacity) * behind) / max(s.opacity, 1e-3), 0.0, 1.0);
 }
 

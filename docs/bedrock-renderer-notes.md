@@ -180,7 +180,19 @@ Order: the scene beneath is attenuated by `WaterExtinction`, then `DeferredWater
   metalness 0.07 and roughness 0.06 to 0.34 per texel. Screen-space reflections only apply below roughness
   0.3 (fading out by 0.4), so the per-texel roughness and normals make the reflections break up on the
   texel grid.
-- **Reflections:** from the separate SSR and indirect specular passes (to analyse), not the water shader.
+- **Reflections:** not from the water shader. `DoWaterSurfaceBuffer` writes the surface into the G-buffer
+  (the grey colour texel, metalness 0.0706 stored as `0.5 + 0.498 m`, the normal map's normal, MERS
+  roughness), and the SSR passes and `DeferredIndirectSpecular` then reflect onto it as onto terrain: probe ×
+  sky-light fade × `IBLParameters.z` 0.5, replaced by SSR where it hits, times `F0·A + B` with
+  `F0 = mix(0.04, albedo, 0.0667)` (about 0.062). That is about three times the 0.02 Schlick term head-on.
+- **Procedural waves:** `DoWaterSurfaceBuffer` can replace the normal map with a sum of `WaterSurfaceParameters.y`
+  (28) octaves of `((sin φ + 1)/2)^k` waves (k = `WaterSurfaceWaveParameters.y` 1.5; each octave turns 1.399
+  rad, scales frequency by `Octave.z` 1.2, speed by `.w` 1.03, weight by `1 - .y` 0.8, and warps the domain by
+  `.x` 0.38 of the wave), tilting only upward faces. Vanilla leaves it off:
+  `WaterSurfaceEnabledAndExtinctionDistShift.x` is 0 in every capture.
+- **Fog:** `DeferredWater` blends the surface's own light towards the distance-fog colour times its alpha F,
+  `mix(spec, fogColour × F, fog)`, then applies the volumetric fog. The renderer does the first; the
+  volumetric fog on the surface itself isn't drawn.
 - **Caustics:** a multiplier on light reaching surfaces under water:
   `(2 × tex(world XZ × scale, frame) × saturate(N·up))^power × (power + 1)`, the `(power + 1)` keeping the
   average about the same as the pattern sharpens. The texture is the engine's built-in 64-frame sheet (not
