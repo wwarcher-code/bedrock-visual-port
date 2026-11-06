@@ -77,8 +77,8 @@ public record SkyAtmosphere(Vector3f zenith, Vector3f horizon, Vector4f blendSto
 	static SkyAtmosphere sample(AtmosphereSettings atmosphere, LightingSettings lighting, float time,
 			Vector3f sunDirection, Vector3f moonDirection, Vector4f fog, FogSettings.VolumetricFog air) {
 		Vector4f[] volume = volume(air);
-		Rgba sunColor = lighting.sun().color().sample(time);
-		Rgba moonColor = lighting.moon().color().sample(time);
+		Rgba sunColor = Weather.sky(lighting.sun().color().sample(time));
+		Rgba moonColor = Weather.sky(lighting.moon().color().sample(time));
 		return new SkyAtmosphere(
 				linear(Weather.sky(atmosphere.skyZenithColor().sample(time))),
 				linear(Weather.sky(atmosphere.skyHorizonColor().sample(time))),

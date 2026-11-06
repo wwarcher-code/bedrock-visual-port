@@ -86,17 +86,17 @@ public record LightingState(
 		float sunIlluminance = lighting.sun().illuminance().sample(time);
 		float moonIlluminance = lighting.moon().illuminance().sample(time);
 		float ambientIlluminance = lighting.ambientIlluminance();
-		// Rain fades direct light out (atmospheric_weather.json directional_light_strength).
-		float direct = Weather.directLight();
+		// Weather greys the sun's and moon's colour like the sky's, at full illuminance (captures in rain and
+		// thunder: SunColor (0.404, 0.404, 0.404, 100) and (0.251, 0.251, 0.251, 100), Weather.sky).
 		float skyIntensity = lighting.skyIntensity().sample(time);
 		float skyAmbient = SKY_INDIRECT * (sunIlluminance + moonIlluminance + ambientIlluminance) * skyIntensity;
 		return new LightingState(
 				sunDirection,
 				// Bedrock sends the sun and moon colours as sRGB/255, not linearised (the captures' SunColor is
 				// (1, 0.890196, 0.843137) for the keyframe 255, 227, 215).
-				srgb(lighting.sun().color().sample(time)).mul(sunIlluminance * UNIT * direct),
+				srgb(Weather.sky(lighting.sun().color().sample(time))).mul(sunIlluminance * UNIT),
 				new Vector3f(sunDirection).negate(),
-				srgb(lighting.moon().color().sample(time)).mul(moonIlluminance * UNIT * direct),
+				srgb(Weather.sky(lighting.moon().color().sample(time))).mul(moonIlluminance * UNIT),
 				new Vector3f(SKY_AMBIENT_COLOR).mul(skyAmbient * UNIT),
 				linear(horizon).mul(skyIntensity * 0.25f),
 				linear(lighting.ambientColor()).mul(ambientIlluminance * UNIT),

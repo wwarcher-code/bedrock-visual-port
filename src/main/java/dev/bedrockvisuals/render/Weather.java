@@ -14,12 +14,13 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 
 /**
- * Bedrock's weather look (renderer/atmospheric_weather.json in the install): rain turns the sky grey and the
- * clouds grey, thunder darker still, and direct sun and moon light fade out ({@code directional_light_strength}
- * 0). Read from the install; Bedrock 1.26.60's values are the fallback.
+ * Bedrock's weather look (renderer/atmospheric_weather.json in the install): rain turns the sky, the sun's and
+ * moon's colour and the clouds grey, thunder darker still. The sun keeps its illuminance: GPU captures in rain and
+ * thunder at noon have SunColor (0.404, 0.404, 0.404, 100) and (0.251, 0.251, 0.251, 100), the same grey as the
+ * sky (rain_sky_color, then base_thunder_sky_color by its contribution), and CloudColor 0.762 and 0.150. Read
+ * from the install; Bedrock 1.26.60's values are the fallback.
  */
 public final class Weather {
-	private static float directionalStrength = 0f;
 	private static float[] rainSky = {103 / 255f, 103 / 255f, 103 / 255f};
 	private static float[] rainCloud = {191 / 255f, 191 / 255f, 191 / 255f};
 	private static float rainCloudContribution = 0.95f;
@@ -44,7 +45,6 @@ public final class Weather {
 		try {
 			String text = Files.readString(file, StandardCharsets.UTF_8).replaceAll("(?m)//.*$", "");
 			JsonObject json = JsonParser.parseString(text).getAsJsonObject();
-			directionalStrength = number(json, "directional_light_strength", directionalStrength);
 			rainSky = color(json, "rain_sky_color", rainSky);
 			rainCloud = color(json, "base_rain_cloud_color", rainCloud);
 			rainCloudContribution = number(json, "rain_cloud_color_contribution", rainCloudContribution);
@@ -111,20 +111,13 @@ public final class Weather {
 		return out;
 	}
 
-	/** How much direct sun and moon light reaches the ground: 1 when clear, directional_light_strength in rain. */
-	static float directLight() {
-		load();
-		float rain = rain();
-		return 1 + (directionalStrength - 1) * rain;
-	}
-
 	private static float blend(float clear, float rainy, float stormy, float rain, float thunder) {
 		float value = clear + (rainy - clear) * rain;
 		return value + (stormy - value) * thunder;
 	}
 
 	public static String status() {
-		return String.format(java.util.Locale.ROOT, "rain %.2f, thunder %.2f, direct light x%.2f", rain(), thunder(),
-				directLight());
+		return String.format(java.util.Locale.ROOT, "rain %.2f, thunder %.2f, sky and sun grey %.3f", rain(), thunder(),
+				sky(new dev.bedrockvisuals.bedrock.Rgba(1, 1, 1, 1)).r());
 	}
 }

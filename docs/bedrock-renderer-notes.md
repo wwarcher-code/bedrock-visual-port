@@ -601,3 +601,33 @@ key of 1.46.
 
 `NdLFloor`, the SSR ray march itself, volumetric fog and local
 exposure; the built-in caustics texture; and every *runtime* value, from the game executable.
+
+## Runtime values from pixdump exports (Bedrock 1.26.60, five captures)
+
+Exported with `tools/pixdump` and named against the material shaders (`decode.py`). Captures: 1 river,
+sun about 41° up; 2 under water; 3 midnight; 4 rain at noon; 5 thunder at noon.
+
+- **Shadows** (`CascadesParameters`, per cascade: on, depth bias, slope bias, PCF width): (1, 0.000275, 1e-5,
+  16), (1, 0.0015, 2e-5, 8), (1, 0.00275, 4e-5, 4), (1, 0.003, 6e-5, 4); `NdLFloor` 0.04;
+  `QuantizationParameters` (1, 1, 0.0625, 1).
+- **Water surface** (`WaterPrepass/DoWaterSurfaceBuffer`): `WaterSurfaceParameters` (1, 28, 1, 0),
+  `WaterSurfaceOctaveParameters` (0.38, 0.2, 1.2, 1.03), `WaterSurfaceWaveParameters` (2, 1.5, 0, 0).
+- **Water extinction** (`WaterExtinctionCoefficients`) (0.309041, 0.0610688, 0.0411471, 1);
+  `WaterAlbedoExtinction` (0.022877, 0.254416, 0.927091, 0.112349); caustics (1, 0.5, 1, 1).
+- **Bloom** `BloomParams` (0.02, 0): no threshold.
+- **Sun disc** `SunMoonEmissiveMultiplier` 25, `SunMoonColor` the sun's colour and illuminance.
+- **Clouds** `CloudColor` (1, 1, 1, 0.9), `CloudLightingUniforms` (16, 0.5, 5, 0.0625).
+- **Air in capture 1's biome**: `AirAlbedoExtinction.w` 0.00155539, `HeightFogScaleBias` (-1, 335.41),
+  `HenyeyGreensteinG` (0.666692, 0.6).
+- **Under water** (capture 2): `FogAndDistanceControl` (0, 9.21555, 384, 33), `FogColor` (0.223, 0.673, 0.939),
+  `UndergroundFogColor` (0, 0.016, 0.016), air `AirAlbedoExtinction.w` 0.0266668 with `HeightFogScaleBias`
+  (-0.000111, 1.10426) and g 0.7.
+- **Rain** (capture 4): `SunColor` (0.404, 0.404, 0.404, 100) and `MoonColor` the same grey; `SkyZenithColor`
+  and `SkyHorizonColor` 0.136 (the grey, linear); `CloudColor` 0.7616; `FogAndDistanceControl` (0.2307,
+  2.1295, 384); `FogColor` 0.40; air extinction 0.004 with `HeightFogScaleBias` (-1, 558.38), g 0.75;
+  `AtmosphericScattering.x` 10; `FogSkyBlend` (0, 0.8, 0.5, 0.25).
+- **Thunder** (capture 5): sun and moon 0.251, sky 0.0478, `CloudColor` 0.1498, fog as in rain.
+
+So weather greys the sun and moon like the sky (`rain_sky_color`, then `base_thunder_sky_color` by its 0.75
+contribution) at full illuminance; it doesn't switch direct light off. The renderer does the same.
+
