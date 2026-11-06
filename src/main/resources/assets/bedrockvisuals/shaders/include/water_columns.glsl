@@ -10,40 +10,57 @@
 // The map covers 128 columns each way; past this a texel can hold a nearer column.
 const float WATER_COLUMN_RANGE = 120.0;
 
+// One column of the map (WaterColumns.java), decoded: the surface's height above the level's floor (0 when
+// the column has no water), the lowest water block's, the underside of the first submerged ledge with water
+// under it (0 for none), and the sky light (0 to 1) reaching the water above and below that ledge. Heights are
+// in the map's frame (WaterColumnOrigin.y is the camera's).
+struct WaterColumn {
+    float surface;
+    float bottom;
+    float roof;
+    float sky;
+    float skyUnder;
+};
+
+bool waterColumnAt(vec3 p, out WaterColumn c) {
+    c = WaterColumn(0.0, 0.0, 0.0, 0.0, 0.0);
+    if (WaterColumnOrigin.w < 0.5 || max(abs(p.x), abs(p.z)) > WATER_COLUMN_RANGE) {
+        return false;
+    }
+    ivec2 texel = ivec2(mod(floor(p.xz + WaterColumnOrigin.xz), 256.0));
+    vec4 column = floor(texelFetch(WATER_COLUMNS, texel, 0) * 65535.0 + 0.5);
+    c.surface = column.r / 16.0;
+    c.bottom = mod(column.g, 4096.0);
+    c.sky = floor(column.g / 4096.0) / 15.0;
+    c.roof = mod(column.b, 4096.0);
+    c.skyUnder = floor(column.b / 4096.0) / 15.0;
+    return c.surface > 0.0;
+}
+
 // How far below the water's surface the camera-relative point p is (blocks), or -1 when it isn't in the top
 // water body of its column (WaterColumns.java). It stands in for Bedrock's water front and back depths with
 // the camera above water.
 float depthBelowWaterSurface(vec3 p) {
-    // The map covers 128 columns each way; past that a texel holds a nearer column.
-    if (WaterColumnOrigin.w < 0.5 || max(abs(p.x), abs(p.z)) > WATER_COLUMN_RANGE) {
+    WaterColumn c;
+    if (!waterColumnAt(p, c)) {
         return -1.0;
     }
-    ivec2 texel = ivec2(mod(floor(p.xz + WaterColumnOrigin.xz), 256.0));
-    vec4 column = texelFetch(WATER_COLUMNS, texel, 0) * 255.0;
-    float surface = (column.r + column.g * 256.0) / 16.0;
-    if (surface <= 0.0) {
-        return -1.0;
-    }
-    float bottom = column.b + mod(floor(column.a + 0.5), 16.0) * 256.0;
     float y = p.y + WaterColumnOrigin.y;
     // Positions come from the view (with view bobbing's sway, up to about 0.1 blocks) and the height from the
     // camera without it, so floors lying exactly on the body's bottom get some slack: without it they flickered
     // in and out of the water while walking.
-    return y >= bottom - 0.3 && y < surface ? max(surface - y, 0.0) : -1.0;
+    return y >= c.bottom - 0.3 && y < c.surface ? max(c.surface - y, 0.0) : -1.0;
 }
 
-// The sky light (0 to 1) reaching the top water body of p's column (WaterColumns.java): full over open water,
-// less under a ledge or a tree, by Minecraft's sky light beside it. -1 outside the map or where it has no water.
+// The sky light (0 to 1) reaching the water at p (WaterColumns.java): full over open water, less under a ledge
+// or a tree, by Minecraft's sky light beside it; under a submerged ledge, the sky light of the water beneath
+// it. -1 outside the map or where it has no water.
 float waterColumnSkyLight(vec3 p) {
-    if (WaterColumnOrigin.w < 0.5 || max(abs(p.x), abs(p.z)) > WATER_COLUMN_RANGE) {
+    WaterColumn c;
+    if (!waterColumnAt(p, c)) {
         return -1.0;
     }
-    ivec2 texel = ivec2(mod(floor(p.xz + WaterColumnOrigin.xz), 256.0));
-    vec4 column = texelFetch(WATER_COLUMNS, texel, 0) * 255.0;
-    if (column.r + column.g <= 0.0) {
-        return -1.0;
-    }
-    return floor(floor(column.a + 0.5) / 16.0) / 15.0;
+    return c.roof > 0.0 && p.y + WaterColumnOrigin.y < c.roof ? c.skyUnder : c.sky;
 }
 
 // How much of the sky ambient light reaches water with sky light s (0 to 1). Bedrock lights its volume's

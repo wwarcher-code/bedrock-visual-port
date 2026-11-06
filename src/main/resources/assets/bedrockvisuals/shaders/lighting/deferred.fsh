@@ -657,7 +657,8 @@ void main() {
     if (DebugParams.x > 2.5) {
         // The water view: what the water column map says about this pixel's surface. Blue: the column has
         // mapped water but the point isn't under it (depth beyond the colour shows how far above); cyan to
-        // dark green: under the water, by depth (0 to 8 blocks); grey: no water mapped in the column; dark red:
+        // dark green: under the water, by depth (0 to 8 blocks), darker where the water gets less sky light;
+        // grey: no water mapped in the column; dark red:
         // outside the map's range.
         vec3 tp = waterTestPoint(position);
         vec3 shown = vec3(0.35);
@@ -671,13 +672,14 @@ void main() {
         if (WaterColumnOrigin.w < 0.5 || max(abs(tp.x), abs(tp.z)) > WATER_COLUMN_RANGE) {
             shown = vec3(0.35, 0.0, 0.0);
         } else {
-            ivec2 texel = ivec2(mod(floor(tp.xz + WaterColumnOrigin.xz), 256.0));
-            vec4 column = texelFetch(WaterColumnMap, texel, 0) * 255.0;
-            float surface = (column.r + column.g * 256.0) / 16.0;
+            WaterColumn column;
+            bool mappedWater = waterColumnAt(tp, column);
             float underBy = depthBelowWaterSurface(tp);
             if (underBy >= 0.0) {
                 shown = mix(vec3(0.0, 1.0, 1.0), vec3(0.0, 0.3, 0.0), clamp(underBy / 8.0, 0.0, 1.0));
-            } else if (surface > 0.0) {
+                // Times the sky light the water there gets (dark under ledges and overhangs).
+                shown *= 0.25 + 0.75 * max(waterColumnSkyLight(tp), 0.0);
+            } else if (mappedWater) {
                 shown = vec3(0.1, 0.2, 1.0);
             }
         }

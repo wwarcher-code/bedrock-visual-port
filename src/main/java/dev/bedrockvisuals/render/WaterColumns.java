@@ -65,7 +65,7 @@ public final class WaterColumns {
 		int cameraZ = (int) Math.floor(camera.z);
 		int firstRow = nextRow;
 		nextRow = (nextRow + ROWS_PER_FRAME) % SIZE;
-		ByteBuffer data = MemoryUtil.memAlloc(SIZE * ROWS_PER_FRAME * 4);
+		ByteBuffer data = MemoryUtil.memAlloc(SIZE * ROWS_PER_FRAME * 8);
 		try {
 			BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
 			for (int r = 0; r < ROWS_PER_FRAME; r++) {
@@ -86,14 +86,17 @@ public final class WaterColumns {
 	}
 
 	/**
-	 * One texel: the surface height × 16 above the level's floor (r, g; 0 when there's no water), and the
-	 * lowest water block's y above the floor (b, and a's low four bits), and the sky light reaching the water
-	 * (a's high four bits).
+	 * One texel, 16 bits a channel: r the surface height × 16 above the level's floor (0 when there's no
+	 * water); g the lowest water block's y above the floor (low 12 bits) and the sky light reaching the water
+	 * (high 4); b the height of the underside of the first ledge under the surface with water beneath it (0
+	 * for none; low 12 bits) and the sky light of the water just under it (high 4).
 	 */
 	private static void encode(ByteBuffer data, ClientLevel level, BlockPos.MutableBlockPos pos, int x, int z) {
 		int surface = 0;
 		int bottom = 0;
 		int sky = 0;
+		int roof = 0;
+		int skyBelow = 0;
 		LevelChunk chunk = level.getChunkSource().getChunk(x >> 4, z >> 4, false);
 		if (chunk != null) {
 			// MOTION_BLOCKING counts fluids, so the block under it is the top water block if there is one.
@@ -126,6 +129,11 @@ public final class WaterColumns {
 				for (int below = top - 1; below > lowest && below > minY && solidRun < LEDGE_THICKNESS; below--) {
 					pos.setY(below);
 					if (chunk.getFluidState(pos).is(FluidTags.WATER)) {
+						if (solidRun > 0 && roof == 0) {
+							// The first submerged ledge: the water under it sees the sky only from the side.
+							roof = below + 1 - minY; // the ledge's underside
+							skyBelow = level.getBrightness(LightLayer.SKY, pos);
+						}
 						y = below;
 						solidRun = 0;
 					} else if (chunk.getBlockState(pos).isAir()) {
@@ -143,8 +151,8 @@ public final class WaterColumns {
 				any = true;
 			}
 		}
-		data.put((byte) surface).put((byte) (surface >> 8)).put((byte) bottom)
-				.put((byte) (((bottom >> 8) & 15) | (sky << 4)));
+		data.putShort((short) surface).putShort((short) ((bottom & 0xFFF) | (sky << 12)))
+				.putShort((short) ((roof & 0xFFF) | (skyBelow << 12))).putShort((short) 0);
 	}
 
 	private static void create() {
@@ -153,8 +161,8 @@ public final class WaterColumns {
 		}
 		GpuDevice device = RenderSystem.getDevice();
 		texture = device.createTexture(() -> "Bedrock Visuals water columns",
-				GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA8_UNORM, SIZE, SIZE, 1, 1);
-		ByteBuffer empty = MemoryUtil.memCalloc(SIZE * SIZE * 4);
+				GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA16_UNORM, SIZE, SIZE, 1, 1);
+		ByteBuffer empty = MemoryUtil.memCalloc(SIZE * SIZE * 8);
 		try {
 			device.createCommandEncoder().writeToTexture(texture, empty, 0, 0, 0, 0, SIZE, SIZE);
 		} finally {
