@@ -205,7 +205,14 @@ vec3 volumetricFog(vec3 dir, float distance, out vec3 transmittance) {
         float visibility = volumeShadow(p, l) * cloudShadow(p, l);
         vec3 source = scattering * (ambient + light * phaseHG(g, cosine) * visibility);
         vec3 stepTransmittance = exp(-extinction * stepLength);
-        inScattered += transmittance * source * (1.0 - stepTransmittance) / max(extinction, vec3(1e-6));
+        // ∫ e^(-σt) dt over the step: (1 - e^(-σ step)) / σ, which tends to the step length as σ goes to 0
+        // (the water from above, whose extinction waterTransmittanceTo applies per point instead; clamping σ
+        // there made the water's in-scattered light vanish).
+        vec3 stepIntegral = vec3(
+                extinction.r > 1e-5 ? (1.0 - stepTransmittance.r) / extinction.r : stepLength,
+                extinction.g > 1e-5 ? (1.0 - stepTransmittance.g) / extinction.g : stepLength,
+                extinction.b > 1e-5 ? (1.0 - stepTransmittance.b) / extinction.b : stepLength);
+        inScattered += transmittance * source * stepIntegral;
         transmittance *= stepTransmittance;
     }
     return inScattered;

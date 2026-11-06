@@ -8,7 +8,7 @@ of minutes.
 
 1. Download the Bedrock material maps if you haven't (see "Bedrock inputs" in the README).
 2. Run `.\test.cmd` from the project folder in PowerShell. With no test world yet, it opens the title screen.
-3. Create a singleplayer world named exactly **BVTest**: Creative, Allow Commands on, World Type Superflat.
+3. Have a singleplayer world with Allow Commands on (Creative is easiest), with an ocean nearby for the water views.
    From then on, `.\test.cmd` loads straight into it.
 
 ## Each round
@@ -19,7 +19,8 @@ of minutes.
    .\test.cmd
    ```
 
-   It pulls Claude's latest push and starts the game in BVTest. If the pull fails, it stops and says so.
+   It pulls Claude's latest push and starts the game in the world you played most recently
+   (`.\test.cmd "New World (1)"` picks one by its folder name). If the pull fails, it stops and says so.
 2. **Once per world** (any world; use your normal one, so the scene and the ocean are in the same place):
    - Stand on flat ground and type `/bv scene build`. It builds the test scene north of you (a row of
      material samples, a pool of water, a pillar with a torch, a roofed overhang and a tree) and remembers
