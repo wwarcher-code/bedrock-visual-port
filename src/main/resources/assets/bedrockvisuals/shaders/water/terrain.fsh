@@ -34,7 +34,8 @@ layout(std140) uniform WaterData {
     vec4 FlowRect;    // the same for water_flow
     vec4 Absorption;  // per block, linear RGB
     vec4 Scattering;  // per block, linear RGB; w: 1 when water shading is on
-    vec4 Animation;   // x: current frame of the surface maps, y: frames in them; z: 1 when u_BrdfLut is Bedrock's
+    vec4 Animation;   // x: current frame of the surface maps, y: frames in them; z: 1 when u_BrdfLut is Bedrock's;
+                      // w: past this horizontal distance, side faces are dropped (0: never)
     vec4 OverlayRect; // the same for water_overlay: water's side faces against see-through blocks (leaves, glass)
 };
 
@@ -553,6 +554,15 @@ void main() {
     vec4 color = u_UseRGSS ? sampleRGSS(u_BlockTex, v_TexCoord, u_TexelSize) : sampleNearest(u_BlockTex, v_TexCoord, u_TexelSize);
 
     if (isWater()) {
+        // The water's side faces at the edge of the loaded chunks: Sodium closes the water off where the next
+        // chunk isn't loaded, and from above those faces showed through the surface as a blue wall hanging
+        // under the chunk border, in front of Distant Horizons' water (which carries on behind them). Dropped
+        // in the outer two chunks while DH's terrain is lit here; a side face that far out is only ever a
+        // waterfall's or one against glass, a few pixels at most.
+        if (Animation.w > 0.0 && UnderwaterParams.x < 0.5 && abs(faceNormal.y) < 0.2
+                && length(v_Position.xz) > Animation.w) {
+            discard;
+        }
         WaterSurface surface = waterSurface(faceNormal, tangent, bitangent);
         #ifdef OIT_ALPHA_ONLY
         executeAlphaOnlyPhase(gl_FragCoord.z, surface.opacity);

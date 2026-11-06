@@ -107,7 +107,13 @@ public final class WaterPass {
 				ClientLevel level = Minecraft.getInstance().level;
 				long ticks = level == null ? 0 : level.getGameTime();
 				int frames = WaterSurfaceMaps.frames();
-				builder.putVec4((float) ((ticks / 2) % frames), frames, BrdfLut.view() != null ? 1 : 0, 0);
+				// w: from how far out (blocks) the water's side faces at the edge of the loaded chunks are dropped,
+				// while Distant Horizons' terrain is lit here (0: never).
+				float edge = DeferredRenderer.ownsDistantComposite()
+						? Math.max(net.minecraft.client.Minecraft.getInstance().options.getEffectiveRenderDistance() - 2, 1)
+								* 16f
+						: 0f;
+				builder.putVec4((float) ((ticks / 2) % frames), frames, BrdfLut.view() != null ? 1 : 0, edge);
 				// Water's side faces against see-through blocks (leaves, glass, seagrass) use water_overlay;
 				// without it they were drawn as plain tinted texture, bright blue.
 				putRect(builder, blockAtlas.getSprite(Identifier.withDefaultNamespace("block/water_overlay")));
