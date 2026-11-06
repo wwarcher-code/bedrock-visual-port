@@ -47,4 +47,21 @@ vec3 waterTransmittanceTo(vec3 p, vec3 dir) {
     return exp(-UnderwaterMedium.rgb * path);
 }
 
+// The light the water scatters towards the camera over `path` blocks of it below the surface, along the view
+// direction dir: what the lighting pass's march adds within the map (sky ambient over 4π and the sun or moon
+// through the water's phase function, dimmed by the water in front of each point along the view), in closed
+// form for a uniform layer, for water the map doesn't cover (farther out, and Distant Horizons' water). No
+// shadows. This renderer's units, before exposure.
+vec3 waterInScatter(vec3 dir, float path) {
+    bool moon = ShadowParams.w > 0.5;
+    vec3 l = normalize(moon ? MoonDirection.xyz : SunDirection.xyz);
+    vec3 light = moon ? MoonColor.rgb : SunColor.rgb;
+    float g = UnderwaterScattering.w;
+    float cosine = dot(l, -dir);
+    float phase = (1.0 - g * g) * 0.07957747 / pow(max(1.0 + g * (2.0 * cosine + g), 1e-4), 1.5);
+    vec3 ambient = SkyColor.rgb * VolumeCamera.x * 0.07957747;
+    vec3 sigma = max(UnderwaterMedium.rgb, vec3(1e-5));
+    return UnderwaterScattering.rgb * (ambient + light * phase) * (1.0 - exp(-sigma * path)) / sigma;
+}
+
 #endif

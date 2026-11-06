@@ -133,6 +133,8 @@ struct WaterSurface {
     vec3 v;
     float fresnel;
     vec3 transmittance;  // along the path from the surface to the bottom
+    float path;          // blocks of water from the surface to the bottom along the view
+    bool scatters;       // the water's in-scattered light is this pass's to add (the lighting pass's map missed it)
     float opacity;       // what the OIT stages blend with; the same in every stage
 };
 
@@ -179,6 +181,8 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
         path = min(length(v_Position) * max(ratio - 1.0, 0.0), BOTTOMLESS);
     }
     s.transmittance = exp(-(Absorption.rgb + Scattering.rgb) * path);
+    s.path = path;
+    s.scatters = UnderwaterParams.x < 0.5;
     // Where the water column map puts what's beneath under this water, the lighting pass already dimmed it by
     // the water above it (and the water's in-scattered light likewise), so nothing more here. The same test
     // on the same point as the lighting pass (water_columns.glsl), so exactly one of them applies it.
@@ -186,6 +190,7 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
         vec3 beneath = v_Position * (viewDistance(opaque) / max(viewDistance(gl_FragCoord.z), 1e-4));
         if (depthBelowWaterSurface(waterTestPoint(beneath)) >= 0.0) {
             s.transmittance = vec3(1.0);
+            s.scatters = false;
         }
     }
     if (UnderwaterParams.x > 0.5) {
@@ -415,6 +420,10 @@ vec3 waterColor(WaterSurface s, float albedo) {
     vec3 behind = texelFetch(u_SceneColor, ivec2(gl_FragCoord.xy), 0).rgb;
     // Bedrock's water only absorbs (WaterExtinction); light scattered in the water comes from volumetric fog.
     vec3 transmitted = behind * s.transmittance;
+    if (s.scatters) {
+        // Beyond the water column map, the water's own scattered light (the lighting pass adds it within).
+        transmitted += toDisplay(locallyExposed(waterInScatter(normalize(v_Position), s.path)));
+    }
     vec3 surfaceLight = specularScale * reflection + toDisplay(locallyExposed(glint));
     // DeferredWater fogs the surface's own light like terrain: towards the sky radiance (blended to the
     // underground colour where sky light is low) times its alpha F, by the distance fog. What shows through
