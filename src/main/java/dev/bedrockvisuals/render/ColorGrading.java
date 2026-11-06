@@ -38,6 +38,45 @@ public final class ColorGrading {
 		return pack.get().colorGrading(pack.get().biome(biome).colorGrading());
 	}
 
+	/** The grading of one biome, or null without a pack. */
+	static ColorGradingSettings forBiome(String biome) {
+		return BedrockInputs.pack().map(pack -> pack.colorGrading(pack.biome(biome).colorGrading())).orElse(null);
+	}
+
+	/**
+	 * The GradingData block for the biomes in effect (BiomeMix), mixed by their shares term by term; the tone
+	 * map's operator (an index, not a quantity) is the largest share's.
+	 */
+	static java.nio.ByteBuffer mixed(org.lwjgl.system.MemoryStack stack) {
+		java.util.List<BiomeMix.Share> shares = BiomeMix.current();
+		Std140Builder first = Std140Builder.onStack(stack, DATA_SIZE);
+		write(first, forBiome(shares.get(0).biome()));
+		java.nio.ByteBuffer result = first.get();
+		java.nio.ByteBuffer floats = result.duplicate().order(java.nio.ByteOrder.nativeOrder());
+		int start = floats.position();
+		int count = DATA_SIZE / 4;
+		int operatorIndex = count - 4;
+		float[] sum = new float[count];
+		for (int i = 0; i < count; i++) {
+			sum[i] = floats.getFloat(start + i * 4) * shares.get(0).weight();
+		}
+		for (int k = 1; k < shares.size(); k++) {
+			Std140Builder other = Std140Builder.onStack(stack, DATA_SIZE);
+			write(other, forBiome(shares.get(k).biome()));
+			java.nio.ByteBuffer data = other.get().duplicate().order(java.nio.ByteOrder.nativeOrder());
+			int at = data.position();
+			for (int i = 0; i < count; i++) {
+				sum[i] += data.getFloat(at + i * 4) * shares.get(k).weight();
+			}
+		}
+		for (int i = 0; i < count; i++) {
+			if (i != operatorIndex) {
+				floats.putFloat(start + i * 4, sum[i]);
+			}
+		}
+		return result;
+	}
+
 	/** Writes the GradingData block; null settings write Bedrock's documented neutral defaults. */
 	public static void write(Std140Builder builder, ColorGradingSettings settings) {
 		ColorGradingSettings.Grade identity = new ColorGradingSettings.Grade(true, 0, Vec3.of(1), Vec3.of(1),

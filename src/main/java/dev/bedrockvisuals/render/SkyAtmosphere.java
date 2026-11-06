@@ -166,6 +166,18 @@ public record SkyAtmosphere(Vector3f zenith, Vector3f horizon, Vector4f blendSto
 	}
 
 	/** Writes AtmosphereData; {@code null} writes a disabled block (the shader leaves Java's sky). */
+	/** a mixed towards b by t, every term (BiomeMix); either alone where the other has none. */
+	static SkyAtmosphere mix(SkyAtmosphere a, SkyAtmosphere b, float t) {
+		if (a == null || b == null) {
+			return a == null ? b : a;
+		}
+		return new SkyAtmosphere(new Vector3f(a.zenith).lerp(b.zenith, t), new Vector3f(a.horizon).lerp(b.horizon, t),
+				new Vector4f(a.blendStops).lerp(b.blendStops, t), new Vector4f(a.scattering).lerp(b.scattering, t),
+				new Vector4f(a.sun).lerp(b.sun, t), new Vector4f(a.moon).lerp(b.moon, t),
+				new Vector4f(a.fog).lerp(b.fog, t), new Vector4f(a.volumeAir).lerp(b.volumeAir, t),
+				new Vector4f(a.volumeHeight).lerp(b.volumeHeight, t));
+	}
+
 	/** Float index of the height fog's scale in the block write() fills; its bias follows. */
 	static final int VOLUME_HEIGHT_SCALE = 8 * 4;
 

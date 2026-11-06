@@ -65,6 +65,8 @@ public final class LightingPass {
 			.withUniform("DistantFinalColor", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("DistantData", UniformType.UNIFORM_BUFFER)
 			.withUniform("DistantHeightMap", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("FroxelScatter", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("FroxelTransmittance", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("PreviousScene", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
@@ -97,15 +99,9 @@ public final class LightingPass {
 	private static GpuTextureView distantDepth;
 	private static Matrix4f previousViewProjection;
 	private static net.minecraft.world.phys.Vec3 previousCamera;
-	private static final int DISTANT_SIZE = 64 + 48;
-	/**
-	 * Biome settings ease across biome borders (SettingsBlend), the air fog's too (its glow round the sun); its
-	 * height term is made relative to the camera after blending.
-	 */
-	private static final SettingsBlend GRADING_BLEND = new SettingsBlend(Integer.MAX_VALUE);
-	private static final SettingsBlend ATMOSPHERE_BLEND = new SettingsBlend(Integer.MAX_VALUE);
-	private static boolean lastSubmerged;
-	private static boolean lastSkyOn;
+	private static final int DISTANT_SIZE = 64 + 64;
+	/** Set once the froxel volume has been attempted; before that its flag is set optimistically. */
+	private static boolean froxelTried;
 
 	private LightingPass() {
 	}
@@ -177,14 +173,9 @@ public final class LightingPass {
 			previousViewProjection.set(viewProjection);
 			previousCamera = cameraNow;
 			encoder.writeToBuffer(data.slice(), builder.get());
-			Std140Builder gradingBuilder = Std140Builder.onStack(stack, ColorGrading.DATA_SIZE);
-			ColorGrading.write(gradingBuilder, ColorGrading.current());
-			boolean submerged = Underwater.submerged();
-			boolean skyOn = light.atmosphere() != null;
-			boolean snap = submerged != lastSubmerged || skyOn != lastSkyOn;
-			lastSubmerged = submerged;
-			lastSkyOn = skyOn;
-			encoder.writeToBuffer(grading.slice(), GRADING_BLEND.blend(gradingBuilder.get(), snap));
+
+			// The grading of the biomes in effect, mixed by their shares (BiomeMix, updated by LightingState).
+			encoder.writeToBuffer(grading.slice(), ColorGrading.mixed(stack));
 			Std140Builder distantBuilder = Std140Builder.onStack(stack, DISTANT_SIZE);
 			if (frame != null) {
 				distantBuilder.putMat4f(new Matrix4f(frame.projection()).invert())
@@ -201,13 +192,18 @@ public final class LightingPass {
 			float seaSurface = level == null ? 0f : (float) (level.getSeaLevel() - 1 + 8.0 / 9.0 - cameraY);
 			distantBuilder.putVec4(lightmap.x, lightmap.y, lightmap.z, seaSurface);
 			DistantHeights.write(distantBuilder);
+			// x: 1 when this frame's froxel volume is there (FroxelVolume, drawn below before the pass opens).
+			distantBuilder.putVec4(FroxelVolume.ready() || !froxelTried ? 1 : 0, 0, 0, 0);
 			encoder.writeToBuffer(distant.slice(), distantBuilder.get());
 			Std140Builder atmosphereBuilder = Std140Builder.onStack(stack, SkyAtmosphere.DATA_SIZE);
 			SkyAtmosphere.write(atmosphereBuilder, light.atmosphere());
 			encoder.writeToBuffer(atmosphere.slice(),
-					SkyAtmosphere.cameraRelative(ATMOSPHERE_BLEND.blend(atmosphereBuilder.get(), snap)));
+					SkyAtmosphere.cameraRelative(atmosphereBuilder.get()));
 		}
 
+		// Bedrock's coarse fog grid for this frame, before the lighting pass reads it.
+		FroxelVolume.render(encoder, data, atmosphere, gbuffer.depthView());
+		froxelTried = true;
 		GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
 		// Resolved before the pass opens: a placeholder may need creating and uploading, which can't happen
 		// while a render pass is open.
@@ -258,6 +254,11 @@ public final class LightingPass {
 			pass.setUniform("DistantWaterDepth", frame != null ? frame.depth() : gbuffer.depthView(), nearest);
 			pass.setUniform("DistantFinalColor", frame != null ? frame.color() : gbuffer.depthView(), nearest);
 			pass.setUniform("DistantData", distant);
+			GpuSampler linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
+			pass.setUniform("FroxelScatter", FroxelVolume.scatterView() != null ? FroxelVolume.scatterView()
+					: gbuffer.depthView(), linear);
+			pass.setUniform("FroxelTransmittance", FroxelVolume.transmittanceView() != null
+					? FroxelVolume.transmittanceView() : gbuffer.depthView(), linear);
 			// The far terrain's heights, for its shadows (DistantData's last vec4 says whether there are any).
 			pass.setUniform("DistantHeightMap", DistantHeights.view() != null ? DistantHeights.view()
 					: gbuffer.depthView(), nearest);

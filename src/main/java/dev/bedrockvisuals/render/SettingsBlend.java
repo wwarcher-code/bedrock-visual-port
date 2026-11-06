@@ -4,7 +4,10 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 /**
- * Eases a block of per-biome settings (all floats, as written for a uniform buffer) towards each frame's
+ * (The biome settings now change through BiomeMix, which mixes each biome's settings at the current time;
+ * this class keeps the frame-to-frame jump detection, noteFrame and teleported, that BiomeMix uses.)
+ *
+ * <p>Eases a block of per-biome settings (all floats, as written for a uniform buffer) towards each frame's
  * values instead of switching at once. Bedrock blends biome settings rather than snapping when the player
  * crosses a biome border; without this the colour grading (warmish in savanna, default over the ocean, 4800 K
  * against 6500 K) and the sky changed abruptly at the border. TUNE: Bedrock's own blend rate for these wasn't
@@ -20,6 +23,12 @@ final class SettingsBlend {
 	private static final double TELEPORT_BLOCKS = 24;
 
 	private static long snapUntilNanos;
+	private static boolean teleported;
+
+	/** Whether the camera was teleported since the last frame (BiomeMix starts over then). */
+	static boolean teleported() {
+		return teleported;
+	}
 	private static long lastDayTime = Long.MIN_VALUE;
 	private static double lastX;
 	private static double lastY;
@@ -30,9 +39,11 @@ final class SettingsBlend {
 	 * takes its new values at once for this frame.
 	 */
 	static void noteFrame(long dayTime, double x, double y, double z) {
-		boolean jumped = lastDayTime != Long.MIN_VALUE && (Math.abs(dayTime - lastDayTime) > TIME_JUMP_TICKS
-				|| (x - lastX) * (x - lastX) + (y - lastY) * (y - lastY) + (z - lastZ) * (z - lastZ)
-						> TELEPORT_BLOCKS * TELEPORT_BLOCKS);
+		boolean moved = lastDayTime != Long.MIN_VALUE
+				&& (x - lastX) * (x - lastX) + (y - lastY) * (y - lastY) + (z - lastZ) * (z - lastZ)
+						> TELEPORT_BLOCKS * TELEPORT_BLOCKS;
+		teleported = moved;
+		boolean jumped = moved || (lastDayTime != Long.MIN_VALUE && Math.abs(dayTime - lastDayTime) > TIME_JUMP_TICKS);
 		lastDayTime = dayTime;
 		lastX = x;
 		lastY = y;

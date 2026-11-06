@@ -75,11 +75,25 @@ public record LightingState(
 		if (pack.isEmpty() || level == null || Minecraft.getInstance().player == null) {
 			return fallback(time);
 		}
+		// The biomes in effect and their shares (BiomeMix: a new biome takes 30 seconds to take over), each
+		// worked out at the current time and mixed, so the change is slow without trailing the time of day.
+		var camera = Minecraft.getInstance().gameRenderer.mainCamera().position();
+		SettingsBlend.noteFrame(dayTime, camera.x, camera.y, camera.z);
+		LightingState mixed = null;
+		float total = 0;
+		for (BiomeMix.Share share : BiomeMix.update(SettingsBlend.teleported())) {
+			LightingState state = forBiome(pack.get(), level, share.biome(), time);
+			total += share.weight();
+			mixed = mixed == null ? state : mix(mixed, state, share.weight() / total);
+		}
+		return mixed;
+	}
 
-		ClientBiome biome = pack.get().biome(level.getBiome(Minecraft.getInstance().player.blockPosition())
-				.unwrapKey().map(key -> key.identifier().toString()).orElse("minecraft:plains"));
-		LightingSettings lighting = pack.get().lighting(biome.lighting());
-		AtmosphereSettings atmosphere = pack.get().atmosphere(biome.atmosphere());
+	/** The lighting for one biome at Bedrock time {@code time}. */
+	private static LightingState forBiome(BedrockPack pack, ClientLevel level, String biomeId, float time) {
+		ClientBiome biome = pack.biome(biomeId);
+		LightingSettings lighting = pack.lighting(biome.lighting());
+		AtmosphereSettings atmosphere = pack.atmosphere(biome.atmosphere());
 		Rgba horizon = Weather.sky(atmosphere.skyHorizonColor().sample(time));
 
 		Vector3f sunDirection = orbit(time, lighting.orbitalOffsetDegrees().sample(time));
@@ -90,7 +104,7 @@ public record LightingState(
 		// thunder: SunColor (0.404, 0.404, 0.404, 100) and (0.251, 0.251, 0.251, 100), Weather.sky).
 		float skyIntensity = lighting.skyIntensity().sample(time);
 		float skyAmbient = SKY_INDIRECT * (sunIlluminance + moonIlluminance + ambientIlluminance) * skyIntensity;
-		FogSettings fog = pack.get().fog(biome.fog());
+		FogSettings fog = pack.fog(biome.fog());
 		boolean overworld = level.dimensionType().skybox() == DimensionType.Skybox.OVERWORLD;
 		SkyAtmosphere sky = overworld
 				? SkyAtmosphere.sample(atmosphere, lighting, time, sunDirection, new Vector3f(sunDirection).negate(),
@@ -109,50 +123,35 @@ public record LightingState(
 						Underwater.secondsSubmerged(), blocks));
 			}
 		}
-		// Bedrock sends the sun and moon colours as sRGB/255, not linearised (the captures' SunColor is
-		// (1, 0.890196, 0.843137) for the keyframe 255, 227, 215).
-		Vector3f sun = srgb(Weather.sky(lighting.sun().color().sample(time))).mul(sunIlluminance * UNIT);
-		Vector3f moon = srgb(Weather.sky(lighting.moon().color().sample(time))).mul(moonIlluminance * UNIT);
-		Vector3f skyLight = skyAmbientColor.mul(skyAmbient * UNIT);
-		Vector3f skyHorizon = linear(horizon).mul(skyIntensity * 0.25f);
-		Vector3f ambient = linear(lighting.ambientColor()).mul(ambientIlluminance * UNIT);
-		// The biome's light eases across biome borders like its grading and sky (SettingsBlend): the sun's and
-		// moon's colour and strength (and so their bloom) flashed to the new biome's at once.
-		var camera = Minecraft.getInstance().gameRenderer.mainCamera().position();
-		SettingsBlend.noteFrame(dayTime, camera.x, camera.y, camera.z);
-		float[] eased = ease(new float[] {sun.x, sun.y, sun.z, moon.x, moon.y, moon.z, skyLight.x, skyLight.y,
-				skyLight.z, skyHorizon.x, skyHorizon.y, skyHorizon.z, ambient.x, ambient.y, ambient.z, sunIlluminance},
-				Underwater.submerged());
 		return new LightingState(
 				sunDirection,
-				new Vector3f(eased[0], eased[1], eased[2]),
+				// Bedrock sends the sun and moon colours as sRGB/255, not linearised (the captures' SunColor is
+				// (1, 0.890196, 0.843137) for the keyframe 255, 227, 215).
+				srgb(Weather.sky(lighting.sun().color().sample(time))).mul(sunIlluminance * UNIT),
 				new Vector3f(sunDirection).negate(),
-				new Vector3f(eased[3], eased[4], eased[5]),
-				new Vector3f(eased[6], eased[7], eased[8]),
-				new Vector3f(eased[9], eased[10], eased[11]),
-				new Vector3f(eased[12], eased[13], eased[14]),
+				srgb(Weather.sky(lighting.moon().color().sample(time))).mul(moonIlluminance * UNIT),
+				skyAmbientColor.mul(skyAmbient * UNIT),
+				linear(horizon).mul(skyIntensity * 0.25f),
+				linear(lighting.ambientColor()).mul(ambientIlluminance * UNIT),
 				new Vector3f(BLOCK_LIGHT).mul(BLOCK_LIGHT_INTENSITY * UNIT),
 				sky,
-				eased[15]);
+				sunIlluminance);
 	}
 
-	private static final SettingsBlend LIGHT_BLEND = new SettingsBlend(Integer.MAX_VALUE);
-	private static boolean lastSubmerged;
-
-	/** Eases the biome's light values (SettingsBlend), snapping when the camera goes into or out of water. */
-	private static float[] ease(float[] values, boolean submerged) {
-		boolean snap = submerged != lastSubmerged;
-		lastSubmerged = submerged;
-		java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(values.length * 4).order(java.nio.ByteOrder.nativeOrder());
-		for (float v : values) {
-			buffer.putFloat(v);
-		}
-		buffer.flip();
-		LIGHT_BLEND.blend(buffer, snap);
-		for (int i = 0; i < values.length; i++) {
-			values[i] = buffer.getFloat(i * 4);
-		}
-		return values;
+	/** a mixed towards b by t (0: a, 1: b). */
+	private static LightingState mix(LightingState a, LightingState b, float t) {
+		Vector3f sunDirection = new Vector3f(a.sunDirection).lerp(b.sunDirection, t).normalize();
+		return new LightingState(
+				sunDirection,
+				new Vector3f(a.sun).lerp(b.sun, t),
+				new Vector3f(sunDirection).negate(),
+				new Vector3f(a.moon).lerp(b.moon, t),
+				new Vector3f(a.sky).lerp(b.sky, t),
+				new Vector3f(a.skyHorizon).lerp(b.skyHorizon, t),
+				new Vector3f(a.ambient).lerp(b.ambient, t),
+				new Vector3f(a.blockLight).lerp(b.blockLight, t),
+				SkyAtmosphere.mix(a.atmosphere, b.atmosphere, t),
+				a.sunIlluminance + (b.sunIlluminance - a.sunIlluminance) * t);
 	}
 
 	/**

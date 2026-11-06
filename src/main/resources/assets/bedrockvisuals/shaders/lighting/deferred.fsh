@@ -36,7 +36,11 @@ layout(std140) uniform DistantData {
                                    // w: the sea's surface height relative to the camera
     vec4 DistantHeightOrigin;      // xz: the camera's world x, z modulo the height map's width in blocks;
                                    // y: its height above the level's floor; w: 1 when there are heights
+    vec4 FroxelParams;             // x: 1 when this frame's froxel volume is there (FroxelVolume.java)
 };
+uniform sampler2D FroxelScatter;      // Bedrock's coarse fog grid: in-scattered light to each slice
+uniform sampler2D FroxelTransmittance; // and the transmittance (froxels.glsl)
+#include <bedrockvisuals:froxels.glsl>
 uniform sampler2D DistantHeightMap; // the far terrain's heights (DistantHeights.java)
 
 #define CLOUD_CELLS CloudShadowMap
@@ -270,6 +274,16 @@ vec3 volumetricFog(vec3 dir, float distance, out vec3 transmittance) {
         transmittance *= stepTransmittance;
     }
     return inScattered;
+}
+
+// The volumetric fog between the camera and the camera-relative point position (along dir, distance away):
+// read from Bedrock's coarse grid at this pixel and the point's view depth (FroxelVolume), else marched here.
+vec3 fogTo(vec3 position, vec3 dir, float distance, out vec3 transmittance) {
+    if (FroxelParams.x > 0.5) {
+        float viewZ = dot(position, froxelForward(InverseViewProjection));
+        return froxelFog(FroxelScatter, FroxelTransmittance, texCoord, viewZ, transmittance);
+    }
+    return volumetricFog(dir, distance, transmittance);
 }
 
 // Bedrock's screen-space reflections (ScreenSpaceReflections; reflection_configuration.pc.json: on below
@@ -673,7 +687,7 @@ void main() {
             sky = mix(sky, clouds.rgb, clouds.a);
             // Volumetric fog in front of the sky, out to its far plane (under water, through the water above).
             vec3 fogTransmittance;
-            vec3 fogLight = volumetricFog(ray, VOLUME_FAR, fogTransmittance);
+            vec3 fogLight = fogTo(ray * VOLUME_FAR, ray, VOLUME_FAR, fogTransmittance);
             sky = sky * fogTransmittance + fogLight;
             meterLuminance = vec4(-dot(sky, LUMA), 0.0, 0.0, 1.0);
             hdrColor = vec4(sky, 1.0);
@@ -886,7 +900,7 @@ void main() {
 
     vec3 viewDir = normalize(position);
     vec3 fogTransmittance;
-    vec3 fogLight = volumetricFog(viewDir, length(position), fogTransmittance);
+    vec3 fogLight = fogTo(position, viewDir, length(position), fogTransmittance);
     // Under water, the march's water medium is Bedrock's WaterExtinction along the view, up to the surface.
     // From above water, what lies under the surface (within the water column map) is dimmed by the water
     // above it here; the water pass then leaves it alone.
