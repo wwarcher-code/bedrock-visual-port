@@ -48,6 +48,8 @@ public final class WaterPass {
 			.withUniform("u_ShadowMap3", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("u_CloudShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("WaterColumnMap", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("DistantDepth", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("DistantData", UniformType.UNIFORM_BUFFER)
 			).build();
 	/** std140 size of WaterData in water/terrain.fsh: five vec4s. */
 	private static final int DATA_SIZE = 6 * 16;
@@ -168,6 +170,11 @@ public final class WaterPass {
 		pass.setUniform("u_CloudShadowMap", CloudShadows.view() != null ? CloudShadows.view() : gbuffer.depthView(),
 				RenderSystem.getSamplerCache().getRepeat(FilterMode.NEAREST));
 		pass.setUniform("WaterColumnMap", WaterColumns.view() != null ? WaterColumns.view() : gbuffer.depthView(), nearest);
+		// Distant Horizons' terrain, for reflections that reach past Java's (DistantData's flag says whether there
+		// is any this frame; without it the placeholder is never read).
+		pass.setUniform("DistantDepth", LightingPass.distantDepth() != null ? LightingPass.distantDepth()
+				: gbuffer.depthView(), RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+		pass.setUniform("DistantData", LightingPass.distantData());
 		LocalExposure.bind(pass);
 	}
 

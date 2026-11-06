@@ -45,6 +45,12 @@ uniform sampler2D WaterColumnMap;
 #define WATER_COLUMNS WaterColumnMap
 #include <bedrockvisuals:water_columns.glsl>
 // The outer shadow cascade and the cloud cells, for the volumetric fog in front of the surface.
+uniform sampler2D DistantDepth;     // Distant Horizons' ground this frame (LightingPass.java), when it is lit
+layout(std140) uniform DistantData {
+    mat4 DistantInverseProjection; // Distant Horizons' clip space to its view space
+    vec4 DistantParams;            // x: its terrain is lit here, y: reversed depth, z: [0, 1] clip depth
+    vec4 DistantLightmap;
+};
 uniform sampler2D u_ShadowMap3;
 uniform sampler2D u_CloudShadowMap;
 
@@ -288,6 +294,58 @@ vec4 screenSpaceReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
     return vec4(0.0);
 }
 
+// Distance to Distant Horizons' terrain at a texture position (as the lighting pass reads it), or -1.
+float distantDistanceAt(vec2 uv) {
+    float d = texture(DistantDepth, uv).r;
+    bool cleared = DistantParams.y > 0.5 ? d <= 0.0 : d >= 1.0;
+    if (cleared) {
+        return -1.0;
+    }
+    float z = DistantParams.z > 0.5 ? d : d * 2.0 - 1.0;
+    vec4 view = DistantInverseProjection * vec4(uv * 2.0 - 1.0, z, 1.0);
+    return length(view.xyz / view.w);
+}
+
+// Where the near march found nothing: the mirror ray on out against Java's depth and Distant Horizons' (whose
+// terrain the lighting pass lit into the scene copy), in steps that grow with the distance, so water near the
+// edge of the render distance reflects the far shore rather than the sky behind it.
+const int DISTANT_SSR_STEPS = 40;
+vec4 distantReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
+    if (DistantParams.x < 0.5) {
+        return vec4(0.0);
+    }
+    float stepLength = max(length(origin) * 0.01, 1.0);
+    float travelled = 0.0;
+    for (int i = 0; i < DISTANT_SSR_STEPS; i++) {
+        travelled += stepLength;
+        stepLength *= 1.15;
+        vec3 point = origin + direction * travelled;
+        vec3 screen = toScreen(point, size, flipY);
+        if (screen.z <= 0.0 || !onScreen(screen.xy, size)) {
+            return vec4(0.0);
+        }
+        ivec2 pixel = ivec2(screen.xy);
+        float depth = texelFetch(u_GBufferDepth, pixel, 0).r;
+        float sceneDistance;
+        float rayDistance;
+        if (depth > 0.0) {
+            sceneDistance = viewDistance(depth);
+            rayDistance = screen.z;
+        } else {
+            sceneDistance = distantDistanceAt((vec2(pixel) + 0.5) / size);
+            rayDistance = length(point);
+        }
+        if (sceneDistance < 0.0) {
+            continue;
+        }
+        if (rayDistance > sceneDistance && rayDistance - sceneDistance < max(stepLength * 2.0, 1.0)) {
+            vec2 edge = min(screen.xy, size - screen.xy) / size;
+            return vec4(texelFetch(u_SceneColor, pixel, 0).rgb, smoothstep(0.0, 0.08, min(edge.x, edge.y)));
+        }
+    }
+    return vec4(0.0);
+}
+
 // Bedrock's volumetric fog in front of the surface (DeferredWater applies the scattering volume on top: in-scatter
 // times its alpha plus transmittance times its colour). The lighting pass's march (lighting/deferred.fsh,
 // volumetricFog), in fewer steps: from above water the path to the surface is all air.
@@ -420,6 +478,10 @@ vec3 waterColor(WaterSurface s, float albedo) {
     // Bedrock's SSR is mirror-only: full up to roughness 0.3, gone by 0.4.
     float ssrWeight = 1.0 - smoothstep(0.3, 0.4, s.roughness);
     vec4 traced = ssrWeight > 0.0 ? screenSpaceReflection(v_Position + s.n * 0.02, mirror, size, flipY) : vec4(0.0);
+    if (ssrWeight > 0.0 && traced.a < 0.5) {
+        vec4 far = distantReflection(v_Position + s.n * 0.02, mirror, size, flipY);
+        traced = far.a > traced.a ? far : traced;
+    }
     vec3 reflection = mix(skyReflection, traced.rgb, traced.a * ssrWeight);
 
     // Sun glint.
