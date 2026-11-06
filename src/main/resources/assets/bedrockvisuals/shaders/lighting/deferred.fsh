@@ -59,6 +59,11 @@ vec3 directLight(vec3 n, vec3 v, vec3 l, vec3 radiance, vec3 diffuseColor, vec3 
     vec3 fresnel = f0 + (1.0 - f0) * pow(1.0 - max(dot(h, v), 0.0), 5.0);
     float geometry = smithG1(nDotV, roughness) * smithG1(nDotL, roughness);
     vec3 specular = fresnel * ggx(max(dot(n, h), 0.0), roughness) * geometry / (4.0 * nDotV * nDotL);
+    // A plant's normal turned towards the light can face away from the camera (light through a thin sheet):
+    // diffuse only there, as the specular term's 1/N·V would flare.
+    if (dot(n, v) <= 0.0) {
+        specular = vec3(0.0);
+    }
     // Bedrock's direct lighting: Lambert (albedo / π) for the diffuse part.
     return ((1.0 - fresnel) * diffuseColor / PI + specular) * radiance * nDotL;
 }
@@ -630,7 +635,16 @@ void main() {
     vec3 moonDir = normalize(MoonDirection.xyz);
     bool moonCasts = ShadowParams.w > 0.5;
     float edgeFade;
-    float mapped = shadowVisibility(snapToTexel(position, n), n, moonCasts ? moonDir : sunDir, edgeFade);
+    // Plants (tall grass, flowers, saplings) are crossed, two-sided quads: the only terrain whose faces aren't
+    // axis-aligned. Their normal faces the camera (G-buffer), so seen from the shaded side it pointed away from
+    // the sun: no sunlight, and the shadow test pushed out along it the wrong way (and over-biased, the face
+    // side-on to the light). A thin sheet is lit from whichever side the light reaches, so for the sun and
+    // moon (and their shadow test) the normal is turned towards the light.
+    bool thinSheet = max(abs(n.x), max(abs(n.y), abs(n.z))) < 0.9;
+    vec3 nSun = thinSheet && dot(n, sunDir) < 0.0 ? -n : n;
+    vec3 nMoon = thinSheet && dot(n, moonDir) < 0.0 ? -n : n;
+    vec3 nCaster = moonCasts ? nMoon : nSun;
+    float mapped = shadowVisibility(snapToTexel(position, n), nCaster, moonCasts ? moonDir : sunDir, edgeFade);
     float casterVisibility = mapped < 0.0 ? skyFallback : mix(skyFallback, mapped * skyGuard, edgeFade);
     if (DebugParams.x > 2.5) {
         // The water view: what the water column map says about this pixel's surface. Blue: the column has
@@ -684,8 +698,8 @@ void main() {
     sunVisibility = min(sunVisibility, cloudShadow(snapped, sunDir));
     moonVisibility = min(moonVisibility, cloudShadow(snapped, moonDir));
 
-    vec3 color = directLight(n, v, sunDir, SunColor.rgb * sunVisibility, diffuseColor, f0, roughness);
-    color += directLight(n, v, moonDir, MoonColor.rgb * moonVisibility, diffuseColor, f0, roughness);
+    vec3 color = directLight(nSun, v, sunDir, SunColor.rgb * sunVisibility, diffuseColor, f0, roughness);
+    color += directLight(nMoon, v, moonDir, MoonColor.rgb * moonVisibility, diffuseColor, f0, roughness);
     color *= causticsMultiplier(position, n);
 
     // Bedrock's indirect light (DiscreteIndirectCombinedLightingPass), one colour whatever the normal:
