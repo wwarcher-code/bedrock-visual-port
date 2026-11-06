@@ -21,6 +21,7 @@ uniform sampler2D CloudCoverage;   // the cloud cells' share per area, mipmapped
 uniform sampler2D DistantColor;    // Distant Horizons' colour and depth this frame (DistantTerrain)
 uniform sampler2D DistantDepth;      // with DistantParams.w: DH's depth before its water (the ground)
 uniform sampler2D DistantWaterDepth; // DH's final depth, its water surface included
+uniform sampler2D DistantFinalColor; // DH's final colour, its water included
 uniform sampler2D PreviousScene;   // the previous frame's HDR scene (BloomPass.java), for reflections
 
 #include <bedrockvisuals:common.glsl>
@@ -31,7 +32,8 @@ layout(std140) uniform DistantData {
     mat4 DistantInverseProjection; // Distant Horizons' clip space to its view space
     vec4 DistantParams;            // x: its terrain is lit here, y: reversed depth, z: [0, 1] clip depth,
                                    // w: DistantDepth is the ground under DH's water (DistantHorizonsAdapter)
-    vec4 DistantLightmap;          // rgb: Minecraft's lightmap at full sky light, which DH multiplied in
+    vec4 DistantLightmap;          // rgb: Minecraft's lightmap at full sky light, which DH multiplied in;
+                                   // w: the sea's surface height relative to the camera
 };
 
 #define CLOUD_CELLS CloudShadowMap
@@ -519,6 +521,20 @@ void main() {
     float distantWater = depth <= 0.0 && DistantParams.x > 0.5 && DistantParams.w > 0.5
             ? distantDistanceIn(DistantWaterDepth, texCoord) : -1.0;
     bool distantWaterHere = distantWater >= 0.0 && (distant < 0.0 || distantWater < distant - 0.25);
+    // DH may draw its water without writing depth: then its final colour differs from the ground's at the same
+    // depth. Water there is assumed to lie at sea level (oceans; a lake above it keeps DH's own colour).
+    bool distantTranslucent = false;
+    if (!distantWaterHere && distant >= 0.0 && DistantParams.w > 0.5) {
+        vec3 finalColor = texture(DistantFinalColor, texCoord).rgb;
+        vec3 groundColor = texture(DistantColor, texCoord).rgb;
+        distantTranslucent = any(greaterThan(abs(finalColor - groundColor), vec3(0.02)));
+        float seaDistance = ray.y < -1e-3 ? DistantLightmap.w / ray.y : -1.0;
+        if (distantTranslucent && DistantLightmap.w < 0.0 && seaDistance > 0.0 && seaDistance < distant - 0.25) {
+            distantWater = seaDistance;
+            distantWaterHere = true;
+            distantTranslucent = false;
+        }
+    }
     if (distantWaterHere && distant < 0.0) {
         distant = distantWater + 64.0; // nothing drawn under it: deep water
     }
@@ -563,7 +579,10 @@ void main() {
         // normals or materials from it), with a rough dielectric material and full sky light.
         position = ray * distant;
         // DH multiplied its colour by Minecraft's lightmap (darker at night); divided back out here.
-        vec3 lodColor = texture(DistantColor, texCoord).rgb / max(DistantLightmap.rgb, vec3(0.05));
+        // Translucent terrain DH drew without depth that isn't sea-level water (a lake above it, ice): its own
+        // colour, as before the ground was split from it.
+        vec3 lodColor = (distantTranslucent ? texture(DistantFinalColor, texCoord).rgb : texture(DistantColor, texCoord).rgb)
+                / max(DistantLightmap.rgb, vec3(0.05));
         albedo = toLinear(clamp(lodColor, 0.0, 1.0));
         n = distantNormal(texCoord, position);
         mers = vec4(0.0, 0.0, 1.0, 0.0);
@@ -609,6 +628,13 @@ void main() {
         // outside the map's range.
         vec3 tp = waterTestPoint(position);
         vec3 shown = vec3(0.35);
+        if (distant >= 0.0) {
+            // Distant Horizons' terrain: magenta where its water is shaded here, dark red where it isn't.
+            fragColor = vec4(distantWaterHere ? vec3(0.9, 0.2, 0.9) : vec3(0.35, 0.0, 0.0), 1.0);
+            meterLuminance = vec4(0.18, 0.0, 0.0, 1.0);
+            hdrColor = vec4(0.0);
+            return;
+        }
         if (WaterColumnOrigin.w < 0.5 || max(abs(tp.x), abs(tp.z)) > WATER_COLUMN_RANGE) {
             shown = vec3(0.35, 0.0, 0.0);
         } else {

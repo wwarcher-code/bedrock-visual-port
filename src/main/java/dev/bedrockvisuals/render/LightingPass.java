@@ -62,6 +62,7 @@ public final class LightingPass {
 			.withUniform("DistantColor", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("DistantDepth", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("DistantWaterDepth", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("DistantFinalColor", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("DistantData", UniformType.UNIFORM_BUFFER)
 			.withUniform("PreviousScene", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
@@ -94,6 +95,11 @@ public final class LightingPass {
 	/** This frame's Distant Horizons depth, or null when its terrain isn't lit here. */
 	private static GpuTextureView distantDepth;
 	private static final int DISTANT_SIZE = 64 + 32;
+	/** Biome settings ease across biome borders (SettingsBlend); the atmosphere's last vec4 follows the camera. */
+	private static final SettingsBlend GRADING_BLEND = new SettingsBlend(Integer.MAX_VALUE);
+	private static final SettingsBlend ATMOSPHERE_BLEND = new SettingsBlend(8 * 4);
+	private static boolean lastSubmerged;
+	private static boolean lastSkyOn;
 
 	private LightingPass() {
 	}
@@ -151,7 +157,12 @@ public final class LightingPass {
 			encoder.writeToBuffer(data.slice(), builder.get());
 			Std140Builder gradingBuilder = Std140Builder.onStack(stack, ColorGrading.DATA_SIZE);
 			ColorGrading.write(gradingBuilder, ColorGrading.current());
-			encoder.writeToBuffer(grading.slice(), gradingBuilder.get());
+			boolean submerged = Underwater.submerged();
+			boolean skyOn = light.atmosphere() != null;
+			boolean snap = submerged != lastSubmerged || skyOn != lastSkyOn;
+			lastSubmerged = submerged;
+			lastSkyOn = skyOn;
+			encoder.writeToBuffer(grading.slice(), GRADING_BLEND.blend(gradingBuilder.get(), snap));
 			Std140Builder distantBuilder = Std140Builder.onStack(stack, DISTANT_SIZE);
 			if (frame != null) {
 				distantBuilder.putMat4f(new Matrix4f(frame.projection()).invert())
@@ -161,11 +172,16 @@ public final class LightingPass {
 				distantBuilder.putMat4f(new Matrix4f()).putVec4(0, 0, 0, 0);
 			}
 			Vector3f lightmap = WorldLightmap.fullSky();
-			distantBuilder.putVec4(lightmap.x, lightmap.y, lightmap.z, 0);
+			// w: the sea's surface height relative to the camera (the top of a water block at sea level - 1),
+			// where DH's water is assumed to lie when its depth doesn't show it.
+			net.minecraft.client.multiplayer.ClientLevel level = net.minecraft.client.Minecraft.getInstance().level;
+			double cameraY = net.minecraft.client.Minecraft.getInstance().gameRenderer.mainCamera().position().y;
+			float seaSurface = level == null ? 0f : (float) (level.getSeaLevel() - 1 + 8.0 / 9.0 - cameraY);
+			distantBuilder.putVec4(lightmap.x, lightmap.y, lightmap.z, seaSurface);
 			encoder.writeToBuffer(distant.slice(), distantBuilder.get());
 			Std140Builder atmosphereBuilder = Std140Builder.onStack(stack, SkyAtmosphere.DATA_SIZE);
 			SkyAtmosphere.write(atmosphereBuilder, light.atmosphere());
-			encoder.writeToBuffer(atmosphere.slice(), atmosphereBuilder.get());
+			encoder.writeToBuffer(atmosphere.slice(), ATMOSPHERE_BLEND.blend(atmosphereBuilder.get(), snap));
 		}
 
 		GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
@@ -216,6 +232,7 @@ public final class LightingPass {
 			pass.setUniform("DistantColor", distantColor != null ? distantColor : gbuffer.depthView(), nearest);
 			pass.setUniform("DistantDepth", distantGround != null ? distantGround : gbuffer.depthView(), nearest);
 			pass.setUniform("DistantWaterDepth", frame != null ? frame.depth() : gbuffer.depthView(), nearest);
+			pass.setUniform("DistantFinalColor", frame != null ? frame.color() : gbuffer.depthView(), nearest);
 			pass.setUniform("DistantData", distant);
 			pass.setUniform("CloudCoverage", coverage,
 					RenderSystem.getSamplerCache().getRepeat(FilterMode.LINEAR, true));

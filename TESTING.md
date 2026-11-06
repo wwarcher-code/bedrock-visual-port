@@ -55,7 +55,8 @@ Captures are kept under `run\bedrock-visuals-captures\<date and time>\`.
 - **Water map.** What the water column map says about each surface: cyan to dark green, under mapped
   water (darker is deeper); blue, the column has water but the surface isn't under it; grey, no water in
   the column; dark red, outside the map (about 120 blocks). Sea floors and pool floors should be cyan to
-  green.
+  green. On Distant Horizons' terrain: magenta where its water is shaded as water, dark red where it isn't;
+  distant oceans should be magenta.
 - **Cascades.** The shadow test tinted by Bedrock's four shadow cascades: white within about 21 blocks, then
   yellow to 43, cyan to 64 and magenta to 128. Shadows fade out over the last 8 blocks. Dark grey is
   beyond the shadows.
