@@ -139,10 +139,14 @@ Don't move between the commands: the shots must be taken from where `bv/scene` p
 
 | Key or command | Does |
 | --- | --- |
-| F7 | Cycle debug views: albedo, normal, material, light, shadow test, cascades, local exposure, bloom, off |
+| F7 | Cycle debug views: albedo, normal, material, light, shadow test, cascades, local exposure, bloom, water map, off |
 | F8 | Deferred lighting on and off, for comparison with vanilla |
-| F9 or `/bv capture` | The full test capture above; F9 again cancels it |
-| `/bv scene` | Build the test scene in front of you |
+| F9 or `/bv capture` | The full test capture above (scene and every spot); F9 again cancels it |
+| `/bv capture <name>` | Capture one spot alone (`scene` for the test scene) |
+| `/bv scene` | Go to this world's test scene (builds it where you stand the first time) |
+| `/bv scene build` | Build the test scene where you stand, and remember it |
+| `/bv spot <name>` | Remember this view; `/bv spot <name> remove` forgets it |
+| `/bv spots`, `/bv go <name>` | List this world's spots; go to one |
 | `/bv status` | Copy the diagnostics report to the clipboard without capturing |
 | `/bv` | List these |
 
