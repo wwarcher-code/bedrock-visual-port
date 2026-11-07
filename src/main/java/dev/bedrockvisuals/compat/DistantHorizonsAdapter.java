@@ -179,6 +179,39 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 					plain ? "turn off" : "restore", e);
 		}
 		vanillaFade(!plain);
+		antiAliasing(!plain);
+	}
+
+	/**
+	 * DH's TAA moves its whole picture by a fraction of a pixel each frame (eight offsets in turn, TAAJitter in
+	 * its terrain shader) and averages the frames in its own TAA pass afterwards. This renderer reads DH's
+	 * colour and depth before that pass, so its depth, the normals rebuilt from it and its colour changed from
+	 * frame to frame with the camera still (the flicker test: about half the far terrain's depth changed between
+	 * frames): the far terrain flickered. Off while this renderer lights DH's terrain; like the vanilla fade,
+	 * through DH's internal config entry, its saved setting left alone.
+	 */
+	private static Boolean savedAntiAliasing;
+
+	private static void antiAliasing(boolean on) {
+		try {
+			var entry = com.seibel.distanthorizons.core.config.Config.Client.Advanced.Graphics.enableAntiAliasing;
+			if (entry.getAllowApiOverride()) {
+				entry.setApiValue(on ? null : Boolean.FALSE, "Bedrock Visuals");
+			} else if (!on) {
+				if (savedAntiAliasing == null) {
+					savedAntiAliasing = entry.get();
+				}
+				entry.setWithoutSaving(Boolean.FALSE);
+			} else if (savedAntiAliasing != null) {
+				entry.setWithoutSaving(savedAntiAliasing);
+				savedAntiAliasing = null;
+			}
+			BedrockVisualsClient.LOGGER.info("[distant] Distant Horizons' anti-aliasing {} ({}; now {})",
+					on ? "restored" : "turned off for the session (its jitter made the far terrain flicker)",
+					entry.getAllowApiOverride() ? "as an API value" : "in memory", entry.get());
+		} catch (RuntimeException | LinkageError e) {
+			BedrockVisualsClient.LOGGER.warn("[distant] couldn't {} Distant Horizons' anti-aliasing", on ? "restore" : "turn off", e);
+		}
 	}
 
 	/**
