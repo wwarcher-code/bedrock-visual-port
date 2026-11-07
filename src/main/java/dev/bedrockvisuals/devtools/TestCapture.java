@@ -6,6 +6,7 @@ import com.mojang.blaze3d.platform.NativeImage;
 import dev.bedrockvisuals.BedrockVisualsClient;
 import dev.bedrockvisuals.render.DeferredRenderer;
 import dev.bedrockvisuals.render.AutoExposure;
+import dev.bedrockvisuals.render.WaterPass;
 import dev.bedrockvisuals.render.GBufferDebugView;
 import dev.bedrockvisuals.render.GBufferDebugView.View;
 import java.io.IOException;
@@ -137,7 +138,7 @@ public final class TestCapture {
 		TestSpots.Spot here = TestSpots.here().orElseThrow();
 		returnTo = here;
 		if (flickerOnly) {
-			message("Flicker test of the far terrain: stand still for about 20 seconds.");
+			message("Flicker test of the far terrain and the water's reflections: stand still for about 30 seconds.");
 			STEPS.add(() -> {
 				if (!minecraft.gui.hud.isHidden()) {
 					minecraft.gui.hud.toggle();
@@ -149,7 +150,7 @@ public final class TestCapture {
 			STEPS.add(TestCapture::finishWhenSaved);
 			return;
 		}
-		message("Capturing test views; stand still. It starts with a 20-second flicker test of the far terrain.");
+		message("Capturing test views; stand still. It starts with a 30-second flicker test.");
 		STEPS.add(() -> {
 			if (!minecraft.gui.hud.isHidden()) {
 				minecraft.gui.hud.toggle();
@@ -194,14 +195,16 @@ public final class TestCapture {
 			AutoExposure.settle();
 			wait = TICKS_AFTER_VIEW_CHANGE;
 		});
-		for (View view : FlickerTest.VIEWS) {
-			String label = FlickerTest.label(view);
-			shots.add(new ContactSheet.Cell(FlickerTest.frame(folder, view, 0), "flicker - " + label));
-			differences.add(new ContactSheet.Cell(FlickerTest.difference(folder, view), "flicker - " + label
+		for (FlickerTest.Pass pass : FlickerTest.PASSES) {
+			View view = pass.view();
+			String label = pass.label();
+			shots.add(new ContactSheet.Cell(FlickerTest.frame(folder, pass, 0), "flicker - " + label));
+			differences.add(new ContactSheet.Cell(FlickerTest.difference(folder, pass), "flicker - " + label
 					+ " changes"));
 			STEPS.add(() -> {
 				DeferredRenderer.setEnabled(true);
 				GBufferDebugView.setView(view);
+				WaterPass.freezeRipples(!pass.rippling());
 				wait = TICKS_AFTER_VIEW_CHANGE;
 				minFrame = DeferredRenderer.totalFrames() + FRAMES_AFTER_VIEW_CHANGE;
 			});
@@ -212,8 +215,8 @@ public final class TestCapture {
 					STEPS.add(() -> wait = ticks - 1);
 				}
 				STEPS.add(() -> {
-					FlickerTest.record(view);
-					shoot(FlickerTest.frame(folder, view, shot));
+					FlickerTest.record(pass);
+					shoot(FlickerTest.frame(folder, pass, shot));
 					// The next shot only once another frame is drawn.
 					minFrame = DeferredRenderer.totalFrames() + 1;
 				});
@@ -439,6 +442,7 @@ public final class TestCapture {
 
 	private static void restore() {
 		Minecraft minecraft = Minecraft.getInstance();
+		WaterPass.freezeRipples(false);
 		DeferredRenderer.setEnabled(lightingBefore);
 		GBufferDebugView.setView(viewBefore);
 		command("time set " + timeBefore);

@@ -30,9 +30,10 @@ of minutes.
      `/bv spot ocean remove` forgets it. Saved spots are kept per world in `run\config\bedrockvisuals\spots.json`.
 3. Press **F9** from anywhere and keep your hands off the controls. The mod hides the HUD, clears the
    weather, and:
-   - first, where you stand (about 20 seconds; face some Distant Horizons terrain): the far terrain's
-     flicker test. The lit view and each input to the far terrain's lighting (its colour, depth, rebuilt
-     normal and shadow) are shot a dozen times with nothing changed. The report says how much of the far
+   - first, where you stand (about 30 seconds; face some Distant Horizons terrain and water): the flicker
+     test. The lit view, each input to the far terrain's lighting (its colour, depth, rebuilt normal and
+     shadow) and the water's reflections (their sources, the reflected sky, the reflected scene; ripples held
+     still) are shot a dozen times with nothing changed. The report says how much of the far
      terrain changes in each, and the sheet's second row shows where (bright: changed; dark blue: steady);
    - at the test scene: screenshots at noon, afternoon, low sun and midnight (lit, vanilla, shadow test,
      material), the debug rows at noon (albedo, normal, light, local exposure; then bloom, shadow cascades and
@@ -153,7 +154,7 @@ Don't move between the commands: the shots must be taken from where `bv/scene` p
 | F7 | Cycle debug views: albedo, normal, material, light, shadow test, cascades, local exposure, bloom, water map, off |
 | F8 | Deferred lighting on and off, for comparison with vanilla |
 | F9 or `/bv capture` | The full test capture above (scene and every spot); F9 again cancels it |
-| `/bv flicker` | The far terrain's flicker test alone, where you stand and as things are (about 20 seconds) |
+| `/bv flicker` | The flicker test alone (far terrain and the water's reflections), where you stand and as things are (about 30 seconds) |
 | `/bv capture <name>` | Capture one spot alone (`scene` for the test scene) |
 | `/bv scene` | Go to this world's test scene (builds it where you stand the first time) |
 | `/bv scene build` | Build the test scene where you stand, and remember it |

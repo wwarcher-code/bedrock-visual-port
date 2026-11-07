@@ -86,6 +86,19 @@ public final class WaterPass {
 	private WaterPass() {
 	}
 
+	/** The ripples' frame held still (the flicker test), or -1 while they animate. */
+	private static int frozenFrame = -1;
+
+	/** Holds the ripples on one frame (true) or lets them animate again (false). */
+	public static void freezeRipples(boolean freeze) {
+		if (!freeze) {
+			frozenFrame = -1;
+		} else if (frozenFrame < 0) {
+			ClientLevel level = Minecraft.getInstance().level;
+			frozenFrame = level == null ? 0 : (int) ((level.getGameTime() / 2) % Math.max(WaterSurfaceMaps.frames(), 1));
+		}
+	}
+
 	/** Called after the lighting pass: whether this frame's water can be shaded, and its data written. */
 	public static void prepare(TextureAtlas blockAtlas, RenderTarget main, boolean lit) {
 		ready = false;
@@ -114,7 +127,8 @@ public final class WaterPass {
 						? Math.max(net.minecraft.client.Minecraft.getInstance().options.getEffectiveRenderDistance() - 2, 1)
 								* 16f
 						: 0f;
-				builder.putVec4((float) ((ticks / 2) % frames), frames, BrdfLut.view() != null ? 1 : 0, edge);
+				int frame = frozenFrame >= 0 ? frozenFrame % Math.max(frames, 1) : (int) ((ticks / 2) % frames);
+				builder.putVec4(frame, frames, BrdfLut.view() != null ? 1 : 0, edge);
 				// Water's side faces against see-through blocks (leaves, glass, seagrass) use water_overlay;
 				// without it they were drawn as plain tinted texture, bright blue.
 				putRect(builder, blockAtlas.getSprite(Identifier.withDefaultNamespace("block/water_overlay")));

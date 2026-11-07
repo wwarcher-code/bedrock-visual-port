@@ -268,13 +268,18 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
     s.opacity = clamp(1.0 - (1.0 - s.fresnel) * leastTransmitted, 0.0, 1.0);
     // The water views that leave the surface out (GBufferDebugView 3 and 4): fully see-through.
     // And the far terrain views (7 to 10), which show only what's under it.
-    if (abs(DebugParams.w - 3.0) < 0.5 || abs(DebugParams.w - 4.0) < 0.5 || DebugParams.w > 6.5) {
+    if (abs(DebugParams.w - 3.0) < 0.5 || abs(DebugParams.w - 4.0) < 0.5
+            || (DebugParams.w > 6.5 && DebugParams.w < 10.5)) {
         s.opacity = 0.0;
     }
     // The water flag view (6): see-through to the lighting pass's codes, but yellow where this pass shades
     // the water itself with nothing at all beneath it (its deep-water fallback).
     if (abs(DebugParams.w - 6.0) < 0.5) {
         s.opacity = !s.flagged && s.bottomless && UnderwaterParams.x < 0.5 ? 1.0 : 0.0;
+    }
+    // The reflection views (11 to 13): the reflection alone, opaque.
+    if (DebugParams.w > 10.5 && DebugParams.w < 13.5 && UnderwaterParams.x < 0.5) {
+        s.opacity = 1.0;
     }
     return s;
 }
@@ -529,11 +534,27 @@ vec3 waterColor(WaterSurface s, float albedo) {
     // Bedrock's SSR is mirror-only: full up to roughness 0.3, gone by 0.4.
     float ssrWeight = 1.0 - smoothstep(0.3, 0.4, s.roughness);
     vec4 traced = ssrWeight > 0.0 ? screenSpaceReflection(v_Position + s.n * 0.02, mirror, size, flipY) : vec4(0.0);
+    float nearHit = traced.a;
+    float farHit = 0.0;
     if (ssrWeight > 0.0 && traced.a < 0.5) {
         vec4 far = distantReflection(v_Position + s.n * 0.02, mirror, size, flipY);
-        traced = far.a > traced.a ? far : traced;
+        if (far.a > traced.a) {
+            traced = far;
+            farHit = far.a;
+        }
     }
     vec3 reflection = mix(skyReflection, traced.rgb, traced.a * ssrWeight);
+    // The reflection views (the flicker test's): 11 where each reflection comes from (red: the screen-space
+    // march's hit, green: the far march's against Distant Horizons' depth, blue: the sky's share), 12 the
+    // reflected sky alone, 13 the reflected scene alone. Drawn opaque (waterSurface).
+    int reflectionView = int(DebugParams.w + 0.5);
+    if (reflectionView == 11) {
+        return vec3(nearHit * ssrWeight, farHit * ssrWeight, 0.15 + 0.85 * (1.0 - traced.a * ssrWeight));
+    } else if (reflectionView == 12) {
+        return skyReflection;
+    } else if (reflectionView == 13) {
+        return traced.rgb * traced.a * ssrWeight;
+    }
 
     // Sun glint.
     float nDotL = max(dot(s.n, sunDir), 0.0);

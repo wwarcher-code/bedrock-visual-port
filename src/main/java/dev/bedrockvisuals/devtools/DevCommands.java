@@ -23,7 +23,7 @@ public final class DevCommands {
 			  /bv spots           list this world's spots
 			  /bv go <name>       go to a spot
 			  /bv capture [name]  same as F9, or just one spot ("scene" for the test scene)
-			  /bv flicker         the far terrain's flicker test alone, where you stand (about 20 seconds)
+			  /bv flicker         the flicker test alone (far terrain and reflections), where you stand (about 30 seconds)
 			  /bv status          copy the diagnostics report to the clipboard""";
 
 	private DevCommands() {
