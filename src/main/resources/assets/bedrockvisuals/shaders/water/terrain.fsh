@@ -52,6 +52,8 @@ layout(std140) uniform DistantData {
     mat4 DistantInverseProjection; // Distant Horizons' clip space to its view space
     vec4 DistantParams;            // x: its terrain is lit here, y: reversed depth, z: [0, 1] clip depth
     vec4 DistantLightmap;
+    vec4 DistantHeightOrigin;
+    vec4 FroxelParams;             // y, z: the band Java's terrain hands over to DH's across (borderShare)
 };
 uniform sampler2D u_ShadowMap3;
 uniform sampler2D u_CloudShadowMap;
@@ -665,6 +667,17 @@ void main() {
         if (Animation.w > 0.0 && UnderwaterParams.x < 0.5 && abs(faceNormal.y) < 0.2
                 && length(v_Position.xz) > Animation.w) {
             discard;
+        }
+        // The hand-over to DH's terrain at the edge of the render distance (borderDither): where the lighting
+        // pass shows DH's picture beneath, this surface gives way to it (DH's water there is shaded by it).
+        if (UnderwaterParams.x < 0.5 && DistantParams.x > 0.5) {
+            float share = borderShare(v_Position, FroxelParams.yz);
+            if (share > 0.0 && borderDither(v_Position) < share) {
+                vec4 clip = u_ProjectionMatrix * u_ModelViewMatrix * vec4(v_Position, 1.0);
+                if (distantDistanceAt(gl_FragCoord.xy / vec2(textureSize(u_GBufferDepth, 0)), clip.xy / clip.w) > 0.0) {
+                    discard;
+                }
+            }
         }
         WaterSurface surface = waterSurface(faceNormal, tangent, bitangent);
         #ifdef OIT_ALPHA_ONLY

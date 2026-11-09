@@ -199,7 +199,9 @@ public final class LightingPass {
 			distantBuilder.putVec4(lightmap.x, lightmap.y, lightmap.z, seaSurface);
 			DistantHeights.write(distantBuilder);
 			// x: 1 when this frame's froxel volume is there (FroxelVolume, drawn below before the pass opens).
-			distantBuilder.putVec4(FroxelVolume.ready() || !froxelTried ? 1 : 0, 0, 0, 0);
+			// y, z: the band (horizontal blocks from the camera) over which Java's terrain hands over to DH's.
+			float[] band = borderBand(frame);
+			distantBuilder.putVec4(FroxelVolume.ready() || !froxelTried ? 1 : 0, band[0], band[1], 0);
 			encoder.writeToBuffer(distant.slice(), distantBuilder.get());
 			Std140Builder atmosphereBuilder = Std140Builder.onStack(stack, SkyAtmosphere.DATA_SIZE);
 			SkyAtmosphere.write(atmosphereBuilder, light.atmosphere());
@@ -308,6 +310,21 @@ public final class LightingPass {
 
 	static GpuBuffer gradingData() {
 		return grading;
+	}
+
+	/**
+	 * The band over which Java's terrain hands over to Distant Horizons' (lighting/deferred.fsh, borderFade):
+	 * ending just inside the circle Sodium draws (its occlusion culler draws a chunk whose box, a block wider,
+	 * comes nearer than the render distance), so no chunk's edge shows, and 32 blocks wide, but not nearer than
+	 * DH's near plane (it draws nothing nearer). {0, 0} for none.
+	 */
+	private static float[] borderBand(DistantTerrainFrame frame) {
+		if (frame == null) {
+			return new float[] {0, 0};
+		}
+		float end = net.minecraft.client.Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f - 4f;
+		float start = Math.max(end - 32f, frame.nearClip() + 8f);
+		return start < end - 4f ? new float[] {start, end} : new float[] {0, 0};
 	}
 
 	private static void putVec4(Std140Builder builder, Vector3f xyz, float w) {

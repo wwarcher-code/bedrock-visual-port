@@ -37,7 +37,8 @@ layout(std140) uniform DistantData {
                                    // w: the sea's surface height relative to the camera
     vec4 DistantHeightOrigin;      // xz: the camera's world x, z modulo the height map's width in blocks;
                                    // y: its height above the level's floor; w: 1 when there are heights
-    vec4 FroxelParams;             // x: 1 when this frame's froxel volume is there (FroxelVolume.java)
+    vec4 FroxelParams;             // x: 1 when this frame's froxel volume is there (FroxelVolume.java);
+                                   // y, z: the band Java's terrain hands over to DH's across (borderShare)
 };
 uniform sampler2D SunTexture;         // Bedrock's textures/environment/sun (SunMoon.java)
 uniform sampler2D MoonTexture;        // and moon_phases: 4 across, 2 down
@@ -754,6 +755,30 @@ void main() {
     vec3 ray = viewRay(texCoord);
     // The angle one pixel spans, for the far clouds (taken here, where every pixel runs it).
     float footprint = 0.5 * (length(dFdx(ray)) + length(dFdy(ray)));
+    // The hand-over from Java's terrain to DH's (borderDither): Java's terrain ends in chunks drawn out to the
+    // render distance, DH's carries on, and the two met in a hard, jagged seam. Across a band ending just inside
+    // that edge (DH draws behind Java's terrain there too), Java's pixels give way to DH's, more of them the
+    // further out, so by the edge the picture is DH's. Under the water, taken where the view meets the water's
+    // surface, as the water pass takes it.
+    bool handedOver = false;
+    if (depth > 0.0 && DistantParams.x > 0.5) {
+        vec4 javaWorld = InverseViewProjection * vec4(texCoord * 2.0 - 1.0, depth, 1.0);
+        vec3 javaPoint = javaWorld.xyz / javaWorld.w;
+        float share = borderShare(javaPoint, FroxelParams.yz);
+        if (share > 0.0 && distantDistance(texCoord) >= 0.0) {
+            vec3 at = javaPoint;
+            WaterColumn above;
+            vec3 probe = waterTestPoint(javaPoint);
+            if (UnderwaterParams.x < 0.5 && ray.y < -1e-3 && depthBelowWaterSurface(probe) >= 0.0
+                    && waterColumnAt(probe, above)) {
+                at = ray * ((above.surface - WaterColumnOrigin.y) / ray.y);
+            }
+            if (borderDither(at) < share) {
+                depth = 0.0;
+                handedOver = true;
+            }
+        }
+    }
     // Distant Horizons' terrain, where vanilla terrain doesn't cover the pixel: lit here like the rest, so it
     // matches the near terrain instead of carrying its own lighting and fog.
     float distant = depth <= 0.0 && DistantParams.x > 0.5 ? distantDistance(texCoord) : -1.0;
@@ -787,7 +812,8 @@ void main() {
     // Where the view crosses the sea's surface over a loaded column with water, what's beyond is under Java's
     // water: DH's ground, dimmed below by the water above it (the water column map carries DH's seabed there).
     bool throughNearWater = false;
-    if (distant >= 0.0 && UnderwaterParams.x < 0.5 && DistantLightmap.w < 0.0 && ray.y < -1e-3) {
+    // Not where the border hands over to DH: there the water pass gives way too, and DH's water is shaded here.
+    if (!handedOver && distant >= 0.0 && UnderwaterParams.x < 0.5 && DistantLightmap.w < 0.0 && ray.y < -1e-3) {
         float seaDistance = DistantLightmap.w / ray.y;
         WaterColumn crossed;
         throughNearWater = seaDistance < distant && waterColumnAt(ray * (seaDistance + 0.05), crossed)

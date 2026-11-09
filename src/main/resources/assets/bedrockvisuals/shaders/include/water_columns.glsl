@@ -174,4 +174,19 @@ vec3 waterInScatter(vec3 dir, float path, float sunVisibility, float skyAccess) 
     return UnderwaterScattering.rgb * (ambient + light * phase * sunVisibility) * (1.0 - exp(-sigma * path)) / sigma;
 }
 
+// The hand-over from Java's terrain to Distant Horizons' at the edge of the render distance: across the band
+// (horizontal blocks from the camera, start and end), more and more of the picture is DH's, chosen per quarter
+// block of the world by this value (0 to 1) under the band's share, so the pattern stays put as the camera
+// turns and moves. Both passes take it at the same point (for water, at its surface), so they agree. The grid
+// is the camera's position modulo 16, so the cells repeat every 16 blocks (64 cells): the hash is too.
+float borderDither(vec3 p) {
+    vec3 cell = mod(floor((p + CameraGridOffset.xyz) * 4.0 + 0.001), 64.0);
+    return fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+}
+
+// The share of the picture that is Distant Horizons' at camera-relative point p (0 to 1), over the band.
+float borderShare(vec3 p, vec2 band) {
+    return band.y > band.x && band.x > 0.0 ? smoothstep(band.x, band.y, length(p.xz)) : 0.0;
+}
+
 #endif
