@@ -674,9 +674,13 @@ bool distantSceneAt(vec3 p, out float sceneDistance, out vec2 uv) {
     }
     vec3 ndc = clip.xyz / clip.w;
     uv = ndc.xy * 0.5 + 0.5;
-    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
+    if (uv.y < 0.0 || uv.y > 1.0) {
         return false;
     }
+    // Held to the screen's left and right edges: a mirror ray off the water that leaves the screen sideways goes
+    // on up the edge column (what it reflects lies almost straight above), rather than finding the sky.
+    uv.x = clamp(uv.x, 0.5 / float(textureSize(Depth, 0).x), 1.0 - 0.5 / float(textureSize(Depth, 0).x));
+    ndc.x = uv.x * 2.0 - 1.0;
     float sceneDepth = texture(Depth, uv).r;
     if (sceneDepth > 0.0) {
         vec4 scene = InverseViewProjection * vec4(ndc.xy, sceneDepth, 1.0);
@@ -729,10 +733,14 @@ vec4 distantReflection(vec3 origin, vec3 direction) {
                 return vec4(0.0);
             }
             vec2 previousUv = previousClip.xy / previousClip.w * 0.5 + 0.5;
-            if (any(lessThan(previousUv, vec2(0.0))) || any(greaterThan(previousUv, vec2(1.0)))) {
+            previousUv.x = clamp(previousUv.x, 0.0, 1.0);
+            if (previousUv.y < 0.0 || previousUv.y > 1.0) {
                 return vec4(0.0);
             }
-            return vec4(texture(PreviousScene, previousUv).rgb, reflectionEdgeFade(hitUv, previousUv));
+            // Faded only near the top and bottom: sideways the march holds to the edge (distantSceneAt).
+            vec2 previousEdge = min(previousUv, 1.0 - previousUv);
+            float fade = smoothstep(0.0, 0.1, min(min(hitUv.y, 1.0 - hitUv.y), previousEdge.y));
+            return vec4(texture(PreviousScene, clamp(previousUv, vec2(0.0), vec2(1.0))).rgb, fade);
         }
         previous = p;
     }
@@ -1182,6 +1190,19 @@ void main() {
             dimmedHere = mapped && (distant < 0.0 || testColumn.loaded) && depthBelowWaterSurface(testPoint) >= 0.0;
             if (dimmedHere) {
                 waterSurfaceY = testColumn.surface - WaterColumnOrigin.y;
+                // The view entered the water where it first met a surface, not necessarily over this point: under
+                // an overhang the column's surface is the water's top under the rock, and the view came in through
+                // the open water beside it (taken from there, a cave's haze and dimming were cut short: a dark
+                // hole). Back along the view, where it crosses that height, the water there may go on up: then
+                // that column's surface, and so on.
+                for (int k = 0; k < 4 && viewDir.y < -1e-3; k++) {
+                    vec3 crossing = viewDir * (waterSurfaceY / viewDir.y);
+                    float above = depthBelowWaterSurface(waterTestPoint(crossing) + vec3(0.0, -0.05, 0.0));
+                    if (above <= 0.05) {
+                        break;
+                    }
+                    waterSurfaceY += above;
+                }
             }
         }
     }

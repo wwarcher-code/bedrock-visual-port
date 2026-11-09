@@ -352,15 +352,24 @@ bool onScreen(vec2 pixel, vec2 size) {
     return all(greaterThanEqual(pixel, vec2(0.0))) && all(lessThan(pixel, size));
 }
 
-// How far a reflection found at screen position hit is trusted near the screen's edges, where the scene it
-// reflects runs out: faded within 8% of an edge, but sideways only as far as the hit lies sideways of this
-// pixel. On a flat mirror the reflection lies almost straight above the water's pixel, so the water along the
-// screen's sides lost its reflections though they were on screen.
+// How far a reflection found at screen position hit is trusted near the top and bottom of the screen, where the
+// scene it reflects runs out (sideways, the marches hold to the edge: toScreenEdge).
 float screenEdgeFade(vec2 hit, vec2 size) {
     vec2 edge = min(hit, size - hit) / size;
-    float drift = smoothstep(0.0, 0.05, abs(hit.x - gl_FragCoord.x) / size.x);
-    float sideways = 1.0 - (1.0 - smoothstep(0.0, 0.08, edge.x)) * drift;
-    return min(sideways, smoothstep(0.0, 0.08, edge.y));
+    return smoothstep(0.0, 0.08, edge.y);
+}
+
+// A point's screen position for the reflection marches, held to the screen's left and right edges: a mirror
+// ray that leaves the screen sideways goes on up the edge column (on water, what it reflects lies almost
+// straight above), rather than missing and showing the sky where the water meets the screen's edge.
+vec3 toScreenEdge(vec3 position, vec2 size, bool flipY) {
+    vec3 screen = toScreen(position, size, flipY);
+    screen.x = clamp(screen.x, 0.5, size.x - 0.5);
+    return screen;
+}
+
+bool onScreenY(vec2 pixel, vec2 size) {
+    return pixel.y >= 0.0 && pixel.y < size.y;
 }
 
 vec4 screenSpaceReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
@@ -370,8 +379,8 @@ vec4 screenSpaceReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
     for (int i = 0; i < SSR_STEPS && travelled < SSR_MAX_DISTANCE; i++) {
         travelled += stepLength;
         vec3 point = origin + direction * travelled;
-        vec3 screen = toScreen(point, size, flipY);
-        if (screen.z <= 0.0 || !onScreen(screen.xy, size)) {
+        vec3 screen = toScreenEdge(point, size, flipY);
+        if (screen.z <= 0.0 || !onScreenY(screen.xy, size)) {
             return vec4(0.0);
         }
         float depth = texelFetch(u_GBufferDepth, ivec2(screen.xy), 0).r;
@@ -384,16 +393,16 @@ vec4 screenSpaceReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
             vec3 back = point;
             for (int j = 0; j < SSR_REFINE; j++) {
                 vec3 middle = (front + back) * 0.5;
-                vec3 m = toScreen(middle, size, flipY);
-                float d = onScreen(m.xy, size) ? texelFetch(u_GBufferDepth, ivec2(m.xy), 0).r : 0.0;
+                vec3 m = toScreenEdge(middle, size, flipY);
+                float d = onScreenY(m.xy, size) ? texelFetch(u_GBufferDepth, ivec2(m.xy), 0).r : 0.0;
                 if (d > 0.0 && m.z > viewDistance(d)) {
                     back = middle;
                 } else {
                     front = middle;
                 }
             }
-            vec3 b = toScreen(back, size, flipY);
-            float bDepth = onScreen(b.xy, size) ? texelFetch(u_GBufferDepth, ivec2(b.xy), 0).r : 0.0;
+            vec3 b = toScreenEdge(back, size, flipY);
+            float bDepth = onScreenY(b.xy, size) ? texelFetch(u_GBufferDepth, ivec2(b.xy), 0).r : 0.0;
             if (bDepth > 0.0 && b.z - viewDistance(bDepth) < max(length(back - front) * 4.0, 0.5)) {
                 vec2 hit = clamp(b.xy, vec2(0.0), size - 1.0);
                 // Fade towards the screen's edges, where the reflected scene runs out.
@@ -438,8 +447,8 @@ vec4 distantReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
         travelled += stepLength;
         stepLength *= 1.15;
         vec3 point = origin + direction * travelled;
-        vec3 screen = toScreen(point, size, flipY);
-        if (screen.z <= 0.0 || !onScreen(screen.xy, size)) {
+        vec3 screen = toScreenEdge(point, size, flipY);
+        if (screen.z <= 0.0 || !onScreenY(screen.xy, size)) {
             return vec4(0.0);
         }
         ivec2 pixel = ivec2(screen.xy);
@@ -491,11 +500,11 @@ vec4 distantReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
 // The scene's distance at camera-relative point p's pixel, and p's own in the same terms (along the view axis
 // against Java's depth, from the camera against DH's); false off the screen or where neither drew anything.
 bool distantSceneAt(vec3 p, vec2 size, bool flipY, out float sceneDistance, out float rayDistance, out ivec2 pixel) {
-    vec3 screen = toScreen(p, size, flipY);
+    vec3 screen = toScreenEdge(p, size, flipY);
     pixel = ivec2(screen.xy);
     sceneDistance = -1.0;
     rayDistance = 0.0;
-    if (screen.z <= 0.0 || !onScreen(screen.xy, size)) {
+    if (screen.z <= 0.0 || !onScreenY(screen.xy, size)) {
         return false;
     }
     float depth = texelFetch(u_GBufferDepth, pixel, 0).r;
@@ -627,6 +636,12 @@ vec3 waterColor(WaterSurface s, float albedo) {
     // (locally exposed here, as the water is drawn after that pass) (with the same horizon handling
     // as the deferred pass's reflections).
     vec3 mirror = reflect(-s.v, s.n);
+    // Seen at a low angle, a ripple can tilt the mirror ray below the water's plane, where it can only find the
+    // sky; DH's flat water beside it always reflects upwards and found the far shore (a seam between them).
+    // Kept a little above the plane.
+    if (UnderwaterParams.x < 0.5 && mirror.y < 0.02) {
+        mirror = normalize(vec3(mirror.x, 0.02 + 0.5 * abs(mirror.y), mirror.z));
+    }
     vec3 skyReflection;
     if (AtmosphereZenith.w > 0.5) {
         // Bedrock's sky probe is its sky (the atmosphere function), so the water reflects the same sky.
