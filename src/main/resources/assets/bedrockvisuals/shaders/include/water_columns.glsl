@@ -174,22 +174,4 @@ vec3 waterInScatter(vec3 dir, float path, float sunVisibility, float skyAccess) 
     return UnderwaterScattering.rgb * (ambient + light * phase * sunVisibility) * (1.0 - exp(-sigma * path)) / sigma;
 }
 
-// The hand-over from Java's terrain to Distant Horizons' at the edge of the render distance: across the band
-// (horizontal blocks from the camera, start and end), more and more of the picture is DH's, chosen per pixel
-// where this value (0 to 1, an 8 x 8 ordered dither) lies under the band's share: pixel by pixel the two
-// pictures read as a blend. (Chosen per quarter block of the world, the pattern showed as grain.) Both passes
-// take it at the same pixel, with the share at the same point (for water, its surface), so they agree.
-float borderDither() {
-    ivec2 q = ivec2(gl_FragCoord.xy) & 7;
-    int xy = q.x ^ q.y;
-    int v = ((xy & 1) << 5) | ((q.x & 1) << 4) | ((xy & 2) << 2) | ((q.x & 2) << 1) | ((xy & 4) >> 1)
-            | ((q.x & 4) >> 2);
-    return (float(v) + 0.5) / 64.0;
-}
-
-// The share of the picture that is Distant Horizons' at camera-relative point p (0 to 1), over the band.
-float borderShare(vec3 p, vec2 band) {
-    return band.y > band.x && band.x > 0.0 ? smoothstep(band.x, band.y, length(p.xz)) : 0.0;
-}
-
 #endif
