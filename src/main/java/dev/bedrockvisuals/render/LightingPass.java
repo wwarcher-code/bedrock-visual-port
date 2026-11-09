@@ -67,6 +67,7 @@ public final class LightingPass {
 			.withUniform("DistantHeightMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("SkyProbe", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("SunTexture", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("LightVolumeMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("MoonTexture", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("FroxelScatter", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("FroxelTransmittance", UniformType.COMBINED_IMAGE_SAMPLER)
@@ -271,6 +272,9 @@ public final class LightingPass {
 			pass.setUniform("SkyProbe", SkyProbe.view() != null ? SkyProbe.view() : gbuffer.depthView(),
 					RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR, true));
 			pass.setUniform("SunTexture", SunMoon.sunView() != null ? SunMoon.sunView() : gbuffer.depthView(), nearest);
+			// The light at each point of the water's haze (waterHaze; LightVolumeOrigin.w says whether it's there).
+			pass.setUniform("LightVolumeMap", LightVolume.view() != null ? LightVolume.view() : gbuffer.depthView(),
+					nearest);
 			pass.setUniform("MoonTexture", SunMoon.moonView() != null ? SunMoon.moonView() : gbuffer.depthView(),
 					nearest);
 			pass.setUniform("FroxelScatter", FroxelVolume.scatterView() != null ? FroxelVolume.scatterView()

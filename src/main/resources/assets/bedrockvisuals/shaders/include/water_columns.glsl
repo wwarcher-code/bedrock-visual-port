@@ -175,13 +175,16 @@ vec3 waterInScatter(vec3 dir, float path, float sunVisibility, float skyAccess) 
 }
 
 // The hand-over from Java's terrain to Distant Horizons' at the edge of the render distance: across the band
-// (horizontal blocks from the camera, start and end), more and more of the picture is DH's, chosen per quarter
-// block of the world by this value (0 to 1) under the band's share, so the pattern stays put as the camera
-// turns and moves. Both passes take it at the same point (for water, at its surface), so they agree. The grid
-// is the camera's position modulo 16, so the cells repeat every 16 blocks (64 cells): the hash is too.
-float borderDither(vec3 p) {
-    vec3 cell = mod(floor((p + CameraGridOffset.xyz) * 4.0 + 0.001), 64.0);
-    return fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+// (horizontal blocks from the camera, start and end), more and more of the picture is DH's, chosen per pixel
+// where this value (0 to 1, an 8 x 8 ordered dither) lies under the band's share: pixel by pixel the two
+// pictures read as a blend. (Chosen per quarter block of the world, the pattern showed as grain.) Both passes
+// take it at the same pixel, with the share at the same point (for water, its surface), so they agree.
+float borderDither() {
+    ivec2 q = ivec2(gl_FragCoord.xy) & 7;
+    int xy = q.x ^ q.y;
+    int v = ((xy & 1) << 5) | ((q.x & 1) << 4) | ((xy & 2) << 2) | ((q.x & 2) << 1) | ((xy & 4) >> 1)
+            | ((q.x & 4) >> 2);
+    return (float(v) + 0.5) / 64.0;
 }
 
 // The share of the picture that is Distant Horizons' at camera-relative point p (0 to 1), over the band.

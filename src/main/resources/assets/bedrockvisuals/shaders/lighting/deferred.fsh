@@ -46,6 +46,9 @@ uniform sampler2D FroxelScatter;      // Bedrock's coarse fog grid: in-scattered
 uniform sampler2D FroxelTransmittance; // and the transmittance (froxels.glsl)
 #include <bedrockvisuals:froxels.glsl>
 uniform sampler2D DistantHeightMap; // the far terrain's heights (DistantHeights.java)
+uniform sampler2D LightVolumeMap;   // sky and block light around the camera (LightVolume.java)
+#define LIGHT_VOLUME LightVolumeMap
+#include <bedrockvisuals:light_volume.glsl>
 
 #define CLOUD_CELLS CloudShadowMap
 #define CLOUD_BRDF BrdfLut
@@ -320,8 +323,9 @@ vec3 celestialRadiance(vec3 ray) {
 // Bedrock's water medium seen from above (PopulateVolume picks it between the water's front and back depths:
 // WaterAlbedoExtinction, 0.112 a block, then DeferredWater's WaterExtinction along the view), integrated along
 // this pixel's own path through the water from tIn to tOut along dir: eight steps, offset per pixel, each lit
-// by the sun where the outer cascade and the clouds let it through (light shafts) and by the sky as much as
-// the water there gets. Returns the light the water scatters towards the camera; transmittance (out) is the
+// by the sun where the outer cascade and the clouds let it through (light shafts) and by the sky and block
+// light there, as the fog grid lit it (its sky samples: the light volume, with the level per block of water
+// above that Minecraft's sky light loses given back; from the water map alone, caves came out far too dark). Returns the light the water scatters towards the camera; transmittance (out) is the
 // volume's 0.112 a block alone (the lighting pass applies WaterExtinction to what lies beneath itself).
 vec3 waterHaze(vec3 dir, float tIn, float tOut, out vec3 transmittance) {
     float path = clamp(tOut - tIn, 0.0, 64.0);
@@ -341,11 +345,18 @@ vec3 waterHaze(vec3 dir, float tIn, float tOut, out vec3 transmittance) {
     vec3 scattered = vec3(0.0);
     for (int i = 0; i < STEPS; i++) {
         vec3 p = dir * (tIn + (float(i) + jitter) * stepLength);
-        float sky = waterColumnSkyLight(waterTestPoint(p));
-        sky = sky < 0.0 ? 1.0 : sky; // past the map: open water
+        WaterColumn column;
+        float surfaceSky = 1.0; // past the map: open water
+        float depth = max(tIn * dir.y - p.y, 0.0);
+        if (waterColumnAt(waterTestPoint(p), column)) {
+            surfaceSky = column.roof > 0.0 && p.y + WaterColumnOrigin.y < column.roof ? column.skyUnder : column.sky;
+            depth = max(column.surface - WaterColumnOrigin.y - p.y, 0.0);
+        }
+        vec2 here = lightVolumeAt(p);
+        float sky = here.x >= 0.0 ? min(here.x + depth / 15.0, max(surfaceSky, here.x)) : surfaceSky;
         float sun = sky > 0.0001 ? volumeShadow(p, l) * cloudShadow(p, l) : 0.0;
-        vec3 source = UnderwaterScattering.rgb * (SkyColor.rgb * waterSkyAccess(sky) * 0.07957747
-                + light * phase * sun);
+        vec3 source = UnderwaterScattering.rgb * ((SkyColor.rgb * waterSkyAccess(sky)
+                + BlockLightColor.rgb * blockLightColor(max(here.y, 0.0))) * 0.07957747 + light * phase * sun);
         scattered += source * exp(-sigma * (float(i) * stepLength)) * stepShare;
     }
     return scattered;
@@ -758,8 +769,8 @@ void main() {
     // The hand-over from Java's terrain to DH's (borderDither): Java's terrain ends in chunks drawn out to the
     // render distance, DH's carries on, and the two met in a hard, jagged seam. Across a band ending just inside
     // that edge (DH draws behind Java's terrain there too), Java's pixels give way to DH's, more of them the
-    // further out, so by the edge the picture is DH's. Under the water, taken where the view meets the water's
-    // surface, as the water pass takes it.
+    // further out, so by the edge the picture is DH's. Under the water, the share is taken where the view meets
+    // the water's surface, as the water pass takes it.
     bool handedOver = false;
     if (depth > 0.0 && DistantParams.x > 0.5) {
         vec4 javaWorld = InverseViewProjection * vec4(texCoord * 2.0 - 1.0, depth, 1.0);
@@ -773,7 +784,7 @@ void main() {
                     && waterColumnAt(probe, above)) {
                 at = ray * ((above.surface - WaterColumnOrigin.y) / ray.y);
             }
-            if (borderDither(at) < share) {
+            if (borderDither() < borderShare(at, FroxelParams.yz)) {
                 depth = 0.0;
                 handedOver = true;
             }

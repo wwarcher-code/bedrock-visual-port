@@ -672,7 +672,7 @@ void main() {
         // pass shows DH's picture beneath, this surface gives way to it (DH's water there is shaded by it).
         if (UnderwaterParams.x < 0.5 && DistantParams.x > 0.5) {
             float share = borderShare(v_Position, FroxelParams.yz);
-            if (share > 0.0 && borderDither(v_Position) < share) {
+            if (share > 0.0 && borderDither() < share) {
                 vec4 clip = u_ProjectionMatrix * u_ModelViewMatrix * vec4(v_Position, 1.0);
                 if (distantDistanceAt(gl_FragCoord.xy / vec2(textureSize(u_GBufferDepth, 0)), clip.xy / clip.w) > 0.0) {
                     discard;
