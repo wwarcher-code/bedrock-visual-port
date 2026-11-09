@@ -84,6 +84,11 @@ image to the screen.
 - **Sky:** `s × mix(s⁴, s², CameraLightIntensity.y)` times `SkyAmbientLightColorIntensity.rgb × .w`, with `s` the
   sky light level. This is one colour, independent of the surface normal; directional sky light comes from
   the sky probe (`SkyAmbientSamples`), to analyse.
+- **`SkyAmbientSamples`, analysed:** a 3D texture, screen-aligned like the fog grid (sampled at the pixel's
+  screen position and a slice), of sky-light samples. PopulateVolume lights each froxel's ambient by it, and
+  DeferredMixedResolutionSurfaceRadiance reads its far slice (z 1) in place of the pixel's sky light when
+  blending the fog towards the sky or the underground colour. Not directional. The renderer's light volume
+  (Minecraft's sky light per block around the camera) stands in for it in the fog grid and the water's haze.
 
 *Runtime:* `SkyAmbientLightColorIntensity`, `AmbientLightParams`, `BlockBaseAmbientLightColorIntensity`,
 `CameraLightIntensity`.
