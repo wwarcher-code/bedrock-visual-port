@@ -316,15 +316,49 @@ vec3 celestialRadiance(vec3 ray) {
     return radiance * SunMoonParams.x;
 }
 
+// Bedrock's water medium seen from above (PopulateVolume picks it between the water's front and back depths:
+// WaterAlbedoExtinction, 0.112 a block, then DeferredWater's WaterExtinction along the view), integrated along
+// this pixel's own path through the water from tIn to tOut along dir: eight steps, offset per pixel, each lit
+// by the sun where the outer cascade and the clouds let it through (light shafts) and by the sky as much as
+// the water there gets. Returns the light the water scatters towards the camera; transmittance (out) is the
+// volume's 0.112 a block alone (the lighting pass applies WaterExtinction to what lies beneath itself).
+vec3 waterHaze(vec3 dir, float tIn, float tOut, out vec3 transmittance) {
+    float path = clamp(tOut - tIn, 0.0, 64.0);
+    transmittance = exp(-vec3(WATER_VOLUME_EXTINCTION) * path);
+    if (path <= 0.0) {
+        return vec3(0.0);
+    }
+    bool moon = ShadowParams.w > 0.5;
+    vec3 l = normalize(moon ? MoonDirection.xyz : SunDirection.xyz);
+    vec3 light = moon ? MoonColor.rgb : SunColor.rgb;
+    float phase = phaseHG(UnderwaterScattering.w, dot(l, -dir));
+    vec3 sigma = waterScatterExtinction();
+    const int STEPS = 8;
+    float stepLength = path / float(STEPS);
+    vec3 stepShare = (1.0 - exp(-sigma * stepLength)) / sigma;
+    float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    vec3 scattered = vec3(0.0);
+    for (int i = 0; i < STEPS; i++) {
+        vec3 p = dir * (tIn + (float(i) + jitter) * stepLength);
+        float sky = waterColumnSkyLight(waterTestPoint(p));
+        sky = sky < 0.0 ? 1.0 : sky; // past the map: open water
+        float sun = sky > 0.0001 ? volumeShadow(p, l) * cloudShadow(p, l) : 0.0;
+        vec3 source = UnderwaterScattering.rgb * (SkyColor.rgb * waterSkyAccess(sky) * 0.07957747
+                + light * phase * sun);
+        scattered += source * exp(-sigma * (float(i) * stepLength)) * stepShare;
+    }
+    return scattered;
+}
+
 // The volumetric fog between the camera and the camera-relative point position (along dir, distance away):
 // read from Bedrock's coarse grid at this pixel and the point's view depth (FroxelVolume), else marched here.
 //
 // With the camera above water and the point under it (or on it: atSurface), surfaceY the water's surface
-// relative to the camera: each of the four cells around the pixel is read where its own ray has gone as far
-// through the water as this pixel's has. A cell's light is integrated along the ray through its centre, which
-// far off, at a grazing angle, meets the surface tens of blocks from where the pixel's own ray does; read at
-// the pixel's depth, it held that much more or less water, alike across each row of cells: horizontal stripes
-// in the water's haze, worst towards the horizon.
+// relative to the camera: the grid gives the air down to the surface, each of the four cells around the
+// pixel read where its own ray meets the surface (a cell's light is integrated along the ray through its
+// centre, which far off, at a grazing angle, meets the surface tens of blocks from where the pixel's own ray
+// does), and the water's own light is integrated along this pixel's path through it (waterHaze). On the grid,
+// the water's haze came in cells of 8 x 8 pixels, a grid of haze however its cells were filtered.
 vec3 fogTo(vec3 position, vec3 dir, float distance, float surfaceY, bool atSurface, out vec3 transmittance) {
     if (FroxelParams.x > 0.5) {
         vec3 forward = froxelForward(InverseViewProjection);
@@ -332,8 +366,6 @@ vec3 fogTo(vec3 position, vec3 dir, float distance, float surfaceY, bool atSurfa
         if (surfaceY >= 0.0 || dir.y > -1e-3 || UnderwaterParams.x > 0.5) {
             return froxelFog(FroxelScatter, FroxelTransmittance, texCoord, viewZ, transmittance);
         }
-        // How far this pixel's ray runs under the surface.
-        float inWater = max(distance - surfaceY / dir.y, 0.0);
         vec2 cells = vec2(FROXEL_CELLS);
         vec2 g = texCoord * cells - 0.5;
         vec2 base = floor(g);
@@ -348,14 +380,16 @@ vec3 fogTo(vec3 position, vec3 dir, float distance, float surfaceY, bool atSurfa
             vec4 onRay = InverseViewProjection * vec4(cellUv * 2.0 - 1.0, 0.5, 1.0);
             vec3 cellDir = normalize(onRay.xyz / onRay.w);
             float along = max(dot(cellDir, forward), 0.05);
-            // Where the cell's ray meets the surface, then as far on as this pixel's runs in the water (the
-            // pixel's own depth where the cell's ray never reaches the surface).
-            float cellZ = cellDir.y < -1e-3 ? (surfaceY / cellDir.y + inWater) * along : viewZ;
+            // Where the cell's ray meets the surface (the pixel's own crossing where it never does).
+            float cellZ = (cellDir.y < -1e-3 ? surfaceY / cellDir.y : surfaceY / dir.y) * along;
             vec3 cellTransmittance;
-            scattered += weight * (atSurface
-                    ? froxelFogInAir(FroxelScatter, FroxelTransmittance, cellUv, cellZ, cellTransmittance)
-                    : froxelFog(FroxelScatter, FroxelTransmittance, cellUv, cellZ, cellTransmittance));
+            scattered += weight * froxelFogInAir(FroxelScatter, FroxelTransmittance, cellUv, cellZ, cellTransmittance);
             transmittance += weight * cellTransmittance;
+        }
+        if (!atSurface) {
+            vec3 waterTransmittance;
+            scattered += transmittance * waterHaze(dir, surfaceY / dir.y, distance, waterTransmittance);
+            transmittance *= waterTransmittance;
         }
         return scattered;
     }
@@ -1037,54 +1071,55 @@ void main() {
     vec3 fogTransmittance;
     // The water's surface above this point, for reading the fog grid (fogTo): DH's water at its own surface,
     // anything under mapped water at its column's.
-    float fogSurfaceY = 1.0;
-    if (distantWaterHere) {
-        fogSurfaceY = position.y;
-    } else if (UnderwaterParams.x < 0.5) {
-        vec3 fogTest = distant >= 0.0 ? waterTestPoint(position) : waterTestPointOn(position, n);
-        WaterColumn fogColumn;
-        if (depthBelowWaterSurface(fogTest) >= 0.0 && waterColumnAt(fogTest, fogColumn)) {
-            fogSurfaceY = fogColumn.surface - WaterColumnOrigin.y;
-        }
-    }
-    vec3 fogLight = fogTo(position, viewDir, length(position), fogSurfaceY, distantWaterHere, fogTransmittance);
-    // Under water, the march's water medium is Bedrock's WaterExtinction along the view, up to the surface.
-    // From above water, what lies under the surface (within the water column map) is dimmed by the water
-    // above it here; the water pass then leaves it alone.
+    // Under the water seen from above: where the water column map (or, for DH's ground seen through Java's
+    // water, the sea) puts the point under a water surface, this pass dims it by the water above it along the
+    // view and adds the water's own light (fogTo); the water pass then leaves it alone.
     // hdrColor's alpha tells the water pass which pixels this pass dimmed (0.5) so that it leaves exactly those
     // alone: the water pass reconstructs the point from its own geometry, and with view bobbing the two
     // reconstructions differ by up to a tenth of a block, enough to put a block's edge in the neighbouring
     // column for one pass and not the other (bright outlines round underwater blocks while walking).
     bool dimmedHere = false;
-    if (UnderwaterParams.x < 0.5) {
-        // Tested a little off the surface along its face (waterTestPointOn): the floor's top face lies exactly
-        // on the water body's bottom, a wall's face on its column's edge.
-        vec3 testPoint = distant >= 0.0 ? waterTestPoint(position) : waterTestPointOn(position, n);
-        // DH's ground is dimmed only seen through Java's water (or in a loaded column): DH's own water seen
-        // from above is its surface, shaded by distantWaterSurface.
-        WaterColumn testColumn;
-        bool nearColumn = distant < 0.0 || throughNearWater
-                || (waterColumnAt(testPoint, testColumn) && testColumn.loaded);
-        dimmedHere = !distantWaterHere && nearColumn && depthBelowWaterSurface(testPoint) >= 0.0;
-        if (abs(DebugParams.w - 6.0) < 0.5) {
-            // The water flag view: green where this pass dimmed the water beneath (and flags it for the water
-            // pass), red where the plain test point says under water but the face's one doesn't, blue where
-            // the column has water but the point isn't in it, grey where no water is mapped.
-            WaterColumn flagColumn;
-            vec3 code = dimmedHere ? vec3(0.0, 0.8, 0.0)
-                    : depthBelowWaterSurface(waterTestPoint(position)) >= 0.0 ? vec3(0.9, 0.0, 0.0)
-                    : waterColumnAt(waterTestPoint(position), flagColumn) ? vec3(0.1, 0.2, 0.9) : vec3(0.35);
-            fragColor = vec4(code, 1.0);
-            meterLuminance = vec4(0.18, 0.0, 0.0, 1.0);
-            hdrColor = vec4(0.0, 0.0, 0.0, dimmedHere ? 0.5 : 1.0);
-            return;
+    float waterSurfaceY = 1.0; // relative to the camera; 1 for none
+    // Tested a little off the surface along its face (waterTestPointOn): the floor's top face lies exactly on
+    // the water body's bottom, a wall's face on its column's edge.
+    vec3 testPoint = distant >= 0.0 ? waterTestPoint(position) : waterTestPointOn(position, n);
+    if (UnderwaterParams.x < 0.5 && !distantWaterHere) {
+        if (throughNearWater) {
+            // DH's ground seen through Java's water: under the sea's surface, whether or not the map reaches
+            // it (far off at a low angle it lies past the map, and was left undimmed: a dip in the water).
+            dimmedHere = position.y < DistantLightmap.w;
+            waterSurfaceY = DistantLightmap.w;
+        } else {
+            // DH's ground only in a column Sodium draws: DH's own water seen from above is its surface,
+            // shaded by distantWaterSurface.
+            WaterColumn testColumn;
+            bool mapped = waterColumnAt(testPoint, testColumn);
+            dimmedHere = mapped && (distant < 0.0 || testColumn.loaded) && depthBelowWaterSurface(testPoint) >= 0.0;
+            if (dimmedHere) {
+                waterSurfaceY = testColumn.surface - WaterColumnOrigin.y;
+            }
         }
-        // With the fog grid, the water's own 0.112 a block is in its transmittance (it integrates the water
-        // medium as Bedrock's does), so only WaterExtinction is applied here; without it, both.
-        if (dimmedHere) {
-            color *= FroxelParams.x > 0.5 ? waterViewTransmittanceAt(testPoint, position, viewDir)
-                    : waterTransmittanceAt(testPoint, position, viewDir);
-        }
+    }
+    vec3 fogLight = fogTo(position, viewDir, length(position), distantWaterHere ? position.y : waterSurfaceY,
+            distantWaterHere, fogTransmittance);
+    if (UnderwaterParams.x < 0.5 && abs(DebugParams.w - 6.0) < 0.5) {
+        // The water flag view: green where this pass dimmed the water beneath (and flags it for the water
+        // pass), red where the plain test point says under water but the face's one doesn't, blue where the
+        // column has water but the point isn't in it, grey where no water is mapped.
+        WaterColumn flagColumn;
+        vec3 code = dimmedHere ? vec3(0.0, 0.8, 0.0)
+                : depthBelowWaterSurface(waterTestPoint(position)) >= 0.0 ? vec3(0.9, 0.0, 0.0)
+                : waterColumnAt(waterTestPoint(position), flagColumn) ? vec3(0.1, 0.2, 0.9) : vec3(0.35);
+        fragColor = vec4(code, 1.0);
+        meterLuminance = vec4(0.18, 0.0, 0.0, 1.0);
+        hdrColor = vec4(0.0, 0.0, 0.0, dimmedHere ? 0.5 : 1.0);
+        return;
+    }
+    if (dimmedHere) {
+        // WaterExtinction along the view through the water above the point; without the fog grid the
+        // volume's own 0.112 a block too (the march here doesn't hold it).
+        float path = min(max(waterSurfaceY - position.y, 0.0) / max(-viewDir.y, 0.05), 64.0);
+        color *= exp(-(FroxelParams.x > 0.5 ? UnderwaterMedium.rgb : waterScatterExtinction()) * path);
     }
     // The water views (GBufferDebugView): 3 the scattered light alone, 4 what lies beneath without it, 5 black
     // under the water surface's own light.

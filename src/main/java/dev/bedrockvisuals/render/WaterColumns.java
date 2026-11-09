@@ -60,6 +60,10 @@ public final class WaterColumns {
 	private static int minY;
 	/** Whether unloaded columns may take Distant Horizons' seabed with water to sea level (the overworld). */
 	private static boolean seaFallback;
+	/** The camera's x and z and the render distance in chunks, for {@link #sodiumDraws}. */
+	private static double cameraX;
+	private static double cameraZ;
+	private static int renderDistance;
 
 	private WaterColumns() {
 	}
@@ -75,6 +79,9 @@ public final class WaterColumns {
 		minY = level.getMinY();
 		seaFallback = level.dimensionType().skybox() == DimensionType.Skybox.OVERWORLD;
 		Vec3 camera = minecraft.gameRenderer.mainCamera().position();
+		WaterColumns.cameraX = camera.x;
+		WaterColumns.cameraZ = camera.z;
+		renderDistance = minecraft.options.getEffectiveRenderDistance();
 		int cameraX = (int) Math.floor(camera.x);
 		int cameraZ = (int) Math.floor(camera.z);
 		int firstRow = nextRow;
@@ -194,10 +201,27 @@ public final class WaterColumns {
 				.putShort((short) ((roof & 0xFFF) | (skyBelow << 12))).putShort((short) (rendered ? 1 : 0));
 	}
 
-	/** Whether Sodium has built the chunk's section at block height y (it draws only the render distance). */
+	/**
+	 * Whether Sodium draws the chunk's section at block height y: built, and within its render distance as its
+	 * occlusion culler measures it (OcclusionCuller: the section's box, a block wider each way, nearer
+	 * horizontally than the render distance × 16 blocks). It builds the square around the camera but draws a
+	 * circle: built alone, the corners' chunks counted as Java's water though only DH's was drawn there, and
+	 * DH's water in them was shaded as ground (unlit squares along the chunk border).
+	 */
 	private static boolean sodiumDraws(int chunkX, int y, int chunkZ) {
 		SodiumWorldRenderer renderer = SodiumWorldRenderer.instanceNullable();
-		return renderer == null || renderer.isSectionReady(chunkX, y >> 4, chunkZ);
+		if (renderer == null) {
+			return true;
+		}
+		double dx = nearestToZero(chunkX * 16 - 1 - cameraX, chunkX * 16 + 17 - cameraX);
+		double dz = nearestToZero(chunkZ * 16 - 1 - cameraZ, chunkZ * 16 + 17 - cameraZ);
+		double radius = renderDistance * 16.0;
+		return dx * dx + dz * dz < radius * radius && renderer.isSectionReady(chunkX, y >> 4, chunkZ);
+	}
+
+	/** The point of [low, high] nearest zero. */
+	private static double nearestToZero(double low, double high) {
+		return low > 0 ? low : high < 0 ? high : 0;
 	}
 
 	private static void create() {
