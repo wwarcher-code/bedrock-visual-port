@@ -20,7 +20,7 @@ so the shaders don't contain them; they're to be found in the game executable ne
 - `WaterSimulation`: an FFT ocean simulation (InitSpectrum: Phillips spectrum with no random amplitudes, wind
   (0, 2), alignment 0.5, dampening 100, G 9.81, a 512² patch of 512 blocks; UpdateSpectrum: ω = √(g|k|) times a
   hash of k; then 9 + 9 Stockham radix-2 stages). Nothing reads its output in 1.26.60: no other material samples
-  it and the game binary never names it. The renderer runs it only for the \"water simulation\" debug view.
+  it and the game binary never names it. The renderer runs it only for the "water simulation" debug view.
 
 ## G-buffer
 
