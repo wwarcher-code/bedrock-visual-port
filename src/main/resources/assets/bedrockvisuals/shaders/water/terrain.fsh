@@ -35,7 +35,7 @@ layout(std140) uniform WaterData {
     vec4 FlowRect;    // the same for water_flow
     vec4 Absorption;  // per block, linear RGB
     vec4 Scattering;  // per block, linear RGB; w: 1 when water shading is on
-    vec4 Animation;   // x: current frame of the surface maps, y: frames in them; z: 1 when u_BrdfLut is Bedrock's;
+    vec4 Animation;   // x: the surface maps' frame, with its fraction (blended), y: frames in them; z: 1 when u_BrdfLut is Bedrock's;
                       // w: past this horizontal distance, side faces are dropped (0: never)
     vec4 OverlayRect; // the same for water_overlay: water's side faces against see-through blocks (leaves, glass)
 };
@@ -156,16 +156,42 @@ struct WaterSurface {
 // How many of the surface map's texels one pixel spans (set in main from the UV derivatives).
 float surfaceFootprint = 1.0;
 
-// This texel's normal and MERS from Bedrock's surface maps, for the current animation frame. The water
-// sprite's UVs cover 16 texels per block (32 for the flowing sprite, which spans two).
+// This texel's normal and MERS from Bedrock's surface maps at the animation's time: between the flipbook's
+// two frames around it, blended. Stepped a whole frame every 2 ticks, every texel's normal turned at once, and
+// the mirror rays of the water near a shore jumped between the shore and the sky beyond it ten times a second
+// (the flicker test: the reflections were steady with the ripples held still and popped as they moved).
+// Bedrock's surface moves continuously. The water sprite's UVs cover 16 texels per block (32 for the flowing
+// sprite, which spans two).
+void surfaceTexelOf(int frame, out vec3 tangentNormal, out vec4 mers);
+
 void surfaceTexel(out vec3 tangentNormal, out float roughness, out float metalness) {
+    float frames = max(Animation.y, 1.0);
+    float time = mod(Animation.x, frames);
+    int f0 = int(floor(time));
+    int f1 = int(mod(float(f0 + 1), frames));
+    vec3 n0;
+    vec3 n1;
+    vec4 m0;
+    vec4 m1;
+    surfaceTexelOf(f0, n0, m0);
+    surfaceTexelOf(f1, n1, m1);
+    float t = time - float(f0);
+    tangentNormal = normalize(mix(n0, n1, t));
+    vec4 mers = mix(m0, m1, t);
+    roughness = mers.b;
+    // Bedrock's G-buffer keeps metalness in the colour target's alpha as 0.5 + 0.498 m, which
+    // DeferredIndirectSpecular reads back as saturate((a - 0.502) × 2.0079): water's 0.0706 becomes 0.0667.
+    metalness = clamp((0.5 + 0.498 * mers.r - 0.50196) * 2.00787, 0.0, 1.0);
+}
+
+void surfaceTexelOf(int frame, out vec3 tangentNormal, out vec4 mers) {
     vec4 rect = inRect(v_TexCoord, StillRect) ? StillRect : inRect(v_TexCoord, FlowRect) ? FlowRect : OverlayRect;
     vec2 local = (v_TexCoord - rect.xy) / max(rect.zw - rect.xy, vec2(1e-6));
     float spriteTexels = max(round((rect.z - rect.x) / u_TexelSize.x), 1.0);
     ivec2 mapSize = textureSize(u_WaterNormal, 0);
     int frameSize = max(mapSize.x, 1);
     ivec2 texel = ivec2(mod(floor(local * spriteTexels), float(frameSize)));
-    texel.y += int(Animation.x) * frameSize;
+    texel.y += frame * frameSize;
     texel = clamp(texel, ivec2(0), mapSize - 1);
     // The mip level for the texels this pixel spans (the maps carry a chain down to a texel per frame), read
     // nearest within it as the base level is: far off, the ripples average out as Bedrock's do.
@@ -179,12 +205,8 @@ void surfaceTexel(out vec3 tangentNormal, out float roughness, out float metalne
     ivec2 far = texel >> lodUp;
     vec3 n0 = texelFetch(u_WaterNormal, near, lod).xyz * 2.0 - 1.0;
     vec3 n1 = texelFetch(u_WaterNormal, far, lodUp).xyz * 2.0 - 1.0;
-    tangentNormal = normalize(mix(n0, n1, blend));
-    vec4 mers = mix(texelFetch(u_WaterMers, near, lod), texelFetch(u_WaterMers, far, lodUp), blend);
-    roughness = mers.b;
-    // Bedrock's G-buffer keeps metalness in the colour target's alpha as 0.5 + 0.498 m, which
-    // DeferredIndirectSpecular reads back as saturate((a - 0.502) × 2.0079): water's 0.0706 becomes 0.0667.
-    metalness = clamp((0.5 + 0.498 * mers.r - 0.50196) * 2.00787, 0.0, 1.0);
+    tangentNormal = mix(n0, n1, blend);
+    mers = mix(texelFetch(u_WaterMers, near, lod), texelFetch(u_WaterMers, far, lodUp), blend);
 }
 
 // Defined with the surface fog below: the outer cascade's shadow test at p.

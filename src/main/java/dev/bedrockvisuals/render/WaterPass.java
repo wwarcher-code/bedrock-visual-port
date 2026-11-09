@@ -117,7 +117,8 @@ public final class WaterPass {
 				putRect(builder, blockAtlas.getSprite(Identifier.withDefaultNamespace("block/water_flow")));
 				builder.putVec4(ABSORPTION[0], ABSORPTION[1], ABSORPTION[2], 0);
 				builder.putVec4(SCATTERING[0], SCATTERING[1], SCATTERING[2], 1);
-				// Surface map animation: Bedrock's flipbook advances a frame every 2 ticks, like Java's water.
+				// Surface map animation: Bedrock's flipbook advances a frame every 2 ticks, like Java's water;
+				// x is the frame, with its fraction.
 				ClientLevel level = Minecraft.getInstance().level;
 				long ticks = level == null ? 0 : level.getGameTime();
 				int frames = WaterSurfaceMaps.frames();
@@ -127,7 +128,10 @@ public final class WaterPass {
 						? Math.max(net.minecraft.client.Minecraft.getInstance().options.getEffectiveRenderDistance() - 2, 1)
 								* 16f
 						: 0f;
-				int frame = frozenFrame >= 0 ? frozenFrame % Math.max(frames, 1) : (int) ((ticks / 2) % frames);
+				// Where the animation is between its frames (the shader blends the two around it).
+				float partial = Minecraft.getInstance().getDeltaTracker().getGameTimeDeltaPartialTick(false);
+				float frame = frozenFrame >= 0 ? frozenFrame % Math.max(frames, 1)
+						: (float) (((ticks % (2L * frames)) + partial) / 2.0);
 				builder.putVec4(frame, frames, BrdfLut.view() != null ? 1 : 0, edge);
 				// Water's side faces against see-through blocks (leaves, glass, seagrass) use water_overlay;
 				// without it they were drawn as plain tinted texture, bright blue.
