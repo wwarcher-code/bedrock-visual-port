@@ -88,14 +88,19 @@ public final class WaterPass {
 
 	/** The ripples' frame held still (the flicker test), or -1 while they animate. */
 	private static int frozenFrame = -1;
+	/**
+	 * The ripples' own clock, in ticks: advanced by the game ticks each frame renders, so it only ever moves
+	 * smoothly. The level's game time is set from the server's now and then, and each correction moved the
+	 * ripples by part of a frame at once: with the frames blended, every reflection hopped every few seconds.
+	 */
+	private static double rippleTicks;
 
 	/** Holds the ripples on one frame (true) or lets them animate again (false). */
 	public static void freezeRipples(boolean freeze) {
 		if (!freeze) {
 			frozenFrame = -1;
 		} else if (frozenFrame < 0) {
-			ClientLevel level = Minecraft.getInstance().level;
-			frozenFrame = level == null ? 0 : (int) ((level.getGameTime() / 2) % Math.max(WaterSurfaceMaps.frames(), 1));
+			frozenFrame = (int) (rippleTicks / 2) % Math.max(WaterSurfaceMaps.frames(), 1);
 		}
 	}
 
@@ -119,9 +124,9 @@ public final class WaterPass {
 				builder.putVec4(SCATTERING[0], SCATTERING[1], SCATTERING[2], 1);
 				// Surface map animation: Bedrock's flipbook advances a frame every 2 ticks, like Java's water;
 				// x is the frame, with its fraction.
-				ClientLevel level = Minecraft.getInstance().level;
-				long ticks = level == null ? 0 : level.getGameTime();
 				int frames = WaterSurfaceMaps.frames();
+				rippleTicks = (rippleTicks + Minecraft.getInstance().getDeltaTracker().getGameTimeDeltaTicks())
+						% (2.0 * Math.max(frames, 1));
 				// w: from how far out (blocks) the water's side faces at the edge of the loaded chunks are dropped,
 				// while Distant Horizons' terrain is lit here (0: never).
 				float edge = DeferredRenderer.ownsDistantComposite()
@@ -129,9 +134,7 @@ public final class WaterPass {
 								* 16f
 						: 0f;
 				// Where the animation is between its frames (the shader blends the two around it).
-				float partial = Minecraft.getInstance().getDeltaTracker().getGameTimeDeltaPartialTick(false);
-				float frame = frozenFrame >= 0 ? frozenFrame % Math.max(frames, 1)
-						: (float) (((ticks % (2L * frames)) + partial) / 2.0);
+				float frame = frozenFrame >= 0 ? frozenFrame : (float) (rippleTicks / 2.0);
 				builder.putVec4(frame, frames, BrdfLut.view() != null ? 1 : 0, edge);
 				// Water's side faces against see-through blocks (leaves, glass, seagrass) use water_overlay;
 				// without it they were drawn as plain tinted texture, bright blue.
