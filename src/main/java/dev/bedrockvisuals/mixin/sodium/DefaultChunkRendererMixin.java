@@ -10,6 +10,8 @@ import com.mojang.renderpearl.api.textures.GpuSampler;
 import dev.bedrockvisuals.compat.SodiumAdapter;
 import dev.bedrockvisuals.render.GBufferPass;
 import dev.bedrockvisuals.render.GBufferTerrainPipelines;
+import dev.bedrockvisuals.render.ProbeTerrainPipelines;
+import dev.bedrockvisuals.render.SceneProbe;
 import dev.bedrockvisuals.render.ShadowPass;
 import dev.bedrockvisuals.render.ShadowTerrainPipelines;
 import dev.bedrockvisuals.render.WaterPass;
@@ -47,7 +49,8 @@ abstract class DefaultChunkRendererMixin {
 			ShadowPass.countTerrainDraw();
 		}
 		bedrockvisuals$water = false;
-		if (pass.isTranslucent() && !GBufferPass.isActive() && !ShadowPass.isActive() && WaterPass.isActive()) {
+		if (pass.isTranslucent() && !GBufferPass.isActive() && !ShadowPass.isActive() && !SceneProbe.isActive()
+				&& WaterPass.isActive()) {
 			try {
 				WaterPass.bind(renderPass);
 				bedrockvisuals$water = true;
@@ -66,6 +69,8 @@ abstract class DefaultChunkRendererMixin {
 	private CompiledRenderPipeline bedrockvisuals$usePassPipeline(RenderPipeline pipeline) {
 		if (ShadowPass.isActive()) {
 			pipeline = ShadowTerrainPipelines.variantOf(pipeline);
+		} else if (SceneProbe.isActive()) {
+			pipeline = ProbeTerrainPipelines.variantOf(pipeline);
 		} else if (GBufferPass.isActive()) {
 			pipeline = GBufferTerrainPipelines.variantOf(pipeline);
 		} else if (bedrockvisuals$water && WaterPass.isActive()) {

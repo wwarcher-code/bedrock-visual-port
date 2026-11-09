@@ -1,5 +1,6 @@
 package dev.bedrockvisuals.mixin.sodium;
 
+import dev.bedrockvisuals.render.SceneProbe;
 import dev.bedrockvisuals.render.ShadowPass;
 import net.caffeinemc.mods.sodium.client.render.viewport.CameraTransform;
 import net.caffeinemc.mods.sodium.client.render.viewport.Viewport;
@@ -50,6 +51,10 @@ abstract class ViewportMixin {
 
 	@Unique
 	private boolean bedrockvisuals$castsIntoView(int x, int y, int z) {
+		// Ahead of a scene probe capture every section passes: the probe sees all around (SceneProbe).
+		if (SceneProbe.wantsAllSections()) {
+			return true;
+		}
 		Vector3f towardsLight = ShadowPass.casterDirection();
 		if (towardsLight == null) {
 			return false;

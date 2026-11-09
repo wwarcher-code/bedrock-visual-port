@@ -131,6 +131,11 @@ exposure and tone mapping to the main image.
 - **Screen-space reflections:** a separate buffer from the `ScreenSpaceReflections` passes (hierarchical depth
   ray march, then gap filling), blended over the sky reflection by its confidence. Per Mojang's docs SSR is
   mirror-only, fading from roughness 0.3 to none at 0.4.
+- **The probe holds the scene, not only the sky:** `SkyProbeDeferredShading` reads the probe's own G-buffer
+  (`ColorMetalnessSubsurface`, `EmissiveAmbientLinearRoughness`, `Normal`, `SceneDepth`) and the shadow
+  cascades, so Bedrock renders the terrain around the camera into the probe and lights it. It is regenerated per
+  `reflection_probe_regen_configuration`. The renderer does the same (SceneProbe: six 256² faces, lit by
+  probe/light.fsh, behind which the probe's base pass puts the sky).
 - **Block light** adds an indirect specular term (`BlockLightIndirectSpecularIntensity`).
 - **Texel snapping:** with `QuantizationParameters.w` on, the reflection's start point is snapped to the texel
   centre like the lighting, so each texel reflects one value. Together with per-texel roughness and normals,

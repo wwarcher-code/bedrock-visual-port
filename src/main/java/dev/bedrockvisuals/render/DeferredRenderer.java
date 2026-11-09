@@ -80,9 +80,15 @@ public final class DeferredRenderer {
 		WaterPass.prepare(blockAtlas, main, false);
 		LightingState light = enabled && !lightingFailed ? LightingState.current() : null;
 		if (light != null) {
+			SceneProbe.beginFrame();
 			ShadowPass.render(chunks, sampler, blockAtlas.getTextureView(), light);
 		}
 		GBufferPass.render(chunks, main, sampler, blockAtlas.getTextureView(), MaterialAtlas.view(blockAtlas));
+		if (light != null && light.atmosphere() != null && GBufferPass.hasTerrain()) {
+			// The reflection probe's scene, when a capture is due (SceneProbe).
+			SceneProbe.capture(chunks, sampler, blockAtlas.getTextureView(), MaterialAtlas.view(blockAtlas),
+					GBufferPass.projection());
+		}
 		if (light == null) {
 			return;
 		}

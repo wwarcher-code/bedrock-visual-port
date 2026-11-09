@@ -38,6 +38,13 @@ public final class SkyProbe {
 	private static final int INTERVAL = 4;
 
 	private static final BindGroupLayout BASE_LAYOUT = BindGroupLayout.builder()
+			.withUniform("ProbeFace0", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("ProbeFace1", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("ProbeFace2", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("ProbeFace3", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("ProbeFace4", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("ProbeFace5", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("ProbeFaces", UniformType.UNIFORM_BUFFER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("AtmosphereData", UniformType.UNIFORM_BUFFER)
 			// Declared by common.glsl, which the shader includes; every declared block must be bound.
@@ -84,7 +91,10 @@ public final class SkyProbe {
 		if (failed || !skyOn) {
 			return;
 		}
-		boolean due = !drawn || ++frame % INTERVAL == 0 || SettingsBlend.snapping();
+		// The scene probe's faces, when it captured terrain this frame (they are lit with this frame's data).
+		SceneProbe.ensure();
+		boolean newScene = SceneProbe.lightFaces(encoder, lightingData, atmosphereData);
+		boolean due = !drawn || ++frame % INTERVAL == 0 || SettingsBlend.snapping() || newScene;
 		if (!due) {
 			return;
 		}
@@ -92,6 +102,7 @@ public final class SkyProbe {
 			create();
 			draw(encoder, baseView, "base", pass -> {
 				pass.setPipeline(RenderSystem.getCompiledPipeline(BASE));
+				SceneProbe.bindFaces(pass);
 				pass.setUniform("LightingData", lightingData);
 				pass.setUniform("AtmosphereData", atmosphereData);
 				pass.setUniform("GradingData", LightingPass.gradingData());
