@@ -114,6 +114,8 @@ public final class DeferredRenderer {
 			replacedSky = light.atmosphere() != null;
 			framesLit++;
 			WaterPass.prepare(blockAtlas, main, true);
+			// The water's screen-space reflections, accumulated over frames (ReflectionPass).
+			ReflectionPass.render(gbuffer);
 			if (!reported) {
 				reported = true;
 				BedrockVisualsClient.LOGGER.info("[lighting] first frame lit by the deferred lighting pass");

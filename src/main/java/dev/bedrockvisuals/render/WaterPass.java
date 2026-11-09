@@ -38,6 +38,7 @@ public final class WaterPass {
 			.withUniform("u_GBufferDepth", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("u_SceneColor", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("u_LitFlags", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("u_Reflections", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("SkyProbe", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
@@ -102,6 +103,11 @@ public final class WaterPass {
 		} else if (frozenFrame < 0) {
 			frozenFrame = (int) (rippleTicks / 2) % Math.max(WaterSurfaceMaps.frames(), 1);
 		}
+	}
+
+	/** The water's data (sprites, extinction, animation) for this frame, or null before the first. */
+	static GpuBuffer data() {
+		return data;
 	}
 
 	/** Called after the lighting pass: whether this frame's water can be shaded, and its data written. */
@@ -182,6 +188,9 @@ public final class WaterPass {
 		// The lighting pass's HDR scene, whose alpha marks what it dimmed under water (without it, the scene copy:
 		// alpha 1 everywhere, so this pass dims all of it).
 		pass.setUniform("u_LitFlags", BloomPass.hdrView() != null ? BloomPass.hdrView() : sceneView, nearest);
+		// This frame's resolved reflections (ReflectionPass), or a texel saying there are none.
+		GpuTextureView reflections = ReflectionPass.view();
+		pass.setUniform("u_Reflections", reflections != null ? reflections : sceneView, nearest);
 		pass.setUniform("LightingData", LightingPass.lightingData());
 		// Bedrock's sky reflection probe (the shader reads it when AtmosphereData says it is there).
 		pass.setUniform("SkyProbe", SkyProbe.view() != null ? SkyProbe.view() : gbuffer.depthView(),

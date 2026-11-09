@@ -29,6 +29,8 @@ uniform sampler2D u_BlockTex;
 uniform sampler2D u_GBufferDepth;  // opaque terrain behind the water, reversed depth, 0 where there is none
 uniform sampler2D u_SceneColor;    // the lit opaque scene (sky and terrain), copied before translucency
 uniform sampler2D u_LitFlags;      // the lighting pass's HDR scene: alpha 0.5 where it dimmed what's under water
+uniform sampler2D u_Reflections;   // this frame's resolved reflections (ReflectionPass): rgb premultiplied by alpha,
+                                   // alpha -2 where it found no water (the water marches its own there)
 
 layout(std140) uniform WaterData {
     vec4 StillRect;   // u0, v0, u1, v1 of the water_still sprite in the block atlas
@@ -647,17 +649,31 @@ vec3 waterColor(WaterSurface s, float albedo) {
     }
     // Bedrock's SSR is mirror-only: full up to roughness 0.3, gone by 0.4.
     float ssrWeight = 1.0 - smoothstep(0.3, 0.4, s.roughness);
-    vec4 traced = ssrWeight > 0.0 ? screenSpaceReflection(v_Position + s.n * 0.02, mirror, size, flipY) : vec4(0.0);
-    float nearHit = traced.a;
+    // Bedrock's reflection passes' result for this pixel (ReflectionPass: the march, the gap fill and the
+    // resolve accumulated over frames), premultiplied; where they found no water here, this fragment's own march.
+    vec4 resolved = texture(u_Reflections, gl_FragCoord.xy / vec2(textureSize(u_GBufferDepth, 0)));
+    vec4 traced;
+    float nearHit;
     float farHit = 0.0;
-    if (ssrWeight > 0.0 && traced.a < 0.5) {
-        vec4 far = distantReflection(v_Position + s.n * 0.02, mirror, size, flipY);
-        if (far.a > traced.a) {
-            traced = far;
-            farHit = far.a;
+    vec3 reflection;
+    if (resolved.w > -1.5) {
+        float confidence = clamp(resolved.w, 0.0, 1.0);
+        traced = vec4(resolved.rgb, confidence);
+        nearHit = confidence;
+        reflection = resolved.rgb * ssrWeight + skyReflection * (1.0 - confidence * ssrWeight);
+    } else {
+        traced = ssrWeight > 0.0 ? screenSpaceReflection(v_Position + s.n * 0.02, mirror, size, flipY) : vec4(0.0);
+        nearHit = traced.a;
+        if (ssrWeight > 0.0 && traced.a < 0.5) {
+            vec4 far = distantReflection(v_Position + s.n * 0.02, mirror, size, flipY);
+            if (far.a > traced.a) {
+                traced = far;
+                farHit = far.a;
+            }
         }
+        reflection = mix(skyReflection, traced.rgb, traced.a * ssrWeight);
+        traced.rgb *= traced.a;
     }
-    vec3 reflection = mix(skyReflection, traced.rgb, traced.a * ssrWeight);
     // The reflection views (the flicker test's): 11 where each reflection comes from (red: the screen-space
     // march's hit, green: the far march's against Distant Horizons' depth, blue: the sky's share), 12 the
     // reflected sky alone, 13 the reflected scene alone. Drawn opaque (waterSurface).
@@ -667,7 +683,7 @@ vec3 waterColor(WaterSurface s, float albedo) {
     } else if (reflectionView == 12) {
         return toDisplay(locallyExposed(skyReflection));
     } else if (reflectionView == 13) {
-        return toDisplay(locallyExposed(traced.rgb * traced.a * ssrWeight));
+        return toDisplay(locallyExposed(traced.rgb * ssrWeight));
     }
 
     // Sun glint.
