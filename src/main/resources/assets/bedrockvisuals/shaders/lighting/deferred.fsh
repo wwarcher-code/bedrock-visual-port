@@ -742,8 +742,18 @@ vec3 distantWaterSurface(vec3 below, vec3 ray, float surface, float ground, vec3
     vec3 reflection = sky * 0.5;
     vec4 traced = distantReflection(ray * surface + n * 0.05, mirror);
     reflection = mix(reflection, traced.rgb, traced.a);
-    return specularScale * reflection + glint
-            + (1.0 - fresnel) * (below * exp(-UnderwaterMedium.rgb * path) * hazeTransmittance + haze);
+    vec3 beneath = below * exp(-UnderwaterMedium.rgb * path) * hazeTransmittance;
+    // The water views split DH's water as they split Java's (the water pass is see-through in 3 and 4, and
+    // draws only its surface in 5): 3 its haze, 4 what lies beneath, 5 its surface's reflection and glint.
+    int view = int(DebugParams.w + 0.5);
+    if (view == 3) {
+        return haze;
+    } else if (view == 4) {
+        return beneath;
+    } else if (view == 5) {
+        return specularScale * reflection + glint;
+    }
+    return specularScale * reflection + glint + (1.0 - fresnel) * (beneath + haze);
 }
 
 // Distant Horizons' terrain carries only colour and depth: the normal is rebuilt from the depth of the
@@ -1141,11 +1151,16 @@ void main() {
     }
     // The water views (GBufferDebugView): 3 the scattered light alone, 4 what lies beneath without it, 5 black
     // under the water surface's own light.
-    if (abs(DebugParams.w - 3.0) < 0.5 || abs(DebugParams.w - 5.0) < 0.5) {
+    // (DH's water is split by distantWaterSurface itself; its surface view keeps the fog's dimming in front,
+    // as the water pass's surface view does.)
+    if ((abs(DebugParams.w - 3.0) < 0.5 || abs(DebugParams.w - 5.0) < 0.5) && !distantWaterHere) {
         color = vec3(0.0);
     }
-    if (abs(DebugParams.w - 4.0) < 0.5 || abs(DebugParams.w - 5.0) < 0.5) {
+    if (abs(DebugParams.w - 4.0) < 0.5 || (abs(DebugParams.w - 5.0) < 0.5 && !distantWaterHere)) {
         fogTransmittance = vec3(1.0);
+        fogLight = vec3(0.0);
+    }
+    if (abs(DebugParams.w - 5.0) < 0.5 && distantWaterHere) {
         fogLight = vec3(0.0);
     }
     color = color * fogTransmittance + fogLight;
