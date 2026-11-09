@@ -73,6 +73,7 @@ public final class DeferredRenderer {
 		WaterColumns.update();
 		DistantHeights.update();
 		LightVolume.update();
+		BlockLightColors.update();
 		PointLights.update();
 		// Placeholders and buffers the water and cloud passes bind are created here, outside any render pass
 		// (uploads can't happen while one is open).

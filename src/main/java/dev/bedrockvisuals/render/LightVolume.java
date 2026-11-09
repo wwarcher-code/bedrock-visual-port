@@ -32,6 +32,17 @@ public final class LightVolume {
 	private static final int HEIGHT = SIZE_XZ * (SIZE_Y / TILES_X);
 	private static final int SLICES_PER_FRAME = 3;
 
+	/** Whether each block is solid and opaque, by its wrapped index (for the colored block light's spread). */
+	static final byte[] SOLID = new byte[SIZE_XZ * SIZE_XZ * SIZE_Y];
+	/** The pack-coloured light blocks found in each slice, by slice. */
+	static final java.util.concurrent.atomic.AtomicReferenceArray<java.util.List<BlockLightColors.Emitter>> EMITTERS =
+			new java.util.concurrent.atomic.AtomicReferenceArray<>(SIZE_Y);
+
+	/** A world block's index in the wrapped volume (x fastest, then z, then y). */
+	static int index(int x, int y, int z) {
+		return Math.floorMod(x, SIZE_XZ) + Math.floorMod(z, SIZE_XZ) * SIZE_XZ + Math.floorMod(y, SIZE_Y) * SIZE_XZ * SIZE_XZ;
+	}
+
 	private static GpuTexture texture;
 	private static GpuTextureView view;
 	private static int nextSlice;
@@ -61,6 +72,8 @@ public final class LightVolume {
 				nextSlice = (nextSlice + 1) % SIZE_Y;
 				int y = cameraY - SIZE_Y / 2 + Math.floorMod(slice - (cameraY - SIZE_Y / 2), SIZE_Y);
 				data.clear();
+				java.util.Map<net.minecraft.world.level.block.Block, float[]> colors = BlockLightColors.declared();
+				java.util.List<BlockLightColors.Emitter> sliceEmitters = new java.util.ArrayList<>();
 				for (int row = 0; row < SIZE_XZ; row++) {
 					int z = cameraZ - SIZE_XZ / 2 + Math.floorMod(row - (cameraZ - SIZE_XZ / 2), SIZE_XZ);
 					for (int column = 0; column < SIZE_XZ; column++) {
@@ -68,11 +81,23 @@ public final class LightVolume {
 						pos.set(x, y, z);
 						int sky = level.getBrightness(LightLayer.SKY, pos);
 						int block = level.getBrightness(LightLayer.BLOCK, pos);
-						boolean solid = level.getBlockState(pos).isSolidRender();
+						net.minecraft.world.level.block.state.BlockState state = level.getBlockState(pos);
+						boolean solid = state.isSolidRender();
+						SOLID[index(x, y, z)] = (byte) (solid ? 1 : 0);
+						if (!colors.isEmpty() && state.getLightEmission() > 0) {
+							float[] color = colors.get(state.getBlock());
+							if (color != null) {
+								sliceEmitters.add(new BlockLightColors.Emitter(x, y, z, state.getLightEmission(), color));
+							}
+						}
 						data.put((byte) (sky * 17)).put((byte) (block * 17)).put((byte) (solid ? 255 : 0)).put((byte) 255);
 					}
 				}
 				data.flip();
+				EMITTERS.set(slice, java.util.List.copyOf(sliceEmitters));
+				if (filled >= SIZE_Y - 1 && nextSlice == 0) {
+					BlockLightColors.rebuild(cameraX, cameraY, cameraZ);
+				}
 				int tileX = (slice % TILES_X) * SIZE_XZ;
 				int tileY = (slice / TILES_X) * SIZE_XZ;
 				RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, data, 0, 0, tileX, tileY,

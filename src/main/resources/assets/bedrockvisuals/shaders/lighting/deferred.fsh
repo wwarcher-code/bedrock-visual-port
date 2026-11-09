@@ -49,11 +49,61 @@ uniform sampler2D LightVolumeMap;   // sky and block light around the camera (Li
 // Bedrock's point lights (PointLights.java): the blocks the packs declare as point lights near the camera.
 const int MAX_POINT_LIGHTS = 64;
 layout(std140) uniform PointLightData {
-    vec4 PointLightCount;                    // x: how many
+    vec4 PointLightCount;                    // x: how many; y: 1 when BlockLightColorMap holds colours
     vec4 PointLights[MAX_POINT_LIGHTS * 2];  // per light: camera-relative position and radius, then colour
 };
 #define LIGHT_VOLUME LightVolumeMap
 #include <bedrockvisuals:light_volume.glsl>
+
+// Bedrock's coloured block light (BlockLightColors.java; GPU block lighting): per block, the mixed colour of the
+// pack-coloured lights reaching it (rgb) and their strongest level (a), in the light volume's layout.
+uniform sampler2D BlockLightColorMap;
+
+vec4 blockLightColorCell(ivec3 cameraCell) {
+    ivec3 cell = cameraCell + ivec3(floor(LightVolumeOrigin.xyz));
+    cell = ivec3(int(mod(float(cell.x), 128.0)), int(mod(float(cell.y), 48.0)), int(mod(float(cell.z), 128.0)));
+    return texelFetch(BlockLightColorMap, ivec2((cell.y % 8) * 128 + cell.x, (cell.y / 8) * 128 + cell.z), 0);
+}
+
+// The block light's radiance per BlockLightColor at a surface: Minecraft's level through Bedrock's falloff colours,
+// or, where the pack-coloured lights make up that level, their colour. Read as Bedrock reads its voxels: at the
+// surface plus 0.2 of its normal, less half a block, blended between the blocks around it (here all eight; a block
+// with no coloured light counts as none).
+vec3 blockLightRadiance(float level, vec3 position, vec3 n) {
+    vec3 plain = blockLightColor(level);
+    if (PointLightCount.y < 0.5 || level <= 0.0) {
+        return plain;
+    }
+    vec3 p = position + n * 0.2 - 0.5;
+    if (!inLightVolume(p) || !inLightVolume(p + 1.0)) {
+        return plain;
+    }
+    vec3 base = floor(p + fract(LightVolumeOrigin.xyz)) - fract(LightVolumeOrigin.xyz);
+    vec3 f = p - base;
+    ivec3 cell = ivec3(floor(p + fract(LightVolumeOrigin.xyz)));
+    vec3 color = vec3(0.0);
+    float coloredLevel = 0.0;
+    float coverage = 0.0;
+    for (int i = 0; i < 8; i++) {
+        ivec3 o = ivec3(i & 1, (i >> 1) & 1, (i >> 2) & 1);
+        vec3 w3 = mix(1.0 - f, f, vec3(o));
+        float w = w3.x * w3.y * w3.z;
+        vec4 c = blockLightColorCell(cell + o);
+        if (c.a > 0.0) {
+            color += c.rgb * w;
+            coverage += w;
+            coloredLevel += c.a * w;
+        }
+    }
+    if (coverage <= 0.0) {
+        return plain;
+    }
+    color /= coverage;
+    // How much of the light here is the coloured lights': all of it where their level reaches Minecraft's,
+    // fading out over two levels below it.
+    float share = clamp(1.0 - (level - coloredLevel) * 7.5, 0.0, 1.0) * clamp(coverage * 2.0, 0.0, 1.0);
+    return mix(plain, color * level * level, share);
+}
 
 #define CLOUD_CELLS CloudShadowMap
 #define CLOUD_BRDF BrdfLut
@@ -1133,7 +1183,8 @@ void main() {
     // LightingState holds Bedrock's captured terms.
     float cameraSky = sqrt(VolumeCamera.x) * 15.0 / 16.0;
     float skyCurve = skyLight * mix(pow(skyLight, 4.0), skyLight * skyLight, cameraSky);
-    vec3 indirect = max(BlockLightColor.rgb * blockLightColor(blockLight) + SkyColor.rgb * skyCurve, AmbientColor.rgb);
+    vec3 blockRadiance = BlockLightColor.rgb * blockLightRadiance(blockLight, position, n);
+    vec3 indirect = max(blockRadiance + SkyColor.rgb * skyCurve, AmbientColor.rgb);
     color += diffuseColor * indirect * (1.0 - emissive);
 
     // Reflected sky: smooth and metallic surfaces mirror their surroundings. Until there are reflections, the
@@ -1162,7 +1213,7 @@ void main() {
     // Metals by torches (DeferredIndirectSpecular): where the reflected sky is dimmer, they reflect the block
     // light instead, BlockLightIndirectSpecularIntensity (0.1 in captures) of the block light's ambient term,
     // blended up from the ambient floor by its luminance (in Bedrock's units) and times the metalness.
-    vec3 blockSpecular = BlockLightColor.rgb * blockLightColor(blockLight) * 0.1;
+    vec3 blockSpecular = blockRadiance * 0.1;
     float blockShare = clamp(dot(blockSpecular, LUMA) * 100.0, 0.0, 1.0); // AutoExposure.UNIT_SCALE
     blockSpecular = mix(AmbientColor.rgb, blockSpecular, blockShare) * metalness;
     if (dot(reflected, LUMA) < dot(blockSpecular, LUMA)) {

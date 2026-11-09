@@ -80,7 +80,8 @@ public final class PointLights {
 			Std140Builder builder = Std140Builder.onStack(stack, DATA_SIZE);
 			List<Light> current = lights;
 			int count = Math.min(current.size(), MAX);
-			builder.putVec4(count, 0, 0, 0);
+			// y: 1 when the coloured block light (BlockLightColors) is there.
+			builder.putVec4(count, BlockLightColors.view() != null ? 1 : 0, 0, 0);
 			for (int i = 0; i < MAX; i++) {
 				if (i < count) {
 					Light light = current.get(i);
