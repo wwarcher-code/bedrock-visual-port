@@ -91,6 +91,7 @@ final class DiagnosticsReport {
 		line("water reflections " + dev.bedrockvisuals.render.ReflectionPass.status());
 		line("point lights " + dev.bedrockvisuals.render.PointLights.status());
 		line("water waves " + dev.bedrockvisuals.render.WaterPass.wavesStatus());
+		line("water extinction " + dev.bedrockvisuals.render.WaterPass.extinctionStatus());
 		line("coloured block light " + dev.bedrockvisuals.render.BlockLightColors.status());
 		line("light volume " + dev.bedrockvisuals.render.LightVolume.status());
 		line("biome mix " + dev.bedrockvisuals.render.BiomeMix.status() + " (a new biome takes 30 s to take over)");

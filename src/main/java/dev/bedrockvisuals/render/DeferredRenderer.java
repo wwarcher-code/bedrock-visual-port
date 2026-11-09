@@ -72,6 +72,7 @@ public final class DeferredRenderer {
 		Underwater.update();
 		WaterColumns.update();
 		DistantHeights.update();
+		WaterPass.updateExtinction();
 		LightVolume.update();
 		BlockLightColors.update();
 		PointLights.update();

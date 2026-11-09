@@ -64,11 +64,28 @@ public final class WaterPass {
 
 	/*
 	 * Bedrock's water extinction per block, per channel (WaterExtinctionCoefficients in GPU captures of the
-	 * default water: 0.309041, 0.0610688, 0.0411471), which WaterExtinction applies along the view under the
-	 * surface. All of it goes in ABSORPTION; the in-scattered light is the volumetric fog's (Underwater.java).
+	 * default water, whose particle concentrations are all 0: 0.309041, 0.0610688, 0.0411471), which
+	 * WaterExtinction applies along the view under the surface. The in-scattered light is the volumetric fog's
+	 * (Underwater.java).
+	 *
+	 * Bedrock works the coefficients out at runtime from the water preset's particle concentrations, per biome,
+	 * and how isn't in its files. Here a water with particles adds the common bio-optical terms to the captured
+	 * clear water, at the sRGB primaries' dominant wavelengths (611, 549, 464 nm): chlorophyll (mg/m³)
+	 * absorbs as A(λ)·C^E(λ) (after Bricaud et al. 1998) and scatters 0.3·C^0.62·(550/λ) (Gordon and Morel);
+	 * suspended sediment (g/m³) absorbs 0.031·S·e^(-0.0123(λ-443)) (Babin et al. 2003) and scatters
+	 * 0.5·S·(550/λ); CDOM, given as its absorption at 440 nm, absorbs cdom·e^(-0.014(λ-440)). Vanilla's water is
+	 * exact; a pack's is an estimate (TUNE). The camera's biome's water is used, eased over a second or so as
+	 * Bedrock blends biomes.
 	 */
-	private static final float[] ABSORPTION = {0.309041f, 0.0610688f, 0.0411471f};
+	private static final float[] CLEAR = {0.309041f, 0.0610688f, 0.0411471f};
+	private static final float[] WAVELENGTHS = {611f, 549f, 464f};
+	private static final float[] CHLOROPHYLL_A = {0.0074f, 0.0076f, 0.0423f};
+	private static final float[] CHLOROPHYLL_E = {0.82f, 0.74f, 0.68f};
+	private static final float[] ABSORPTION = CLEAR.clone();
 	private static final float[] SCATTERING = {0f, 0f, 0f};
+	private static final float[] TARGET_ABSORPTION = CLEAR.clone();
+	private static final float[] TARGET_SCATTERING = {0f, 0f, 0f};
+	private static long lastEase;
 
 	/** Scattering per block, linear RGB. */
 	static float[] scattering() {
@@ -78,6 +95,36 @@ public final class WaterPass {
 	/** Extinction per block (absorption + scattering), linear RGB. */
 	static float[] extinction() {
 		return new float[] {ABSORPTION[0] + SCATTERING[0], ABSORPTION[1] + SCATTERING[1], ABSORPTION[2] + SCATTERING[2]};
+	}
+
+	/** Once a frame: the camera's biome's water, eased towards. */
+	static void updateExtinction() {
+		WaterSettings water = BedrockInputs.pack().map(pack -> pack.water(Underwater.currentBiomeWater())).orElse(null);
+		float chlorophyll = water == null ? 0 : Math.max(water.chlorophyll(), 0);
+		float sediment = water == null ? 0 : Math.max(water.suspendedSediment(), 0);
+		float cdom = water == null ? 0 : Math.max(water.cdom(), 0);
+		for (int i = 0; i < 3; i++) {
+			float lambda = WAVELENGTHS[i];
+			float absorption = CLEAR[i];
+			float scattering = 0;
+			if (chlorophyll > 0) {
+				absorption += CHLOROPHYLL_A[i] * (float) Math.pow(chlorophyll, CHLOROPHYLL_E[i]);
+				scattering += 0.3f * (float) Math.pow(chlorophyll, 0.62) * 550f / lambda;
+			}
+			absorption += 0.031f * sediment * (float) Math.exp(-0.0123 * (lambda - 443));
+			scattering += 0.5f * sediment * 550f / lambda;
+			absorption += cdom * (float) Math.exp(-0.014 * (lambda - 440));
+			TARGET_ABSORPTION[i] = absorption;
+			TARGET_SCATTERING[i] = scattering;
+		}
+		long now = System.nanoTime();
+		float seconds = lastEase == 0 ? 10f : (now - lastEase) / 1e9f;
+		lastEase = now;
+		float t = 1f - (float) Math.exp(-seconds * 3f);
+		for (int i = 0; i < 3; i++) {
+			ABSORPTION[i] += (TARGET_ABSORPTION[i] - ABSORPTION[i]) * t;
+			SCATTERING[i] += (TARGET_SCATTERING[i] - SCATTERING[i]) * t;
+		}
 	}
 
 	private static final Map<RenderPipeline, RenderPipeline> VARIANTS = new ConcurrentHashMap<>();
@@ -136,6 +183,13 @@ public final class WaterPass {
 		builder.putVec4(waves.frequencyScaling(), waves.speedScaling(), (float) waveSeconds, 0);
 		builder.putVec4((float) (camera.x - Math.floor(camera.x / WAVE_ORIGIN_GRID) * WAVE_ORIGIN_GRID), 0,
 				(float) (camera.z - Math.floor(camera.z / WAVE_ORIGIN_GRID) * WAVE_ORIGIN_GRID), 0);
+	}
+
+	/** The water extinction in use, for the diagnostics report. */
+	public static String extinctionStatus() {
+		float[] e = extinction();
+		return String.format(java.util.Locale.ROOT, "%s: %.4f %.4f %.4f per block", Underwater.currentBiomeWater(),
+				e[0], e[1], e[2]);
 	}
 
 	/** Whether a pack's water here has Bedrock's waves on. */
