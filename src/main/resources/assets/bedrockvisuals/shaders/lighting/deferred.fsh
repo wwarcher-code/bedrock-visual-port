@@ -407,6 +407,17 @@ vec3 fogTo(vec3 position, vec3 dir, float distance, float surfaceY, bool atSurfa
     return volumetricFog(dir, distance, transmittance);
 }
 
+// How far a reflection found at screen position uv (previousUv in the frame it's read from) is trusted near the
+// screen's edges, where the scene it reflects runs out: faded within 10% of an edge, but sideways only as far as
+// the hit lies sideways of this pixel. On a flat mirror (water) the reflection lies almost straight above the
+// pixel, so the water along the screen's sides lost its reflections though they were on screen.
+float reflectionEdgeFade(vec2 uv, vec2 previousUv) {
+    vec2 edge = min(min(uv, 1.0 - uv), min(previousUv, 1.0 - previousUv));
+    float drift = smoothstep(0.0, 0.05, abs(uv.x - texCoord.x));
+    float sideways = 1.0 - (1.0 - smoothstep(0.0, 0.1, edge.x)) * drift;
+    return min(sideways, smoothstep(0.0, 0.1, edge.y));
+}
+
 // Bedrock's screen-space reflections (ScreenSpaceReflections; reflection_configuration.pc.json: on below
 // roughness 0.4, fading from 0.3), for every smooth surface, not only water. The mirror ray is marched through
 // the G-buffer's depth; a hit takes the previous frame's HDR colour there. rgb: colour, a: confidence.
@@ -447,9 +458,7 @@ vec4 terrainReflection(vec3 origin, vec3 direction) {
                 return vec4(0.0);
             }
             // Fade near the screen's edges (fading_distance), where the reflected scene runs out.
-            vec2 edge = min(min(uv, 1.0 - uv), min(previousUv, 1.0 - previousUv));
-            float fade = smoothstep(0.0, 0.1, min(edge.x, edge.y));
-            return vec4(texture(PreviousScene, previousUv).rgb, fade);
+            return vec4(texture(PreviousScene, previousUv).rgb, reflectionEdgeFade(uv, previousUv));
         }
     }
     return vec4(0.0);
@@ -691,8 +700,7 @@ vec4 distantReflection(vec3 origin, vec3 direction) {
             if (any(lessThan(previousUv, vec2(0.0))) || any(greaterThan(previousUv, vec2(1.0)))) {
                 return vec4(0.0);
             }
-            vec2 edge = min(min(uv, 1.0 - uv), min(previousUv, 1.0 - previousUv));
-            return vec4(texture(PreviousScene, previousUv).rgb, smoothstep(0.0, 0.1, min(edge.x, edge.y)));
+            return vec4(texture(PreviousScene, previousUv).rgb, reflectionEdgeFade(uv, previousUv));
         }
     }
     return vec4(0.0);
