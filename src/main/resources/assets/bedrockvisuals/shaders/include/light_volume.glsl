@@ -67,4 +67,37 @@ float voxelVisibility(vec3 from, vec3 to) {
     return 1.0;
 }
 
+// Whether a ray from the camera-relative point from along direction (unit) meets a solid block before it leaves
+// the volume or has crossed maxCells blocks: 0 blocked, 1 clear.
+float voxelRayVisibility(vec3 from, vec3 direction, int maxCells) {
+    if (!inLightVolume(from)) {
+        return 1.0;
+    }
+    vec3 origin = from + fract(LightVolumeOrigin.xyz);
+    ivec3 cell = ivec3(floor(origin));
+    ivec3 stepDir = ivec3(sign(direction));
+    vec3 inv = 1.0 / max(abs(direction), vec3(1e-6));
+    vec3 tMax = (vec3(stepDir) * (vec3(cell) + 0.5 - origin) + 0.5) * inv;
+    for (int i = 0; i < maxCells; i++) {
+        if (tMax.x < tMax.y && tMax.x < tMax.z) {
+            cell.x += stepDir.x;
+            tMax.x += inv.x;
+        } else if (tMax.y < tMax.z) {
+            cell.y += stepDir.y;
+            tMax.y += inv.y;
+        } else {
+            cell.z += stepDir.z;
+            tMax.z += inv.z;
+        }
+        vec3 p = vec3(cell) + 0.5 - fract(LightVolumeOrigin.xyz);
+        if (max(abs(p.x), abs(p.z)) > 63.0 || abs(p.y) > 23.0) {
+            return 1.0;
+        }
+        if (solidCell(cell)) {
+            return 0.0;
+        }
+    }
+    return 1.0;
+}
+
 #endif

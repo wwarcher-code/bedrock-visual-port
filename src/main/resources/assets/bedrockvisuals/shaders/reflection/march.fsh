@@ -63,9 +63,9 @@ float distantDistanceAt(vec2 uv) {
     return length(view.xyz / view.w);
 }
 
-// The scene's distance from the camera at camera-relative point p's pixel, held to the screen's left and right
-// edges (a ray leaving sideways goes on up the edge column); false off the top or bottom, or where nothing was
-// drawn.
+// The scene's distance from the camera at camera-relative point p's pixel; false off the screen (uv -1: the ray
+// left it, and the scene probe, which holds the terrain around the camera, reflects what lies there) or where
+// nothing was drawn. (Held to the screen's sides, a ray leaving sideways ran up the edge column: streaks.)
 bool sceneAt(vec3 p, out float sceneDistance, out vec2 uv) {
     sceneDistance = -1.0;
     uv = vec2(-1.0);
@@ -74,12 +74,10 @@ bool sceneAt(vec3 p, out float sceneDistance, out vec2 uv) {
         return false;
     }
     uv = clip.xy / clip.w * 0.5 + 0.5;
-    if (uv.y < 0.0 || uv.y > 1.0) {
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
         uv = vec2(-1.0);
         return false;
     }
-    float halfTexel = 0.5 / float(textureSize(Depth, 0).x);
-    uv.x = clamp(uv.x, halfTexel, 1.0 - halfTexel);
     float depth = texture(Depth, uv).r;
     if (depth > 0.0) {
         vec4 world = InverseViewProjection * vec4(uv * 2.0 - 1.0, depth, 1.0);
@@ -187,7 +185,7 @@ void main() {
         vec2 uv;
         bool there = sceneAt(p, here, uv);
         if (uv.x < 0.0) {
-            break; // off the top or bottom of the screen
+            break; // off the screen: the scene probe's
         }
         if (!there || length(p) <= here) {
             previous = p;
@@ -208,7 +206,9 @@ void main() {
         float backScene;
         vec2 hitUv;
         if (sceneAt(back, backScene, hitUv) && length(back) - backScene < max(length(back - front) * 4.0, 1.0)) {
-            float fade = smoothstep(0.0, 0.08, min(hitUv.y, 1.0 - hitUv.y));
+            // Faded out towards the screen's edges, where the scene probe takes over.
+            vec2 edge = min(hitUv, 1.0 - hitUv);
+            float fade = smoothstep(0.0, 0.08, edge.y) * smoothstep(0.0, 0.05, edge.x);
             marchOut = vec4(hitUv, t, fade);
             return;
         }

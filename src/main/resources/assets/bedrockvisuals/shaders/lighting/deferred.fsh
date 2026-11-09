@@ -730,13 +730,11 @@ bool distantSceneAt(vec3 p, out float sceneDistance, out vec2 uv) {
     }
     vec3 ndc = clip.xyz / clip.w;
     uv = ndc.xy * 0.5 + 0.5;
-    if (uv.y < 0.0 || uv.y > 1.0) {
+    // Off the screen the ray misses and the scene probe reflects what lies there (held to the screen's sides, a
+    // ray leaving sideways ran up the edge column: streaks).
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
         return false;
     }
-    // Held to the screen's left and right edges: a mirror ray off the water that leaves the screen sideways goes
-    // on up the edge column (what it reflects lies almost straight above), rather than finding the sky.
-    uv.x = clamp(uv.x, 0.5 / float(textureSize(Depth, 0).x), 1.0 - 0.5 / float(textureSize(Depth, 0).x));
-    ndc.x = uv.x * 2.0 - 1.0;
     float sceneDepth = texture(Depth, uv).r;
     if (sceneDepth > 0.0) {
         vec4 scene = InverseViewProjection * vec4(ndc.xy, sceneDepth, 1.0);
@@ -789,13 +787,12 @@ vec4 distantReflection(vec3 origin, vec3 direction) {
                 return vec4(0.0);
             }
             vec2 previousUv = previousClip.xy / previousClip.w * 0.5 + 0.5;
-            previousUv.x = clamp(previousUv.x, 0.0, 1.0);
-            if (previousUv.y < 0.0 || previousUv.y > 1.0) {
+            if (any(lessThan(previousUv, vec2(0.0))) || any(greaterThan(previousUv, vec2(1.0)))) {
                 return vec4(0.0);
             }
-            // Faded only near the top and bottom: sideways the march holds to the edge (distantSceneAt).
-            vec2 previousEdge = min(previousUv, 1.0 - previousUv);
-            float fade = smoothstep(0.0, 0.1, min(min(hitUv.y, 1.0 - hitUv.y), previousEdge.y));
+            // Faded out towards the screen's edges, where the scene probe takes over.
+            vec2 edge = min(min(hitUv, 1.0 - hitUv), min(previousUv, 1.0 - previousUv));
+            float fade = smoothstep(0.0, 0.1, edge.y) * smoothstep(0.0, 0.05, edge.x);
             return vec4(texture(PreviousScene, clamp(previousUv, vec2(0.0), vec2(1.0))).rgb, fade);
         }
         previous = p;
@@ -1058,6 +1055,13 @@ void main() {
     vec3 nCaster = moonCasts ? nMoon : nSun;
     float mapped = shadowVisibility(snapToTexel(position, n), nCaster, moonCasts ? moonDir : sunDir, edgeFade);
     float casterVisibility = mapped < 0.0 ? skyFallback : mix(skyFallback, mapped * skyGuard, edgeFade);
+    // Underground, Sodium's cave culling leaves the rock and the surface above out of the sections it draws, so
+    // out of the shadow map, and the sun reached cave floors that had some sky light. Any ray from a cave to the
+    // sun crosses the rock right around it: where the sky light isn't full, the blocks towards the light are
+    // walked through the light volume's solid-block channel, and the first solid one shades the point.
+    if (skyLight < 0.999 && casterVisibility > 0.0) {
+        casterVisibility *= voxelRayVisibility(position + nCaster * 0.05, moonCasts ? moonDir : sunDir, 64);
+    }
     if (DebugParams.w > 6.5 && DebugParams.w < 10.5) {
         // The far terrain views (GBufferDebugView; the flicker test compares frames of each): each input to
         // Distant Horizons' terrain's lighting alone, black elsewhere. 7 DH's colour as it hands it over;

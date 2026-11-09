@@ -102,6 +102,11 @@ void main() {
         if (here.x >= 0.0) {
             stepAmbient = (SkyColor.rgb * here.x * here.x + BlockLightColor.rgb * blockLightColor(here.y)) * 0.07957747;
             stepSun = here.x > 0.0001 ? 1.0 : 0.0;
+            // As on the surfaces (deferred.fsh): where the sky light isn't full, the blocks towards the light
+            // stand in for casters missing from the shadow map (Sodium's cave culling), or caves' air glowed.
+            if (stepSun > 0.0 && here.x < 0.999) {
+                stepSun *= voxelRayVisibility(p, l, 24);
+            }
         }
         if (water && p.y < UnderwaterMedium.w) {
             extinction = UnderwaterMedium.rgb;

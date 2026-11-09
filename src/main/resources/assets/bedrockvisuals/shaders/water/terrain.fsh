@@ -349,24 +349,21 @@ bool onScreen(vec2 pixel, vec2 size) {
     return all(greaterThanEqual(pixel, vec2(0.0))) && all(lessThan(pixel, size));
 }
 
-// How far a reflection found at screen position hit is trusted near the top and bottom of the screen, where the
-// scene it reflects runs out (sideways, the marches hold to the edge: toScreenEdge).
+// How far a reflection found at screen position hit is trusted near the screen's edges, where the scene it
+// reflects runs out (the scene probe, which holds the terrain around the camera, takes over).
 float screenEdgeFade(vec2 hit, vec2 size) {
     vec2 edge = min(hit, size - hit) / size;
-    return smoothstep(0.0, 0.08, edge.y);
+    return smoothstep(0.0, 0.08, edge.y) * smoothstep(0.0, 0.05, edge.x);
 }
 
-// A point's screen position for the reflection marches, held to the screen's left and right edges: a mirror
-// ray that leaves the screen sideways goes on up the edge column (on water, what it reflects lies almost
-// straight above), rather than missing and showing the sky where the water meets the screen's edge.
+// A point's screen position for the reflection marches. A mirror ray that leaves the screen misses, and the scene
+// probe reflects what lies there (held to the screen's sides, it ran up the edge column: streaks).
 vec3 toScreenEdge(vec3 position, vec2 size, bool flipY) {
-    vec3 screen = toScreen(position, size, flipY);
-    screen.x = clamp(screen.x, 0.5, size.x - 0.5);
-    return screen;
+    return toScreen(position, size, flipY);
 }
 
 bool onScreenY(vec2 pixel, vec2 size) {
-    return pixel.y >= 0.0 && pixel.y < size.y;
+    return all(greaterThanEqual(pixel, vec2(0.0))) && all(lessThan(pixel, size));
 }
 
 vec4 screenSpaceReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
@@ -663,10 +660,16 @@ vec3 waterColor(WaterSurface s, float albedo) {
     float farHit = 0.0;
     vec3 reflection;
     if (resolved.w > -1.5) {
+        // The resolve holds the share of recent frames whose ray hit the screen (ripples flip rays between hit
+        // and miss) with their reflection premultiplied by it. Mixed by that share as it is, the scene probe's
+        // terrain, seen from where it was captured, showed through every reflection as a ghost; a pixel whose
+        // rays mostly hit takes the screen's reflection whole, and the probe only fills where they mostly miss.
         float confidence = clamp(resolved.w, 0.0, 1.0);
-        traced = vec4(resolved.rgb, confidence);
-        nearHit = confidence;
-        reflection = resolved.rgb * ssrWeight + skyReflection * (1.0 - confidence * ssrWeight);
+        vec3 hitColor = confidence > 1e-3 ? resolved.rgb / confidence : vec3(0.0);
+        float hitWeight = smoothstep(0.1, 0.45, confidence);
+        traced = vec4(hitColor * hitWeight, hitWeight);
+        nearHit = hitWeight;
+        reflection = mix(skyReflection, hitColor, hitWeight * ssrWeight);
     } else {
         traced = ssrWeight > 0.0 ? screenSpaceReflection(v_Position + s.n * 0.02, mirror, size, flipY) : vec4(0.0);
         nearHit = traced.a;
