@@ -1097,22 +1097,34 @@ void main() {
     vec3 color = directLight(nSun, v, sunDir, SunColor.rgb * sunVisibility, diffuseColor, f0, roughness);
     color += directLight(nMoon, v, moonDir, MoonColor.rgb * moonVisibility, diffuseColor, f0, roughness);
     color *= causticsMultiplier(position, n);
-    // Bedrock's point lights: each declared light block lights the surface from its centre, falling off with
-    // the square of the distance and to nothing at its radius (its light level in blocks). Only where
-    // Minecraft's block light reaches: it stands in for the point lights' shadows (PointLightShadowTextureAtlas).
-    if (PointLightCount.x > 0.5 && blockLight > 0.0) {
+    // Bedrock's point lights (DiscreteIndirectCombinedLightingPass with PointLightShading): each declared light
+    // block lights the surface from its centre out to its radius (its light level in blocks), by
+    // saturate(1 - (d²/r²)²)² / max(d², 0.1) times its colour and intensity, through the shading model's GGX
+    // specular and diffuse. Its shadow is one hard test per light (PointLightShadowTextureAtlas, a cube of depth per
+    // light): here the blocks between the surface and the light, from the light volume; beyond the volume,
+    // Minecraft's block light stands in (the light reaches only where it does).
+    if (PointLightCount.x > 0.5) {
         float reach = smoothstep(0.0, 0.15, blockLight);
         int count = min(int(PointLightCount.x + 0.5), MAX_POINT_LIGHTS);
+        vec3 from = position + n * 0.05;
         for (int i = 0; i < count; i++) {
             vec4 at = PointLights[i * 2];
             vec3 toLight = at.xyz - position;
-            float d = length(toLight);
-            if (d >= at.w || d < 1e-3) {
+            float d2 = dot(toLight, toLight);
+            if (d2 >= at.w * at.w || d2 < 1e-6) {
                 continue;
             }
-            float window = pow(clamp(1.0 - pow(d / at.w, 4.0), 0.0, 1.0), 2.0);
-            vec3 radiance = PointLights[i * 2 + 1].rgb * window / (d * d + 1.0) * reach;
-            color += directLight(n, v, toLight / d, radiance, diffuseColor, f0, roughness);
+            float falloff = clamp(1.0 - pow(d2 / (at.w * at.w + 1e-4), 2.0), 0.0, 1.0);
+            float attenuation = falloff * falloff / max(d2, 0.1);
+            float visible = voxelVisibility(from, at.xyz);
+            if (visible < 0.0) {
+                visible = reach;
+            }
+            if (visible <= 0.0) {
+                continue;
+            }
+            vec3 radiance = PointLights[i * 2 + 1].rgb * attenuation * visible;
+            color += directLight(n, v, toLight * inversesqrt(d2), radiance, diffuseColor, f0, roughness);
         }
     }
 

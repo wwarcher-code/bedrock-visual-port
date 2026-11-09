@@ -665,3 +665,22 @@ sun about 41° up; 2 under water; 3 midnight; 4 rain at noon; 5 thunder at noon.
 So weather greys the sun and moon like the sky (`rain_sky_color`, then `base_thunder_sky_color` by its 0.75
 contribution) at full illuminance; it doesn't switch direct light off. The renderer does the same.
 
+
+## Point lights and GPU block lighting (DeferredMixedResolutionLightingPrepass)
+
+`DiscreteIndirectCombinedLightingPass` has two flags, `PointLightShading` and `GPUBlockLighting`.
+
+- **Point lights** (`zLights`, clustered by `LightClustering`): each light is a position and radius, a colour
+  and intensity, and six atlas rects (`shadowFaceUV0..5`). A light falls off as
+  `saturate(1 - (d²/(r² + 1e-4))²)² / max(d², 0.1)` (d² is Manhattan squared when
+  `ManhattanDistAttenuationEnabled`), times colour × intensity, with an optional smoothstep window
+  (`PointLightAttenuationWindow`). The shading is the sun's: GGX, a Smith-style visibility, Schlick Fresnel,
+  wrapped diffuse for subsurface. The shadow picks the cube face by the major axis of (surface - light), projects
+  with `PointLightProj`, biases by `(Params1.x + Params1.y·tan θ) × AtlasRes.z / max(AtlasRes.x × faceWidth, 1)`
+  and makes one point-sampled depth compare: hard shadows. The renderer walks the blocks between the surface
+  and the light in the light volume's solid-block channel instead of rendering the atlas.
+- **GPU block lighting:** no propagation shader ships; the light is computed on the CPU and uploaded per
+  16³ section (`GpuEntryBuffer`, a hash table of section keys; `VoxelBuffer`, 4096 RGBA8 voxels per section plus
+  neighbour data). `CombineVoxelLighting` (compute) only cross-fades a changed section from its old voxels. The
+  lighting pass reads the voxel at `world + normal × 0.2 - 0.5`, bilinear across the face's plane (four voxels),
+  each `rgb × a × 9.227e-5` (a = intensity), in place of the G-buffer's per-vertex block-light colour.

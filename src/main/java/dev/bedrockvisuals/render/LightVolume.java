@@ -21,7 +21,8 @@ import org.lwjgl.system.MemoryUtil;
  * the whole view, and gives the sun's light only where some sky light reaches. This holds Minecraft's own light
  * levels for {@link #SIZE_XZ} x {@link #SIZE_Y} x {@link #SIZE_XZ} blocks around the camera, wrapping on world
  * coordinates (so a block always sits at the same texel), its horizontal slices side by side in a 2D texture,
- * {@link #TILES_X} across. A few slices are refreshed each frame.
+ * {@link #TILES_X} across. A few slices are refreshed each frame. Blue is 1 where the block is solid and opaque
+ * (isSolidRender): what the point lights' shadows are traced through.
  */
 public final class LightVolume {
 	static final int SIZE_XZ = 128;
@@ -67,7 +68,8 @@ public final class LightVolume {
 						pos.set(x, y, z);
 						int sky = level.getBrightness(LightLayer.SKY, pos);
 						int block = level.getBrightness(LightLayer.BLOCK, pos);
-						data.put((byte) (sky * 17)).put((byte) (block * 17)).put((byte) 0).put((byte) 255);
+						boolean solid = level.getBlockState(pos).isSolidRender();
+						data.put((byte) (sky * 17)).put((byte) (block * 17)).put((byte) (solid ? 255 : 0)).put((byte) 255);
 					}
 				}
 				data.flip();

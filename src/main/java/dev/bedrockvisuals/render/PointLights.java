@@ -29,9 +29,10 @@ import org.lwjgl.system.MemoryStack;
  * {@link #MAX} of the nearest within {@link #RADIUS} blocks; the blocks are found a slice of chunk sections at a
  * time, the whole area every {@link #SECTIONS_PER_FRAME}-th part a frame.
  *
- * <p>Vanilla's packs declare none; Vibrant Visuals packs can. Bedrock's point lights also cast shadows
- * (PointLightShadowTextureAtlas): here a point light reaches only where Minecraft's block light does, which keeps
- * it from shining through walls.
+ * <p>Vanilla's packs declare none; Vibrant Visuals packs can. Bedrock's point lights cast shadows from a cube
+ * of depth per light (PointLightShadowTextureAtlas); here the lighting pass walks the blocks between the surface
+ * and the light through the light volume's solid-block channel (LightVolume), and past the volume a light reaches
+ * only where Minecraft's block light does.
  */
 public final class PointLights {
 	static final int MAX = 64;
@@ -44,7 +45,7 @@ public final class PointLights {
 	 * Radiance at a block's distance for a full-brightness light, in this renderer's units (TUNE: Bedrock's point
 	 * light intensity isn't in its files; this puts a torch's light beside it near the block light's).
 	 */
-	private static final float INTENSITY = 4f;
+	private static final float INTENSITY = 2f;
 
 	private record Light(BlockPos pos, float r, float g, float b, float radius) {
 	}
