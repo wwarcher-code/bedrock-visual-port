@@ -663,36 +663,68 @@ float distantDistance(vec2 uv) {
 // DH's (terrainReflection sees only Java's, and its steps are sized for nearby surfaces), in steps that grow
 // with the distance from the camera. The hit is read from the previous frame's image, as for terrain.
 const int DISTANT_SSR_STEPS = 40;
+// The scene's distance from the camera at camera-relative point p's pixel (Java's depth, else DH's), and the
+// pixel's screen position; false off the screen or where neither drew anything.
+bool distantSceneAt(vec3 p, out float sceneDistance, out vec2 uv) {
+    sceneDistance = -1.0;
+    uv = vec2(-1.0);
+    vec4 clip = ViewProjection * vec4(p, 1.0);
+    if (clip.w <= 0.0) {
+        return false;
+    }
+    vec3 ndc = clip.xyz / clip.w;
+    uv = ndc.xy * 0.5 + 0.5;
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
+        return false;
+    }
+    float sceneDepth = texture(Depth, uv).r;
+    if (sceneDepth > 0.0) {
+        vec4 scene = InverseViewProjection * vec4(ndc.xy, sceneDepth, 1.0);
+        sceneDistance = length(scene.xyz / scene.w);
+    } else if (DistantParams.x > 0.5) {
+        sceneDistance = distantDistance(uv);
+    }
+    return sceneDistance >= 0.0;
+}
+
 vec4 distantReflection(vec3 origin, vec3 direction) {
     float stepLength = max(length(origin) * 0.01, 0.5);
     float travelled = 0.0;
+    vec3 previous = origin;
     for (int i = 0; i < DISTANT_SSR_STEPS; i++) {
         travelled += stepLength;
         stepLength *= 1.15;
         vec3 p = origin + direction * travelled;
-        vec4 clip = ViewProjection * vec4(p, 1.0);
-        if (clip.w <= 0.0) {
-            return vec4(0.0);
+        float sceneDistance;
+        vec2 uv;
+        bool there = distantSceneAt(p, sceneDistance, uv);
+        if (uv.x < 0.0) {
+            return vec4(0.0); // off the screen
         }
-        vec3 ndc = clip.xyz / clip.w;
-        vec2 uv = ndc.xy * 0.5 + 0.5;
-        if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
-            return vec4(0.0);
-        }
-        float sceneDistance = -1.0;
-        float sceneDepth = texture(Depth, uv).r;
-        if (sceneDepth > 0.0) {
-            vec4 scene = InverseViewProjection * vec4(ndc.xy, sceneDepth, 1.0);
-            sceneDistance = length(scene.xyz / scene.w);
-        } else if (DistantParams.x > 0.5) {
-            sceneDistance = distantDistance(uv);
-        }
-        if (sceneDistance < 0.0) {
+        if (!there || length(p) <= sceneDistance) {
+            previous = p;
             continue;
         }
-        float rayDistance = length(p);
-        if (rayDistance > sceneDistance && rayDistance - sceneDistance < max(stepLength * 2.0, 1.0)) {
-            vec4 previousClip = PreviousViewProjection * vec4(p + CameraMotion.xyz, 1.0);
+        // Behind the scene: the crossing is refined between the last step in front and this one, and is a hit if
+        // the refined point lies on the surface; else the ray passed behind something and goes on. (Taken only
+        // within two steps of the surface, rays grazing up a far mountain's face, whose steps there are tens of
+        // blocks long, jumped past it and found the sky: its reflection was cut off.)
+        vec3 front = previous;
+        vec3 back = p;
+        for (int j = 0; j < 6; j++) {
+            vec3 middle = (front + back) * 0.5;
+            float middleScene;
+            vec2 middleUv;
+            if (distantSceneAt(middle, middleScene, middleUv) && length(middle) > middleScene) {
+                back = middle;
+            } else {
+                front = middle;
+            }
+        }
+        float backScene;
+        vec2 hitUv;
+        if (distantSceneAt(back, backScene, hitUv) && length(back) - backScene < max(length(back - front) * 4.0, 1.0)) {
+            vec4 previousClip = PreviousViewProjection * vec4(back + CameraMotion.xyz, 1.0);
             if (previousClip.w <= 0.0) {
                 return vec4(0.0);
             }
@@ -700,8 +732,9 @@ vec4 distantReflection(vec3 origin, vec3 direction) {
             if (any(lessThan(previousUv, vec2(0.0))) || any(greaterThan(previousUv, vec2(1.0)))) {
                 return vec4(0.0);
             }
-            return vec4(texture(PreviousScene, previousUv).rgb, reflectionEdgeFade(uv, previousUv));
+            return vec4(texture(PreviousScene, previousUv).rgb, reflectionEdgeFade(hitUv, previousUv));
         }
+        previous = p;
     }
     return vec4(0.0);
 }
@@ -790,6 +823,15 @@ void main() {
     vec3 ray = viewRay(texCoord);
     // The angle one pixel spans, for the far clouds (taken here, where every pixel runs it).
     float footprint = 0.5 * (length(dFdx(ray)) + length(dFdy(ray)));
+    // A chunk Sodium has just started drawing is held back a few frames (columnHeld): DH's picture shows there
+    // until everything that lights the chunk has caught up, so it doesn't come in for a frame or two with other
+    // lighting.
+    if (depth > 0.0 && DistantParams.x > 0.5) {
+        vec4 javaWorld = InverseViewProjection * vec4(texCoord * 2.0 - 1.0, depth, 1.0);
+        if (columnHeld(javaWorld.xyz / javaWorld.w) && distantDistance(texCoord) >= 0.0) {
+            depth = 0.0;
+        }
+    }
     // Distant Horizons' terrain, where vanilla terrain doesn't cover the pixel: lit here like the rest, so it
     // matches the near terrain instead of carrying its own lighting and fog.
     float distant = depth <= 0.0 && DistantParams.x > 0.5 ? distantDistance(texCoord) : -1.0;

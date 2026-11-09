@@ -20,7 +20,7 @@ struct WaterColumn {
     float roof;
     float sky;
     float skyUnder;
-    bool loaded;  // Java's chunk is loaded (else its water is DH's seabed under the sea: WaterColumns.java)
+    bool loaded;  // Sodium draws Java's chunk (else its water is DH's seabed under the sea: WaterColumns.java)
 };
 
 bool waterColumnAt(vec3 p, out WaterColumn c) {
@@ -35,8 +35,19 @@ bool waterColumnAt(vec3 p, out WaterColumn c) {
     c.sky = floor(column.g / 4096.0) / 15.0;
     c.roof = mod(column.b, 4096.0);
     c.skyUnder = floor(column.b / 4096.0) / 15.0;
-    c.loaded = column.a > 0.5;
+    // 2: a chunk Sodium has just started drawing, held back for a few frames (columnHeld): not yet Java's.
+    c.loaded = column.a > 0.5 && column.a < 1.5;
     return c.surface > 0.0;
+}
+
+// Whether p's column lies in a chunk Sodium has just started drawing (WaterColumns.java holds it back a few
+// frames): its pixels show DH's picture until all that lights the chunk has caught up, so it comes in lit.
+bool columnHeld(vec3 p) {
+    if (WaterColumnOrigin.w < 0.5 || max(abs(p.x), abs(p.z)) > WATER_COLUMN_RANGE) {
+        return false;
+    }
+    ivec2 texel = ivec2(mod(floor(p.xz + WaterColumnOrigin.xz), 512.0));
+    return texelFetch(WATER_COLUMNS, texel, 0).a * 65535.0 > 1.5;
 }
 
 // How far below the water's surface the camera-relative point p is (blocks), or -1 when it isn't in the top

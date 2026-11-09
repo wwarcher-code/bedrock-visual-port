@@ -209,6 +209,16 @@ void surfaceTexelOf(int frame, out vec3 tangentNormal, out vec4 mers) {
     mers = mix(texelFetch(u_WaterMers, near, lod), texelFetch(u_WaterMers, far, lodUp), blend);
 }
 
+// The screen's encoding (toDisplay's last step, Bedrock's gamma) undone and redone: the water mixes its parts in
+// linear light, as Bedrock's does.
+vec3 displayToLinear(vec3 c) {
+    return pow(max(c, vec3(0.0)), max(Gamma.rgb, vec3(0.1)));
+}
+
+vec3 linearToDisplay(vec3 c) {
+    return pow(clamp(c, 0.0, 1.0), 1.0 / max(Gamma.rgb, vec3(0.1)));
+}
+
 // Defined with the surface fog below: the outer cascade's shadow test at p.
 float surfaceFogShadow(vec3 p);
 // Defined with the reflections below: Distant Horizons' ground at a texture and a clip position.
@@ -288,6 +298,14 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
     // for below (waterColor) non-negative; the per-channel tint goes into that color.
     float leastTransmitted = min(s.transmittance.r, min(s.transmittance.g, s.transmittance.b));
     s.opacity = clamp(1.0 - (1.0 - s.fresnel) * leastTransmitted, 0.0, 1.0);
+    // Seen from above, the water mixes its reflection with what lies beneath in linear light (waterColor), as
+    // Bedrock's deferred water does in HDR and the lighting pass does for DH's water. The mix needn't fit the
+    // one opacity the blend allows over the scene (a weighted sum in linear light is brighter than the same sum
+    // of encoded colours): drawn opaque, with what lies beneath taken from the scene copy. (Mixed in encoded
+    // colours, the near water's reflections came out much weaker than DH's water beside it.)
+    if (UnderwaterParams.x < 0.5) {
+        s.opacity = 1.0;
+    }
     // The water views that leave the surface out (GBufferDebugView 3 and 4): fully see-through.
     // And the far terrain views (7 to 10), which show only what's under it.
     // And the water map view (the shadow test's DebugParams.x 3), whose codes the surface's own shading
@@ -358,10 +376,10 @@ vec4 screenSpaceReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
         }
         float depth = texelFetch(u_GBufferDepth, ivec2(screen.xy), 0).r;
         if (depth > 0.0 && screen.z > viewDistance(depth)) {
-            // Behind the depth buffer: a hit unless far behind it (the ray passed behind an object).
-            if (screen.z - viewDistance(depth) > max(stepLength * 2.0, 1.0)) {
-                return vec4(0.0);
-            }
+            // Behind the depth buffer: the crossing is refined between the last step in front and this one, and
+            // is a hit if the refined point lies on the surface; else the ray passed behind a thin object and
+            // goes on. (Given up at the first object it passed behind, the reflections of what lay beyond it
+            // were cut off: the sky showed instead.)
             vec3 front = previous;
             vec3 back = point;
             for (int j = 0; j < SSR_REFINE; j++) {
@@ -374,9 +392,13 @@ vec4 screenSpaceReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
                     front = middle;
                 }
             }
-            vec2 hit = clamp(toScreen(back, size, flipY).xy, vec2(0.0), size - 1.0);
-            // Fade towards the screen's edges, where the reflected scene runs out.
-            return vec4(texelFetch(u_SceneColor, ivec2(hit), 0).rgb, screenEdgeFade(hit, size));
+            vec3 b = toScreen(back, size, flipY);
+            float bDepth = onScreen(b.xy, size) ? texelFetch(u_GBufferDepth, ivec2(b.xy), 0).r : 0.0;
+            if (bDepth > 0.0 && b.z - viewDistance(bDepth) < max(length(back - front) * 4.0, 0.5)) {
+                vec2 hit = clamp(b.xy, vec2(0.0), size - 1.0);
+                // Fade towards the screen's edges, where the reflected scene runs out.
+                return vec4(texelFetch(u_SceneColor, ivec2(hit), 0).rgb, screenEdgeFade(hit, size));
+            }
         }
         previous = point;
         stepLength *= 1.18;
@@ -403,12 +425,15 @@ float distantDistanceAt(vec2 uv, vec2 ndcXy) {
 // terrain the lighting pass lit into the scene copy), in steps that grow with the distance, so water near the
 // edge of the render distance reflects the far shore rather than the sky behind it.
 const int DISTANT_SSR_STEPS = 40;
+bool distantSceneAt(vec3 p, vec2 size, bool flipY, out float sceneDistance, out float rayDistance, out ivec2 pixel);
+
 vec4 distantReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
     if (DistantParams.x < 0.5) {
         return vec4(0.0);
     }
     float stepLength = max(length(origin) * 0.01, 1.0);
     float travelled = 0.0;
+    vec3 previous = origin;
     for (int i = 0; i < DISTANT_SSR_STEPS; i++) {
         travelled += stepLength;
         stepLength *= 1.15;
@@ -430,14 +455,60 @@ vec4 distantReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
             sceneDistance = distantDistanceAt(uv, ndcXy);
             rayDistance = length(point);
         }
-        if (sceneDistance < 0.0) {
+        if (sceneDistance < 0.0 || rayDistance <= sceneDistance) {
+            previous = point;
             continue;
         }
-        if (rayDistance > sceneDistance && rayDistance - sceneDistance < max(stepLength * 2.0, 1.0)) {
-            return vec4(texelFetch(u_SceneColor, pixel, 0).rgb, screenEdgeFade(screen.xy, size));
+        // Behind the scene: the crossing is refined between the last step in front and this one, and is a hit if
+        // the refined point lies on the surface; else the ray passed behind something and goes on. (Taken only
+        // within two steps of the surface, rays grazing up a far mountain's face, whose steps there are tens of
+        // blocks long, jumped past it and found the sky: its reflection was cut off.)
+        vec3 front = previous;
+        vec3 back = point;
+        for (int j = 0; j < 6; j++) {
+            vec3 middle = (front + back) * 0.5;
+            float sceneHere;
+            float rayHere;
+            ivec2 at;
+            if (distantSceneAt(middle, size, flipY, sceneHere, rayHere, at) && rayHere > sceneHere) {
+                back = middle;
+            } else {
+                front = middle;
+            }
         }
+        float sceneBack;
+        float rayBack;
+        ivec2 hitPixel;
+        if (distantSceneAt(back, size, flipY, sceneBack, rayBack, hitPixel)
+                && rayBack - sceneBack < max(length(back - front) * 4.0, 1.0)) {
+            return vec4(texelFetch(u_SceneColor, hitPixel, 0).rgb, screenEdgeFade(vec2(hitPixel), size));
+        }
+        previous = point;
     }
     return vec4(0.0);
+}
+
+// The scene's distance at camera-relative point p's pixel, and p's own in the same terms (along the view axis
+// against Java's depth, from the camera against DH's); false off the screen or where neither drew anything.
+bool distantSceneAt(vec3 p, vec2 size, bool flipY, out float sceneDistance, out float rayDistance, out ivec2 pixel) {
+    vec3 screen = toScreen(p, size, flipY);
+    pixel = ivec2(screen.xy);
+    sceneDistance = -1.0;
+    rayDistance = 0.0;
+    if (screen.z <= 0.0 || !onScreen(screen.xy, size)) {
+        return false;
+    }
+    float depth = texelFetch(u_GBufferDepth, pixel, 0).r;
+    if (depth > 0.0) {
+        sceneDistance = viewDistance(depth);
+        rayDistance = screen.z;
+    } else {
+        vec2 uv = (vec2(pixel) + 0.5) / size;
+        vec2 ndcXy = vec2(uv.x, flipY ? 1.0 - uv.y : uv.y) * 2.0 - 1.0;
+        sceneDistance = distantDistanceAt(uv, ndcXy);
+        rayDistance = length(p);
+    }
+    return sceneDistance >= 0.0;
 }
 
 // Bedrock's volumetric fog in front of the surface (DeferredWater applies the scattering volume on top: in-scatter
@@ -580,6 +651,8 @@ vec3 waterColor(WaterSurface s, float albedo) {
         }
     }
     vec3 reflection = mix(skyReflection, traced.rgb, traced.a * ssrWeight);
+    // In linear light from here (displayToLinear): the colours above are encoded for the screen.
+    vec3 reflectionLinear = displayToLinear(reflection);
     // The reflection views (the flicker test's): 11 where each reflection comes from (red: the screen-space
     // march's hit, green: the far march's against Distant Horizons' depth, blue: the sky's share), 12 the
     // reflected sky alone, 13 the reflected scene alone. Drawn opaque (waterSurface).
@@ -606,16 +679,16 @@ vec3 waterColor(WaterSurface s, float albedo) {
 
     vec3 behind = texelFetch(u_SceneColor, ivec2(gl_FragCoord.xy), 0).rgb;
     // Bedrock's water only absorbs (WaterExtinction); light scattered in the water comes from volumetric fog.
-    vec3 transmitted = behind * s.transmittance;
+    vec3 transmitted = displayToLinear(behind) * s.transmittance;
     if (s.scatters) {
         // Beyond the water column map, the water's own scattered light (the lighting pass adds it within).
-        transmitted += toDisplay(locallyExposed(waterInScatter(normalize(v_Position), s.path, s.beneathLit,
+        transmitted += displayToLinear(toDisplay(locallyExposed(waterInScatter(normalize(v_Position), s.path, s.beneathLit,
                 // The surface's sky light (one level up for the water block's own dimming of it), as the
                 // lighting pass takes its column's.
                 min(VolumeCamera.x, s.beneathSky >= 0.0 ? waterSkyAccess(s.beneathSky)
-                        : waterSkyAccess(clamp(levels.y + 1.0 / 15.0, 0.0, 1.0))))));
+                        : waterSkyAccess(clamp(levels.y + 1.0 / 15.0, 0.0, 1.0)))))));
     }
-    vec3 surfaceLight = specularScale * reflection + toDisplay(locallyExposed(glint));
+    vec3 surfaceLight = specularScale * reflectionLinear + displayToLinear(toDisplay(locallyExposed(glint)));
     // DeferredWater fogs the surface's own light like terrain: towards the sky radiance (blended to the
     // underground colour where sky light is low) times its alpha F, by the distance fog. What shows through
     // was fogged by the lighting pass already.
@@ -625,17 +698,17 @@ vec3 waterColor(WaterSurface s, float albedo) {
             float open = max(sqrt(VolumeCamera.x) * 15.0 / 16.0, levels.y);
             vec3 fogColor = toDisplay(locallyExposed(
                     bedrockSkyRadiance(normalize(v_Position), sunDir, moonDir) * AtmosphereHorizon.w * open));
-            surfaceLight = mix(surfaceLight, fogColor * s.fresnel, fog);
+            surfaceLight = mix(surfaceLight, displayToLinear(fogColor) * s.fresnel, fog);
         }
         // Then the volumetric fog between the camera and the surface.
         vec3 fogTransmittance;
         vec3 fogLight = surfaceFog(normalize(v_Position), length(v_Position), fogTransmittance);
-        surfaceLight = surfaceLight * fogTransmittance + toDisplay(locallyExposed(fogLight)) * s.fresnel;
+        surfaceLight = surfaceLight * fogTransmittance + displayToLinear(toDisplay(locallyExposed(fogLight))) * s.fresnel;
     }
     if (abs(DebugParams.w - 5.0) < 0.5) {
         transmitted = vec3(0.0); // the surface view: its reflection and glint alone
     }
-    vec3 target = clamp(surfaceLight + (1.0 - s.fresnel) * transmitted, 0.0, 1.0);
+    vec3 target = linearToDisplay(surfaceLight + (1.0 - s.fresnel) * transmitted);
     return clamp((target - (1.0 - s.opacity) * behind) / max(s.opacity, 1e-3), 0.0, 1.0);
 }
 
@@ -667,6 +740,14 @@ void main() {
         if (Animation.w > 0.0 && UnderwaterParams.x < 0.5 && abs(faceNormal.y) < 0.2
                 && length(v_Position.xz) > Animation.w) {
             discard;
+        }
+        // In a chunk Sodium has just started drawing (columnHeld), the lighting pass shows DH's picture for a few
+        // frames; this water gives way to it until then.
+        if (DistantParams.x > 0.5 && UnderwaterParams.x < 0.5 && columnHeld(v_Position)) {
+            vec4 clip = u_ProjectionMatrix * u_ModelViewMatrix * vec4(v_Position, 1.0);
+            if (distantDistanceAt(gl_FragCoord.xy / vec2(textureSize(u_GBufferDepth, 0)), clip.xy / clip.w) > 0.0) {
+                discard;
+            }
         }
         WaterSurface surface = waterSurface(faceNormal, tangent, bitangent);
         #ifdef OIT_ALPHA_ONLY

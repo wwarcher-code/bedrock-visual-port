@@ -72,6 +72,15 @@ public final class WaterColumns {
 	 */
 	private static final long[] checkedChunk = new long[32 * 32];
 	private static final boolean[] drawnChunk = new boolean[32 * 32];
+	/**
+	 * The frame until which a chunk Sodium has just started drawing is held back: marked in the map (alpha 2)
+	 * so the lighting pass shows DH's picture there and the water pass leaves its water out, until whatever
+	 * lights it has caught up (a frame or two came in with other lighting even with the map current).
+	 */
+	private static final long[] heldUntil = new long[32 * 32];
+	/** Frames a new chunk is held back. */
+	private static final int HOLD_FRAMES = 5;
+	private static long frame;
 	/** Chunks mapped again at most per frame. */
 	private static final int CHUNKS_PER_FRAME = 64;
 
@@ -119,8 +128,22 @@ public final class WaterColumns {
 		remapChangedChunks(level, cameraX >> 4, cameraZ >> 4);
 	}
 
-	/** Maps again, this frame, the chunks around the render distance whose drawn state changed. */
+	/** Whether the chunk is held back (just started being drawn; see {@link #heldUntil}). */
+	private static boolean held(int chunkX, int chunkZ) {
+		int index = Math.floorMod(chunkZ, 32) * 32 + Math.floorMod(chunkX, 32);
+		return checkedChunk[index] == chunkKey(chunkX, chunkZ) && drawnChunk[index] && heldUntil[index] > frame;
+	}
+
+	private static long chunkKey(int chunkX, int chunkZ) {
+		return ((long) chunkX << 32) ^ (chunkZ & 0xFFFFFFFFL);
+	}
+
+	/**
+	 * Maps again, this frame, the chunks around the render distance whose drawn state changed, and those whose
+	 * hold has just ended.
+	 */
 	private static void remapChangedChunks(ClientLevel level, int cameraChunkX, int cameraChunkZ) {
+		frame++;
 		int reach = Math.min(renderDistance + 2, 15);
 		int seaY = level.getSeaLevel() - 1;
 		int done = 0;
@@ -132,14 +155,22 @@ public final class WaterColumns {
 					int cx = cameraChunkX + dx;
 					int cz = cameraChunkZ + dz;
 					int index = Math.floorMod(cz, 32) * 32 + Math.floorMod(cx, 32);
-					long key = ((long) cx << 32) ^ (cz & 0xFFFFFFFFL);
+					long key = chunkKey(cx, cz);
 					boolean drawn = level.getChunkSource().getChunk(cx, cz, false) != null && sodiumDraws(cx, seaY, cz);
-					if (checkedChunk[index] == key && drawnChunk[index] == drawn) {
+					boolean holdEnds = checkedChunk[index] == key && drawn && heldUntil[index] != 0
+							&& heldUntil[index] <= frame;
+					if (checkedChunk[index] == key && drawnChunk[index] == drawn && !holdEnds) {
 						continue;
 					}
 					boolean first = checkedChunk[index] != key;
+					if (drawn && !holdEnds && (first || !drawnChunk[index])) {
+						heldUntil[index] = frame + HOLD_FRAMES;
+					}
 					checkedChunk[index] = key;
 					drawnChunk[index] = drawn;
+					if (holdEnds || !drawn) {
+						heldUntil[index] = 0;
+					}
 					if (first && !drawn) {
 						continue; // newly in reach and not drawn: the row band has it as it is
 					}
@@ -170,7 +201,8 @@ public final class WaterColumns {
 	 * water); g the lowest water block's y above the floor (low 12 bits) and the sky light reaching the water
 	 * (high 4); b the height of the underside of the first ledge under the surface with water beneath it (0
 	 * for none; low 12 bits) and the sky light of the water just under it (high 4); a 1 where the column's
-	 * chunk is drawn by Sodium (else any water is Distant Horizons' seabed under the sea, see below).
+	 * chunk is drawn by Sodium (else any water is Distant Horizons' seabed under the sea, see below), 2 while
+	 * that chunk is held back after it first appears ({@link #heldUntil}).
 	 */
 	private static void encode(ByteBuffer data, ClientLevel level, BlockPos.MutableBlockPos pos, int x, int z) {
 		int surface = 0;
@@ -255,7 +287,8 @@ public final class WaterColumns {
 			}
 		}
 		data.putShort((short) surface).putShort((short) ((bottom & 0xFFF) | (sky << 12)))
-				.putShort((short) ((roof & 0xFFF) | (skyBelow << 12))).putShort((short) (rendered ? 1 : 0));
+				.putShort((short) ((roof & 0xFFF) | (skyBelow << 12)))
+				.putShort((short) (!rendered ? 0 : held(x >> 4, z >> 4) ? 2 : 1));
 	}
 
 	/**
