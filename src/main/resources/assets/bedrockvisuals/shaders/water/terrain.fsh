@@ -646,8 +646,10 @@ void main() {
     // Flat face normal from screen-space derivatives (turned to face the camera in waterSurface).
     vec3 dpx = dFdx(v_Position);
     vec3 dpy = dFdy(v_Position);
+    // Against gl_FragCoord's own change down the screen: this backend's derivative of y can run against its
+    // gl_FragCoord.y, and taken alone it turned every reflection's search upside down.
     vec4 clipHere = u_ProjectionMatrix * u_ModelViewMatrix * vec4(v_Position, 1.0);
-    screenFlipped = dFdy(clipHere.y / clipHere.w) < 0.0;
+    screenFlipped = dFdy(clipHere.y / clipHere.w) * dFdy(gl_FragCoord.y) < 0.0;
     vec3 faceNormal = normalize(cross(dpx, dpy));
     // Tangent frame from position and UV derivatives: the directions the texture's u and v run on this face.
     vec2 duvx = dFdx(v_TexCoord);

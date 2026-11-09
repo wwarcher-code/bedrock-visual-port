@@ -772,6 +772,7 @@ void main() {
     // further out, so by the edge the picture is DH's. Under the water, the share is taken where the view meets
     // the water's surface, as the water pass takes it.
     bool handedOver = false;
+    float handedWater = -1.0; // where the view met Java's water's surface, for a pixel handed over under it
     if (depth > 0.0 && DistantParams.x > 0.5) {
         vec4 javaWorld = InverseViewProjection * vec4(texCoord * 2.0 - 1.0, depth, 1.0);
         vec3 javaPoint = javaWorld.xyz / javaWorld.w;
@@ -787,6 +788,7 @@ void main() {
             if (borderDither() < borderShare(at, FroxelParams.yz)) {
                 depth = 0.0;
                 handedOver = true;
+                handedWater = at == javaPoint ? -1.0 : length(at);
             }
         }
     }
@@ -833,6 +835,14 @@ void main() {
             distantWaterHere = false;
             distantTranslucent = false;
         }
+    }
+    // Handed over under Java's water, where DH's own water didn't show (it can leave it out among the chunks
+    // Java draws): DH's water at the surface Java's had, so the band's water is all one surface (shaded as
+    // seabed under water with no surface, it carried the near water's colour out to the chunk edge).
+    if (handedOver && handedWater > 0.0 && !distantWaterHere && distant >= 0.0 && handedWater < distant) {
+        distantWaterHere = true;
+        distantWater = handedWater;
+        distantTranslucent = false;
     }
     if (distantWaterHere && distant < 0.0) {
         distant = distantWater + 64.0; // nothing drawn under it: deep water
