@@ -22,7 +22,8 @@ public final class DevCommands {
 			  /bv spot <name> remove   forget it
 			  /bv spots           list this world's spots
 			  /bv go <name>       go to a spot
-			  /bv capture [name]  same as F9, or just one spot ("scene" for the test scene)
+			  /bv capture [name]  same as F9, or one section: flicker, scene (times, debug, horizon, underwater,
+			                      rain), spots, or one spot by name; a sheet-<section>.png set per section
 			  /bv flicker         the flicker test alone (far terrain and reflections), where you stand (about 30 seconds)
 			  /bv status          copy the diagnostics report to the clipboard""";
 
@@ -65,10 +66,15 @@ public final class DevCommands {
 						.then(ClientCommands.literal("capture").executes(c -> {
 							TestCapture.start();
 							return 1;
-						}).then(ClientCommands.argument("name", StringArgumentType.word()).executes(c -> {
+						}).then(ClientCommands.argument("name", StringArgumentType.word()).suggests((c, builder) -> {
+							TestCapture.SECTIONS.forEach(builder::suggest);
+							TestSpots.all().keySet().stream().filter(n -> !n.equals(TestSpots.SCENE)).forEach(builder::suggest);
+							return builder.buildFuture();
+						}).executes(c -> {
 							String name = StringArgumentType.getString(c, "name");
-							if (!name.equals(TestSpots.SCENE) && TestSpots.get(name).isEmpty()) {
-								feedback(c.getSource(), "No spot called " + name + " in this world (/bv spots lists them).");
+							if (!TestCapture.SECTIONS.contains(name) && TestSpots.get(name).isEmpty()) {
+								feedback(c.getSource(), "No section or spot called " + name + " (sections: "
+										+ String.join(", ", TestCapture.SECTIONS) + "; /bv spots lists the spots).");
 								return 0;
 							}
 							TestCapture.start(name);

@@ -6,7 +6,7 @@ PBR renderer on the native Vulkan backend, alongside Sodium and Distant Horizons
 Design doc: https://claude.ai/artifact/Sf95jvy5UQoAoqr1DMriZm
 
 To test a change in game, see [TESTING.md](TESTING.md): `.\test.cmd` pulls and launches into the test world,
-**F9** captures every view at four times of day into one contact sheet and copies a diagnostics report to
+**F9** captures every view at four times of day into contact sheets (one set per section) and copies a diagnostics report to
 the clipboard, and `/bv scene` builds a standard test scene.
 
 ## Build

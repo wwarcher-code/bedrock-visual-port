@@ -69,7 +69,13 @@ public final class TestCapture {
 	private static boolean running;
 	private static Path folder;
 	private static DiagnosticsReport report;
-	private static List<List<ContactSheet.Cell>> sheet;
+	/** The contact sheets' rows by section, in capture order (ContactSheet writes a sheet set per section). */
+	private static java.util.Map<String, List<List<ContactSheet.Cell>>> sheet;
+	/** The test scene's sections, which /bv capture takes alone or "scene" takes together. */
+	public static final List<String> SCENE_SECTIONS = List.of("times", "debug", "horizon", "underwater", "rain");
+	/** Every section name /bv capture takes, besides saved spots' names. */
+	public static final List<String> SECTIONS = List.of("flicker", "scene", "times", "debug", "horizon",
+			"underwater", "rain", "spots");
 
 	// State to restore afterwards.
 	private static boolean hudWasHidden;
@@ -96,9 +102,24 @@ public final class TestCapture {
 		start(null);
 	}
 
-	/** @param only a saved spot's name to capture alone ("scene" for the test scene), or null for all */
+	/**
+	 * @param only a section ({@link #SECTIONS}: "scene" for all of the test scene's, "spots" for every saved
+	 *             spot, "flicker" for the flicker test alone) or a saved spot's name to capture alone, or null
+	 *             for everything
+	 */
 	public static void start(String only) {
-		start(only, false);
+		if ("flicker".equals(only)) {
+			start(null, true);
+		} else {
+			start(only, false);
+		}
+	}
+
+	/** A new row of the contact sheet in the given section. */
+	private static List<ContactSheet.Cell> newRow(String section) {
+		List<ContactSheet.Cell> row = new ArrayList<>();
+		sheet.computeIfAbsent(section, k -> new ArrayList<>()).add(row);
+		return row;
 	}
 
 	/**
@@ -129,7 +150,7 @@ public final class TestCapture {
 			return;
 		}
 		report = new DiagnosticsReport("Bedrock Visuals test capture " + folder.getFileName());
-		sheet = new ArrayList<>();
+		sheet = new java.util.LinkedHashMap<>();
 		hudWasHidden = minecraft.gui.hud.isHidden();
 		viewBefore = GBufferDebugView.view();
 		lightingBefore = DeferredRenderer.isEnabled();
@@ -158,21 +179,29 @@ public final class TestCapture {
 			command("weather clear");
 		});
 		// Before anything moves the camera or the time: the far terrain's flicker test, from where the player
-		// stands.
-		addFlickerShots();
+		// stands (everything only).
+		if (only == null) {
+			addFlickerShots();
+		}
 		java.util.Map<String, TestSpots.Spot> spots = TestSpots.all();
 		TestSpots.Spot scene = spots.get(TestSpots.SCENE);
-		boolean sceneRows = only == null || only.equals(TestSpots.SCENE);
-		if (sceneRows) {
+		java.util.Set<String> sceneSections = new java.util.HashSet<>();
+		if (only == null || only.equals(TestSpots.SCENE)) {
+			sceneSections.addAll(SCENE_SECTIONS);
+		} else if (SCENE_SECTIONS.contains(only)) {
+			sceneSections.add(only);
+		}
+		if (!sceneSections.isEmpty()) {
 			// At the saved test scene (or, with none saved, from where the player stands).
 			TestSpots.Spot base = scene != null ? scene : here;
 			if (scene != null) {
 				teleport(scene);
 			}
-			addSceneShots(base);
+			addSceneShots(base, sceneSections);
 		}
+		boolean allSpots = only == null || only.equals("spots");
 		for (java.util.Map.Entry<String, TestSpots.Spot> spot : spots.entrySet()) {
-			if (spot.getKey().equals(TestSpots.SCENE) || (only != null && !only.equals(spot.getKey()))) {
+			if (spot.getKey().equals(TestSpots.SCENE) || !(allSpots || spot.getKey().equals(only))) {
 				continue;
 			}
 			addSpotShots(spot.getKey(), spot.getValue());
@@ -187,10 +216,6 @@ public final class TestCapture {
 	 */
 	private static void addFlickerShots() {
 		FlickerTest.reset();
-		List<ContactSheet.Cell> shots = new ArrayList<>();
-		List<ContactSheet.Cell> differences = new ArrayList<>();
-		sheet.add(shots);
-		sheet.add(differences);
 		STEPS.add(() -> {
 			AutoExposure.settle();
 			wait = TICKS_AFTER_VIEW_CHANGE;
@@ -198,9 +223,10 @@ public final class TestCapture {
 		for (FlickerTest.Pass pass : FlickerTest.PASSES) {
 			View view = pass.view();
 			String label = pass.label();
-			shots.add(new ContactSheet.Cell(FlickerTest.frame(folder, pass, 0), "flicker - " + label));
-			differences.add(new ContactSheet.Cell(FlickerTest.difference(folder, pass), "flicker - " + label
-					+ " changes"));
+			// Each pass's first shot beside where it changed.
+			List<ContactSheet.Cell> row = newRow("flicker");
+			row.add(new ContactSheet.Cell(FlickerTest.frame(folder, pass, 0), "flicker - " + label));
+			row.add(new ContactSheet.Cell(FlickerTest.difference(folder, pass), "flicker - " + label + " changes"));
 			STEPS.add(() -> {
 				DeferredRenderer.setEnabled(true);
 				GBufferDebugView.setView(view);
@@ -236,12 +262,15 @@ public final class TestCapture {
 	 * The test scene's rows from its camera: four times of day (lit, vanilla, shadows, material), the debug
 	 * rows at noon, the horizon shots, the underwater shots and rain.
 	 */
-	private static void addSceneShots(TestSpots.Spot base) {
+	private static void addSceneShots(TestSpots.Spot base, java.util.Set<String> sections) {
 		for (int t = 0; t < TIMES.length; t++) {
 			long time = TIMES[t];
 			String timeLabel = TIME_LABELS[t];
-			List<ContactSheet.Cell> row = new ArrayList<>();
-			sheet.add(row);
+			boolean timesRow = sections.contains("times");
+			boolean debugRows = t == 0 && sections.contains("debug");
+			if (!timesRow && !debugRows) {
+				continue;
+			}
 			STEPS.add(() -> {
 				command("time set " + time);
 				wait = TICKS_AFTER_TIME_CHANGE;
@@ -254,25 +283,32 @@ public final class TestCapture {
 				wait = TICKS_AFTER_VIEW_CHANGE;
 			});
 			STEPS.add(() -> report.lightingAt(timeLabel + " (" + time + ")"));
-			for (View view : VIEWS) {
-				addShot(row, timeLabel, view);
+			if (timesRow) {
+				List<ContactSheet.Cell> row = newRow("times");
+				for (View view : VIEWS) {
+					addShot(row, timeLabel, view);
+				}
 			}
-			if (t == 0) {
-				List<ContactSheet.Cell> extras = new ArrayList<>();
+			if (debugRows) {
+				List<ContactSheet.Cell> extras = newRow("debug");
 				for (View view : EXTRA_VIEWS) {
 					addShot(extras, timeLabel, view);
 				}
-				sheet.add(extras);
-				List<ContactSheet.Cell> extras2 = new ArrayList<>();
+				List<ContactSheet.Cell> extras2 = newRow("debug");
 				for (View view : EXTRA_VIEWS_2) {
 					addShot(extras2, timeLabel, view);
 				}
-				sheet.add(extras2);
 			}
 		}
-		addHorizonShots(base);
-		addUnderwaterShots(base);
-		addRainShots();
+		if (sections.contains("horizon")) {
+			addHorizonShots(base);
+		}
+		if (sections.contains("underwater")) {
+			addUnderwaterShots(base);
+		}
+		if (sections.contains("rain")) {
+			addRainShots();
+		}
 	}
 
 	/**
@@ -286,8 +322,7 @@ public final class TestCapture {
 		for (int i = 0; i < times.length; i++) {
 			long time = times[i];
 			String label = name + " " + labels[i];
-			List<ContactSheet.Cell> row = new ArrayList<>();
-			sheet.add(row);
+			List<ContactSheet.Cell> row = newRow("spot-" + name);
 			STEPS.add(() -> {
 				command("time set " + time);
 				wait = TICKS_AFTER_TIME_CHANGE;
@@ -315,8 +350,7 @@ public final class TestCapture {
 	 */
 	private static void addUnderwaterShots(TestSpots.Spot base) {
 		String back = base.teleport();
-		List<ContactSheet.Cell> row = new ArrayList<>();
-		sheet.add(row);
+		List<ContactSheet.Cell> row = newRow("underwater");
 		STEPS.add(() -> {
 			command("time set 6000");
 			command(back);
@@ -339,8 +373,7 @@ public final class TestCapture {
 	 * for that; the weather is cleared again afterwards.
 	 */
 	private static void addRainShots() {
-		List<ContactSheet.Cell> row = new ArrayList<>();
-		sheet.add(row);
+		List<ContactSheet.Cell> row = newRow("rain");
 		STEPS.add(() -> {
 			command("time set 6000");
 			command("weather rain");
@@ -365,8 +398,7 @@ public final class TestCapture {
 		String back = base.teleport();
 		String up = new TestSpots.Spot(base.dimension(), base.x(), base.y(), base.z(), base.yaw(), HORIZON_PITCH)
 				.teleport();
-		List<ContactSheet.Cell> row = new ArrayList<>();
-		sheet.add(row);
+		List<ContactSheet.Cell> row = newRow("horizon");
 		long[] times = {6000, 11500};
 		String[] labels = {"horizon noon", "horizon low sun"};
 		for (int i = 0; i < times.length; i++) {
@@ -466,16 +498,19 @@ public final class TestCapture {
 		report.logExcerpt(minecraft.gameDirectory.toPath());
 		String reportText = report.text();
 		Path captureFolder = folder;
-		List<List<ContactSheet.Cell>> cells = sheet;
+		java.util.Map<String, List<List<ContactSheet.Cell>>> cells = sheet;
 		Util.ioPool().execute(() -> {
 			// The flicker test's comparison first: its difference images go on the sheet, its results in the report.
-			String text = reportText + FlickerTest.analyse(captureFolder);
+			String text = reportText + (cells.containsKey("flicker") ? FlickerTest.analyse(captureFolder) : "");
 			minecraft.execute(() -> minecraft.keyboardHandler.setClipboard(text));
 			try {
 				Files.writeString(captureFolder.resolve("report.txt"), text, StandardCharsets.UTF_8);
-				ContactSheet.write(cells, captureFolder.resolve("contact-sheet.png"));
+				List<Path> sheets = ContactSheet.write(cells, captureFolder);
+				String names = sheets.size() <= 4 ? String.join(", ", sheets.stream()
+						.map(sheetFile -> sheetFile.getFileName().toString()).toList())
+						: sheets.size() + " sheet-*.png files";
 				minecraft.execute(() -> {
-					message("Capture saved. The report is on your clipboard; send it with contact-sheet.png.");
+					message("Capture saved. The report is on your clipboard; send it with " + names + ".");
 					Blaze3D.openPath(captureFolder);
 				});
 			} catch (IOException | RuntimeException e) {

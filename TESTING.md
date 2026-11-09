@@ -34,16 +34,18 @@ of minutes.
      test. The lit view, each input to the far terrain's lighting (its colour, depth, rebuilt normal and
      shadow) and the water's reflections (their sources, the reflected sky, the reflected scene; ripples held
      still) are shot a dozen times with nothing changed. The report says how much of the far
-     terrain changes in each, and the sheet's second row shows where (bright: changed; dark blue: steady);
+     terrain changes in each, and each pass's shot sits beside where it changed (bright: changed; dark blue: steady);
    - at the test scene: screenshots at noon, afternoon, low sun and midnight (lit, vanilla, shadow test,
      material), the debug rows at noon (albedo, normal, light, local exposure; then bloom, shadow cascades and
      the water map), horizon shots at noon and low sun, a shot from inside the pool, and rain;
    - at each saved spot: noon lit, vanilla and the water map, then low sun lit and vanilla.
 
    Each teleport waits about five seconds for the terrain to load. Afterwards it puts you back where you
-   were, restores the time, view and HUD, and opens the folder. `/bv capture ocean` shoots one spot alone,
-   `/bv capture scene` the scene alone.
-4. Send Claude **`contact-sheet.png`** from the folder that opened, and paste the clipboard (Ctrl+V): it
+   were, restores the time, view and HUD, and opens the folder. Each part can be run alone with
+   `/bv capture <section>`: `flicker`, `scene` (or one of its parts: `times`, `debug`, `horizon`, `underwater`,
+   `rain`), `spots`, or a spot's name (`/bv capture ocean`).
+4. Send Claude the **`sheet-*.png`** files from the folder that opened (one set per section, two shots a line,
+   large enough to read), and paste the clipboard (Ctrl+V): it
    holds the diagnostics report (build commit, mod versions, GPU, pass status, Bedrock data, biome,
    lighting per time and recent errors). The individual screenshots are in the same folder if Claude asks
    for one at full size.
@@ -155,7 +157,7 @@ Don't move between the commands: the shots must be taken from where `bv/scene` p
 | F8 | Deferred lighting on and off, for comparison with vanilla |
 | F9 or `/bv capture` | The full test capture above (scene and every spot); F9 again cancels it |
 | `/bv flicker` | The flicker test alone (far terrain and the water's reflections), where you stand and as things are (about 30 seconds) |
-| `/bv capture <name>` | Capture one spot alone (`scene` for the test scene) |
+| `/bv capture <name>` | One section alone (`flicker`, `scene`, `times`, `debug`, `horizon`, `underwater`, `rain`, `spots`) or one spot by name |
 | `/bv scene` | Go to this world's test scene (builds it where you stand the first time) |
 | `/bv scene build` | Build the test scene where you stand, and remember it |
 | `/bv spot <name>` | Remember this view; `/bv spot <name> remove` forgets it |

@@ -833,6 +833,13 @@ void main() {
             distantTranslucent = false;
         }
     }
+    // DH puts its water's surface at the top of the block; Java's water under air stands at 8/9 of it. At sea
+    // level, DH's water is put at Java's height, so the far water's reflections line up with the near water's
+    // across the chunk edge.
+    if (distantWaterHere && ray.y < -1e-3 && DistantLightmap.w < 0.0
+            && abs((ray * distantWater).y - DistantLightmap.w) < 0.5) {
+        distantWater = DistantLightmap.w / ray.y;
+    }
     if (distantWaterHere && distant < 0.0) {
         distant = distantWater + 64.0; // nothing drawn under it: deep water
     }

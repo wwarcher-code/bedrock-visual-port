@@ -64,6 +64,16 @@ public final class WaterColumns {
 	private static double cameraX;
 	private static double cameraZ;
 	private static int renderDistance;
+	/**
+	 * Per chunk of the map (32 x 32, wrapping like the map): which chunk it was last checked for and whether
+	 * Sodium drew it then. A chunk Sodium starts (or stops) drawing is mapped again at once: left to the row
+	 * band, it was shaded for up to 16 frames as if Sodium weren't drawing it (as DH's water or none), a flash of
+	 * different lighting as it came in.
+	 */
+	private static final long[] checkedChunk = new long[32 * 32];
+	private static final boolean[] drawnChunk = new boolean[32 * 32];
+	/** Chunks mapped again at most per frame. */
+	private static final int CHUNKS_PER_FRAME = 64;
 
 	private WaterColumns() {
 	}
@@ -105,6 +115,53 @@ public final class WaterColumns {
 					rows);
 		} finally {
 			MemoryUtil.memFree(data);
+		}
+		remapChangedChunks(level, cameraX >> 4, cameraZ >> 4);
+	}
+
+	/** Maps again, this frame, the chunks around the render distance whose drawn state changed. */
+	private static void remapChangedChunks(ClientLevel level, int cameraChunkX, int cameraChunkZ) {
+		int reach = Math.min(renderDistance + 2, 15);
+		int seaY = level.getSeaLevel() - 1;
+		int done = 0;
+		ByteBuffer data = null;
+		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+		try {
+			for (int dz = -reach; dz <= reach && done < CHUNKS_PER_FRAME; dz++) {
+				for (int dx = -reach; dx <= reach && done < CHUNKS_PER_FRAME; dx++) {
+					int cx = cameraChunkX + dx;
+					int cz = cameraChunkZ + dz;
+					int index = Math.floorMod(cz, 32) * 32 + Math.floorMod(cx, 32);
+					long key = ((long) cx << 32) ^ (cz & 0xFFFFFFFFL);
+					boolean drawn = level.getChunkSource().getChunk(cx, cz, false) != null && sodiumDraws(cx, seaY, cz);
+					if (checkedChunk[index] == key && drawnChunk[index] == drawn) {
+						continue;
+					}
+					boolean first = checkedChunk[index] != key;
+					checkedChunk[index] = key;
+					drawnChunk[index] = drawn;
+					if (first && !drawn) {
+						continue; // newly in reach and not drawn: the row band has it as it is
+					}
+					if (data == null) {
+						data = MemoryUtil.memAlloc(16 * 16 * 8);
+					}
+					data.clear();
+					for (int z = cz * 16; z < cz * 16 + 16; z++) {
+						for (int x = cx * 16; x < cx * 16 + 16; x++) {
+							encode(data, level, pos, x, z);
+						}
+					}
+					data.flip();
+					RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, data, 0, 0,
+							Math.floorMod(cx * 16, SIZE), Math.floorMod(cz * 16, SIZE), 16, 16);
+					done++;
+				}
+			}
+		} finally {
+			if (data != null) {
+				MemoryUtil.memFree(data);
+			}
 		}
 	}
 
