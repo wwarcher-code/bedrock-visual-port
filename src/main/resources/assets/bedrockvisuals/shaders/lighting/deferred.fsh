@@ -706,9 +706,10 @@ vec3 distantWaterSurface(vec3 below, vec3 ray, float surface, float ground, vec3
     if (nDotV <= 0.0) {
         return below; // seen from below its level: a side face, left as the ground behind it
     }
+    // Bedrock's water_still_grey MERS averages 0.0852 roughness: the near water's at a distance, where its
+    // maps are read at their coarsest.
     const float ROUGHNESS = 0.085;
     float fresnel = 0.02 + 0.98 * pow(1.0 - nDotV, 5.0);
-    vec3 transmittance = exp(-waterScatterExtinction() * max(ground - surface, 0.0));
     // F0 = mix(0.04, grey 0.371 (linear), metalness 0.0667), as for the near water.
     float f0 = mix(0.04, 0.371, 0.0667);
     float specularScale;
@@ -730,14 +731,20 @@ vec3 distantWaterSurface(vec3 below, vec3 ray, float surface, float ground, vec3
         float geometry = smithG1(nDotV, ROUGHNESS) * smithG1(nDotL, ROUGHNESS);
         glint = SunColor.rgb * fh * ggx(max(dot(n, h), 0.0), ROUGHNESS) * geometry / (4.0 * nDotV);
     }
-    float path = max(ground - surface, 0.0);
+    // What lies beneath and the water's own light exactly as for the near water's (the lighting pass under
+    // Java's water): WaterExtinction along the view, and the water's haze along this pixel's path (waterHaze,
+    // with its shadows and the light volume's light). An older estimate (unshadowed, lit by the camera's sky
+    // access) left DH's water greyer and brighter than Java's beside it.
+    float path = min(max(ground - surface, 0.0), 64.0);
+    vec3 hazeTransmittance;
+    vec3 haze = waterHaze(ray, surface, surface + path, hazeTransmittance);
     // The probe at IBLParameters.z 0.5, replaced by SSR where that hits (Bedrock's is mirror-only, and this
     // flat water's roughness is under its 0.3 cut-off), as for the near water.
     vec3 reflection = sky * 0.5;
     vec4 traced = distantReflection(ray * surface + n * 0.05, mirror);
     reflection = mix(reflection, traced.rgb, traced.a);
     return specularScale * reflection + glint
-            + (1.0 - fresnel) * (below * transmittance + waterInScatter(ray, min(path, 64.0), 1.0, VolumeCamera.x));
+            + (1.0 - fresnel) * (below * exp(-UnderwaterMedium.rgb * path) * hazeTransmittance + haze);
 }
 
 // Distant Horizons' terrain carries only colour and depth: the normal is rebuilt from the depth of the
