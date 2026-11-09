@@ -35,7 +35,8 @@ public final class GBufferDebugView {
 		DISTANT_SHADOW("far shadow", null),
 		REFLECTION_SOURCE("reflection source", null),
 		REFLECTED_SKY("reflected sky", null),
-		REFLECTED_SCENE("reflected scene", null);
+		REFLECTED_SCENE("reflected scene", null),
+		WATER_SIMULATION("water simulation (FFT)", null);
 
 		public final String label;
 		final GBuffer.Target target;
@@ -111,6 +112,10 @@ public final class GBufferDebugView {
 
 	/** Called after Minecraft's main pass. */
 	public static void apply(RenderTarget main) {
+		if (showing == View.WATER_SIMULATION) {
+			WaterSimulation.showOn(main);
+			return;
+		}
 		GBuffer gbuffer = GBufferPass.gbuffer();
 		if (showing.target == null || gbuffer.texture(showing.target) == null
 				|| gbuffer.width() != main.width || gbuffer.height() != main.height) {

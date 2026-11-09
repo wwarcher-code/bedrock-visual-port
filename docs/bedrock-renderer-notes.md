@@ -17,7 +17,10 @@ so the shaders don't contain them; they're to be found in the game executable ne
 - `WaterExtinction`, `DeferredWater`, `DeferredMixedResolutionCaustics`: water.
 - `VolumeScattering`, `VolumetricsShadows`: volumetric fog.
 - `LuminanceHistogram` (auto exposure), `LocalExposure`, `Bloom`, `ColorPostProcessing` (grading, tone map).
-- `WaterSimulation`: an FFT ocean simulation, only used when a water preset enables waves (vanilla doesn't).
+- `WaterSimulation`: an FFT ocean simulation (InitSpectrum: Phillips spectrum with no random amplitudes, wind
+  (0, 2), alignment 0.5, dampening 100, G 9.81, a 512² patch of 512 blocks; UpdateSpectrum: ω = √(g|k|) times a
+  hash of k; then 9 + 9 Stockham radix-2 stages). Nothing reads its output in 1.26.60: no other material samples
+  it and the game binary never names it. The renderer runs it only for the \"water simulation\" debug view.
 
 ## G-buffer
 
@@ -202,7 +205,7 @@ Order: the scene beneath is attenuated by `WaterExtinction`, then `DeferredWater
   `WaterSurfaceEnabledAndExtinctionDistShift.x` is 0 in every capture.
   The renderer does the same when a pack's water turns `waves` on (`include/water_waves.glsl`, from the water
   JSON's values; time in seconds, positions from a floating origin on a 4096-block grid), in the water pass and
-  the reflection march. The FFT `WaterSimulation` is not ported.
+  the reflection march.
 - **Fog:** `DeferredWater` blends the surface's own light towards the distance-fog colour times its alpha F,
   `mix(spec, fogColour × F, fog)`, then applies the volumetric fog. The renderer does both (the water pass
   marches the air in front of the surface in 16 steps).
