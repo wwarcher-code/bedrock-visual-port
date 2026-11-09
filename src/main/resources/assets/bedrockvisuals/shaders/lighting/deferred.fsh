@@ -46,6 +46,12 @@ uniform sampler2D FroxelTransmittance; // and the transmittance (froxels.glsl)
 #include <bedrockvisuals:froxels.glsl>
 uniform sampler2D DistantHeightMap; // the far terrain's heights (DistantHeights.java)
 uniform sampler2D LightVolumeMap;   // sky and block light around the camera (LightVolume.java)
+// Bedrock's point lights (PointLights.java): the blocks the packs declare as point lights near the camera.
+const int MAX_POINT_LIGHTS = 64;
+layout(std140) uniform PointLightData {
+    vec4 PointLightCount;                    // x: how many
+    vec4 PointLights[MAX_POINT_LIGHTS * 2];  // per light: camera-relative position and radius, then colour
+};
 #define LIGHT_VOLUME LightVolumeMap
 #include <bedrockvisuals:light_volume.glsl>
 
@@ -1091,6 +1097,24 @@ void main() {
     vec3 color = directLight(nSun, v, sunDir, SunColor.rgb * sunVisibility, diffuseColor, f0, roughness);
     color += directLight(nMoon, v, moonDir, MoonColor.rgb * moonVisibility, diffuseColor, f0, roughness);
     color *= causticsMultiplier(position, n);
+    // Bedrock's point lights: each declared light block lights the surface from its centre, falling off with
+    // the square of the distance and to nothing at its radius (its light level in blocks). Only where
+    // Minecraft's block light reaches: it stands in for the point lights' shadows (PointLightShadowTextureAtlas).
+    if (PointLightCount.x > 0.5 && blockLight > 0.0) {
+        float reach = smoothstep(0.0, 0.15, blockLight);
+        int count = min(int(PointLightCount.x + 0.5), MAX_POINT_LIGHTS);
+        for (int i = 0; i < count; i++) {
+            vec4 at = PointLights[i * 2];
+            vec3 toLight = at.xyz - position;
+            float d = length(toLight);
+            if (d >= at.w || d < 1e-3) {
+                continue;
+            }
+            float window = pow(clamp(1.0 - pow(d / at.w, 4.0), 0.0, 1.0), 2.0);
+            vec3 radiance = PointLights[i * 2 + 1].rgb * window / (d * d + 1.0) * reach;
+            color += directLight(n, v, toLight / d, radiance, diffuseColor, f0, roughness);
+        }
+    }
 
     // Bedrock's indirect light (DiscreteIndirectCombinedLightingPass), one colour whatever the normal:
     // max(block light + sky ambient × s × mix(s⁴, s², camera sky light), ambient floor), less where emissive.
