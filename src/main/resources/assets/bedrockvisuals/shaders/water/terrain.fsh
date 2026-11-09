@@ -325,8 +325,24 @@ vec3 toScreen(vec3 position, vec2 size, bool flipY) {
     return vec3(pixel, clip.w);
 }
 
+// Whether the framebuffer's y runs against clip space's: set in main from how this fragment's clip-space
+// height changes down the screen. It was decided per pixel by which way put the fragment where it is, which on
+// the screen's middle row both did: that row's reflections were looked up upside down (a line across the water).
+bool screenFlipped = false;
+
 bool onScreen(vec2 pixel, vec2 size) {
     return all(greaterThanEqual(pixel, vec2(0.0))) && all(lessThan(pixel, size));
+}
+
+// How far a reflection found at screen position hit is trusted near the screen's edges, where the scene it
+// reflects runs out: faded within 8% of an edge, but sideways only as far as the hit lies sideways of this
+// pixel. On a flat mirror the reflection lies almost straight above the water's pixel, so the water along the
+// screen's sides lost its reflections though they were on screen.
+float screenEdgeFade(vec2 hit, vec2 size) {
+    vec2 edge = min(hit, size - hit) / size;
+    float drift = smoothstep(0.0, 0.05, abs(hit.x - gl_FragCoord.x) / size.x);
+    float sideways = 1.0 - (1.0 - smoothstep(0.0, 0.08, edge.x)) * drift;
+    return min(sideways, smoothstep(0.0, 0.08, edge.y));
 }
 
 vec4 screenSpaceReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
@@ -360,8 +376,7 @@ vec4 screenSpaceReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
             }
             vec2 hit = clamp(toScreen(back, size, flipY).xy, vec2(0.0), size - 1.0);
             // Fade towards the screen's edges, where the reflected scene runs out.
-            vec2 edge = min(hit, size - hit) / size;
-            return vec4(texelFetch(u_SceneColor, ivec2(hit), 0).rgb, smoothstep(0.0, 0.08, min(edge.x, edge.y)));
+            return vec4(texelFetch(u_SceneColor, ivec2(hit), 0).rgb, screenEdgeFade(hit, size));
         }
         previous = point;
         stepLength *= 1.18;
@@ -419,8 +434,7 @@ vec4 distantReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
             continue;
         }
         if (rayDistance > sceneDistance && rayDistance - sceneDistance < max(stepLength * 2.0, 1.0)) {
-            vec2 edge = min(screen.xy, size - screen.xy) / size;
-            return vec4(texelFetch(u_SceneColor, pixel, 0).rgb, smoothstep(0.0, 0.08, min(edge.x, edge.y)));
+            return vec4(texelFetch(u_SceneColor, pixel, 0).rgb, screenEdgeFade(screen.xy, size));
         }
     }
     return vec4(0.0);
@@ -493,8 +507,7 @@ vec3 surfaceFog(vec3 dir, float distance, out vec3 transmittance) {
 vec3 waterColor(WaterSurface s, float albedo) {
     if (UnderwaterParams.x > 0.5) {
         vec2 size = vec2(textureSize(u_GBufferDepth, 0));
-        vec2 self = toScreen(v_Position, size, false).xy;
-        bool flipY = abs(self.y - gl_FragCoord.y) > abs(size.y - self.y - gl_FragCoord.y);
+        bool flipY = screenFlipped;
         vec3 behind = texelFetch(u_SceneColor, ivec2(gl_FragCoord.xy), 0).rgb;
         // The reflection is of the water below: screen-space where the mirror ray finds it, else what Bedrock's
         // indirect specular falls back to, the sky probe in the mirror direction. Under water that probe is the
@@ -536,9 +549,8 @@ vec3 waterColor(WaterSurface s, float albedo) {
     vec3 sunDir = normalize(SunDirection.xyz);
     vec3 moonDir = normalize(MoonDirection.xyz);
     vec2 size = vec2(textureSize(u_GBufferDepth, 0));
-    // Which way the framebuffer's y runs relative to clip space: whichever puts this fragment where it is.
-    vec2 self = toScreen(v_Position, size, false).xy;
-    bool flipY = abs(self.y - gl_FragCoord.y) > abs(size.y - self.y - gl_FragCoord.y);
+    // Which way the framebuffer's y runs relative to clip space (screenFlipped, set in main).
+    bool flipY = screenFlipped;
 
     // Reflection: the scene where the mirror ray lands (already locally exposed), else the sky gradient
     // (locally exposed here, as the water is drawn after that pass) (with the same horizon handling
@@ -632,6 +644,8 @@ void main() {
     // Flat face normal from screen-space derivatives (turned to face the camera in waterSurface).
     vec3 dpx = dFdx(v_Position);
     vec3 dpy = dFdy(v_Position);
+    vec4 clipHere = u_ProjectionMatrix * u_ModelViewMatrix * vec4(v_Position, 1.0);
+    screenFlipped = dFdy(clipHere.y / clipHere.w) < 0.0;
     vec3 faceNormal = normalize(cross(dpx, dpy));
     // Tangent frame from position and UV derivatives: the directions the texture's u and v run on this face.
     vec2 duvx = dFdx(v_TexCoord);
