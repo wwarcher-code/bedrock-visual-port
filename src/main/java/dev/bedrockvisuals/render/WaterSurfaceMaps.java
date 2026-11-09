@@ -69,8 +69,8 @@ final class WaterSurfaceMaps {
 			mersImage = new TgaImage(1, 1, new int[] {FLAT_MERS});
 		}
 		frames = Math.max(1, normalImage.height() / normalImage.width());
-		normal = upload("Bedrock Visuals water normal", normalImage);
-		mers = upload("Bedrock Visuals water MERS", mersImage);
+		normal = upload("Bedrock Visuals water normal", normalImage, true);
+		mers = upload("Bedrock Visuals water MERS", mersImage, false);
 		BedrockVisualsClient.LOGGER.info("[water] surface maps: {} frames of {}x{}", frames, normalImage.width(),
 				normalImage.width());
 	}
@@ -90,17 +90,21 @@ final class WaterSurfaceMaps {
 	/**
 	 * Uploads the strip with its mip chain, each level a 2x2 box average of the one above (normals averaged as
 	 * encoded, so ripples flatten with distance as Bedrock's sampled surface maps do), down to one texel per
-	 * frame: the frames stay square and stacked at every level.
+	 * frame: the frames stay square and stacked at every level. 16 bits a channel, so the averages (and the
+	 * normal map's correction, {@link #levelTilt}) keep their fractions of an 8-bit step.
+	 *
+	 * @param levelTilt for the normal map: shift each frame's red and green so its average equals the whole
+	 *                  loop's
 	 */
-	private static GpuTextureView upload(String label, TgaImage image) {
+	private static GpuTextureView upload(String label, TgaImage image, boolean levelTilt) {
 		GpuDevice device = RenderSystem.getDevice();
 		int width = image.width();
 		int height = image.height();
 		int levels = 1 + Integer.numberOfTrailingZeros(Integer.highestOneBit(Math.max(width, 1)));
 		GpuTexture texture = device.createTexture(() -> label,
-				GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA8_UNORM, width, height, 1,
+				GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA16_UNORM, width, height, 1,
 				levels);
-		int[][] channels = new int[4][width * height];
+		double[][] channels = new double[4][width * height];
 		for (int y = 0; y < height; y++) {
 			for (int x = 0; x < width; x++) {
 				int argb = image.argb(x, y);
@@ -111,14 +115,18 @@ final class WaterSurfaceMaps {
 				channels[3][i] = argb >>> 24;
 			}
 		}
+		if (levelTilt) {
+			levelTilt(channels, width, height);
+		}
 		int w = width;
 		int h = height;
 		for (int level = 0; level < levels; level++) {
-			ByteBuffer data = MemoryUtil.memAlloc(w * h * 4);
+			ByteBuffer data = MemoryUtil.memAlloc(w * h * 8);
 			try {
 				for (int i = 0; i < w * h; i++) {
-					data.put((byte) channels[0][i]).put((byte) channels[1][i]).put((byte) channels[2][i])
-							.put((byte) channels[3][i]);
+					for (int c = 0; c < 4; c++) {
+						data.putShort((short) Math.round(Math.max(0, Math.min(255, channels[c][i])) * 65535.0 / 255.0));
+					}
 				}
 				data.flip();
 				device.createCommandEncoder().writeToTexture(texture, data, level, 0, 0, 0, w, h);
@@ -128,7 +136,7 @@ final class WaterSurfaceMaps {
 			if (level + 1 < levels) {
 				int nw = Math.max(1, w / 2);
 				int nh = Math.max(1, h / 2);
-				int[][] next = new int[4][nw * nh];
+				double[][] next = new double[4][nw * nh];
 				for (int c = 0; c < 4; c++) {
 					for (int y = 0; y < nh; y++) {
 						for (int x = 0; x < nw; x++) {
@@ -137,7 +145,7 @@ final class WaterSurfaceMaps {
 							int y0 = Math.min(2 * y, h - 1);
 							int y1 = Math.min(2 * y + 1, h - 1);
 							next[c][y * nw + x] = (channels[c][y0 * w + x0] + channels[c][y0 * w + x1]
-									+ channels[c][y1 * w + x0] + channels[c][y1 * w + x1] + 2) / 4;
+									+ channels[c][y1 * w + x0] + channels[c][y1 * w + x1]) / 4.0;
 						}
 					}
 				}
@@ -147,5 +155,37 @@ final class WaterSurfaceMaps {
 			}
 		}
 		return device.createTextureView(texture);
+	}
+
+	/**
+	 * Bedrock's water normal frames each lean a little differently on average: across the loop the green
+	 * channel's average drifts from 126.18 (frame 0) to 126.53 (frame 31) and drops back at the wrap, 0.35 of a
+	 * step where neighbouring frames differ by about 0.05. That is a 0.3° tilt of the whole surface at once,
+	 * which water seen at a low angle magnifies: with the frames blended, every reflection rolled (one side of the
+	 * screen up, the other down) each time the 3.2-second loop wrapped. Each frame is shifted so its average red
+	 * and green equal the whole loop's; the ripples' shapes are Bedrock's.
+	 */
+	private static void levelTilt(double[][] channels, int width, int height) {
+		int frames = Math.max(1, height / width);
+		int texels = width * width;
+		for (int c = 0; c < 2; c++) {
+			double total = 0;
+			double[] frameMean = new double[frames];
+			for (int f = 0; f < frames; f++) {
+				double sum = 0;
+				for (int i = f * texels; i < (f + 1) * texels; i++) {
+					sum += channels[c][i];
+				}
+				frameMean[f] = sum / texels;
+				total += sum;
+			}
+			double loopMean = total / ((double) frames * texels);
+			for (int f = 0; f < frames; f++) {
+				double shift = loopMean - frameMean[f];
+				for (int i = f * texels; i < (f + 1) * texels; i++) {
+					channels[c][i] += shift;
+				}
+			}
+		}
 	}
 }
