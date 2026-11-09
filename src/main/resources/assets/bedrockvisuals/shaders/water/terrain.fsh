@@ -40,7 +40,12 @@ layout(std140) uniform WaterData {
     vec4 Animation;   // x: the surface maps' frame, with its fraction (blended), y: frames in them; z: 1 when u_BrdfLut is Bedrock's;
                       // w: past this horizontal distance, side faces are dropped (0: never)
     vec4 OverlayRect; // the same for water_overlay: water's side faces against see-through blocks (leaves, glass)
+    vec4 WaveParams0; // Bedrock's waves (WaterPass.putWaves): enabled, frequency, octaves, depth
+    vec4 WaveParams1; // speed, shape, pull, mix
+    vec4 WaveParams2; // frequency scaling, speed scaling, time (s)
+    vec4 WaveOrigin;  // xz: the camera from the waves' floating origin
 };
+#include <bedrockvisuals:water_waves.glsl>
 
 // Bedrock's split-sum BRDF table (BrdfLut.java), read as DeferredIndirectSpecular reads it.
 uniform sampler2D u_BrdfLut;
@@ -225,6 +230,7 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
     vec3 tangentNormal;
     surfaceTexel(tangentNormal, s.roughness, s.metalness);
     s.n = normalize(tangent * tangentNormal.x + bitangent * tangentNormal.y + face * tangentNormal.z);
+    s.n = withWaves(s.n, face, v_Position);
     if (dot(s.n, v_Position) > 0.0) {
         s.n = face;
     }

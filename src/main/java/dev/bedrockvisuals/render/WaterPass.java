@@ -14,6 +14,8 @@ import com.mojang.renderpearl.api.textures.GpuSampler;
 import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
 import dev.bedrockvisuals.BedrockVisualsClient;
+import dev.bedrockvisuals.bedrock.BedrockInputs;
+import dev.bedrockvisuals.bedrock.WaterSettings;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -53,8 +55,12 @@ public final class WaterPass {
 			.withUniform("DistantDepth", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("DistantData", UniformType.UNIFORM_BUFFER)
 			).build();
-	/** std140 size of WaterData in water/terrain.fsh: five vec4s. */
-	private static final int DATA_SIZE = 6 * 16;
+	/** std140 size of WaterData in water/terrain.fsh and reflection/march.fsh: ten vec4s. */
+	private static final int DATA_SIZE = 10 * 16;
+	/** The waves' floating origin snaps to this grid (blocks), so their positions stay small in floats. */
+	private static final double WAVE_ORIGIN_GRID = 4096;
+	/** The waves' clock wraps at this many seconds. */
+	private static final double WAVE_PERIOD = 3600;
 
 	/*
 	 * Bedrock's water extinction per block, per channel (WaterExtinctionCoefficients in GPU captures of the
@@ -95,6 +101,8 @@ public final class WaterPass {
 	 * ripples by part of a frame at once: with the frames blended, every reflection hopped every few seconds.
 	 */
 	private static double rippleTicks;
+	/** The waves' own clock, in seconds (DoWaterSurfaceBuffer's time), held with the ripples. */
+	private static double waveSeconds;
 
 	/** Holds the ripples on one frame (true) or lets them animate again (false). */
 	public static void freezeRipples(boolean freeze) {
@@ -103,6 +111,39 @@ public final class WaterPass {
 		} else if (frozenFrame < 0) {
 			frozenFrame = (int) (rippleTicks / 2) % Math.max(WaterSurfaceMaps.frames(), 1);
 		}
+	}
+
+	/**
+	 * Bedrock's waves (water/*.json "waves"; DoWaterSurfaceBuffer): WaveParams0 (enabled, frequency, octaves,
+	 * depth), WaveParams1 (speed, shape, pull, mix), WaveParams2 (frequency scaling, speed scaling, time in
+	 * seconds), WaveOrigin (the camera's xz from the waves' floating origin). Vanilla's default water has them off.
+	 */
+	private static void putWaves(Std140Builder builder) {
+		WaterSettings.Waves waves = BedrockInputs.pack()
+				.map(pack -> pack.water(Underwater.currentBiomeWater()))
+				.map(WaterSettings::waves).orElse(null);
+		if (frozenFrame < 0) {
+			waveSeconds = (waveSeconds + Minecraft.getInstance().getDeltaTracker().getGameTimeDeltaTicks() / 20.0)
+					% WAVE_PERIOD;
+		}
+		if (waves == null || !waves.enabled() || waves.octaves() <= 0) {
+			builder.putVec4(0, 0, 0, 0).putVec4(0, 0, 0, 0).putVec4(0, 0, 0, 0).putVec4(0, 0, 0, 0);
+			return;
+		}
+		net.minecraft.world.phys.Vec3 camera = Minecraft.getInstance().gameRenderer.mainCamera().position();
+		builder.putVec4(1, waves.frequency(), Math.min(waves.octaves(), 64), waves.depth());
+		builder.putVec4(waves.speed(), waves.shape(), waves.pull(), waves.mix());
+		builder.putVec4(waves.frequencyScaling(), waves.speedScaling(), (float) waveSeconds, 0);
+		builder.putVec4((float) (camera.x - Math.floor(camera.x / WAVE_ORIGIN_GRID) * WAVE_ORIGIN_GRID), 0,
+				(float) (camera.z - Math.floor(camera.z / WAVE_ORIGIN_GRID) * WAVE_ORIGIN_GRID), 0);
+	}
+
+	/** Whether a pack's water here has Bedrock's waves on. */
+	public static String wavesStatus() {
+		WaterSettings.Waves waves = BedrockInputs.pack()
+				.map(pack -> pack.water(Underwater.currentBiomeWater()))
+				.map(WaterSettings::waves).orElse(null);
+		return waves != null && waves.enabled() ? "on, " + waves.octaves() + " octaves" : "off (the water here has none)";
 	}
 
 	/** The water's data (sprites, extinction, animation) for this frame, or null before the first. */
@@ -145,6 +186,7 @@ public final class WaterPass {
 				// Water's side faces against see-through blocks (leaves, glass, seagrass) use water_overlay;
 				// without it they were drawn as plain tinted texture, bright blue.
 				putRect(builder, blockAtlas.getSprite(Identifier.withDefaultNamespace("block/water_overlay")));
+				putWaves(builder);
 				RenderSystem.getDevice().createCommandEncoder().writeToBuffer(data.slice(), builder.get());
 			}
 			ready = true;

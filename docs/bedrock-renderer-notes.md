@@ -200,6 +200,9 @@ Order: the scene beneath is attenuated by `WaterExtinction`, then `DeferredWater
   rad, scales frequency by `Octave.z` 1.2, speed by `.w` 1.03, weight by `1 - .y` 0.8, and warps the domain by
   `.x` 0.38 of the wave), tilting only upward faces. Vanilla leaves it off:
   `WaterSurfaceEnabledAndExtinctionDistShift.x` is 0 in every capture.
+  The renderer does the same when a pack's water turns `waves` on (`include/water_waves.glsl`, from the water
+  JSON's values; time in seconds, positions from a floating origin on a 4096-block grid), in the water pass and
+  the reflection march. The FFT `WaterSimulation` is not ported.
 - **Fog:** `DeferredWater` blends the surface's own light towards the distance-fog colour times its alpha F,
   `mix(spec, fogColour × F, fog)`, then applies the volumetric fog. The renderer does both (the water pass
   marches the air in front of the surface in 16 steps).

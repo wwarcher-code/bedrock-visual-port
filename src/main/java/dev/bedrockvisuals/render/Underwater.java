@@ -147,7 +147,7 @@ public final class Underwater {
 		return level * level;
 	}
 
-	private static String currentBiomeWater() {
+	static String currentBiomeWater() {
 		Minecraft minecraft = Minecraft.getInstance();
 		if (minecraft.level == null || minecraft.player == null) {
 			return "minecraft:default_water";

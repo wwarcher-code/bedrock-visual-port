@@ -30,7 +30,12 @@ layout(std140) uniform WaterData {
     vec4 Scattering;
     vec4 Animation;   // x: the surface maps' frame, with its fraction, y: frames in them
     vec4 OverlayRect;
+    vec4 WaveParams0; // Bedrock's waves (WaterPass.putWaves): enabled, frequency, octaves, depth
+    vec4 WaveParams1; // speed, shape, pull, mix
+    vec4 WaveParams2; // frequency scaling, speed scaling, time (s)
+    vec4 WaveOrigin;  // xz: the camera from the waves' floating origin
 };
+#include <bedrockvisuals:water_waves.glsl>
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 marchOut;
@@ -162,6 +167,7 @@ void main() {
     float pixelAngle = length(viewRay(texCoord + vec2(0.0, 1.0 / float(textureSize(Depth, 0).y))) - ray);
     float texelsPerPixel = 16.0 * t * pixelAngle / max(-ray.y, 0.05);
     vec3 n = rippleNormal(origin + CameraGridOffset.xyz, texelsPerPixel);
+    n = withWaves(n, vec3(0.0, 1.0, 0.0), origin);
     vec3 mirror = reflect(ray, n);
     // As the water pass: a ripple tilting the ray below the water's plane is kept just above it.
     if (mirror.y < 0.02) {

@@ -90,6 +90,7 @@ final class DiagnosticsReport {
 		line("scene probe " + dev.bedrockvisuals.render.SceneProbe.status());
 		line("water reflections " + dev.bedrockvisuals.render.ReflectionPass.status());
 		line("point lights " + dev.bedrockvisuals.render.PointLights.status());
+		line("water waves " + dev.bedrockvisuals.render.WaterPass.wavesStatus());
 		line("light volume " + dev.bedrockvisuals.render.LightVolume.status());
 		line("biome mix " + dev.bedrockvisuals.render.BiomeMix.status() + " (a new biome takes 30 s to take over)");
 		line("clouds " + CloudPass.status() + "; cloud shadows " + CloudShadows.status() + "; Java's Clouds setting "
