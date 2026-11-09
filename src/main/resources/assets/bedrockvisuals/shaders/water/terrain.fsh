@@ -209,16 +209,6 @@ void surfaceTexelOf(int frame, out vec3 tangentNormal, out vec4 mers) {
     mers = mix(texelFetch(u_WaterMers, near, lod), texelFetch(u_WaterMers, far, lodUp), blend);
 }
 
-// The screen's encoding (toDisplay's last step, Bedrock's gamma) undone and redone: the water mixes its parts in
-// linear light, as Bedrock's does.
-vec3 displayToLinear(vec3 c) {
-    return pow(max(c, vec3(0.0)), max(Gamma.rgb, vec3(0.1)));
-}
-
-vec3 linearToDisplay(vec3 c) {
-    return pow(clamp(c, 0.0, 1.0), 1.0 / max(Gamma.rgb, vec3(0.1)));
-}
-
 // Defined with the surface fog below: the outer cascade's shadow test at p.
 float surfaceFogShadow(vec3 p);
 // Defined with the reflections below: Distant Horizons' ground at a texture and a clip position.
@@ -298,11 +288,10 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
     // for below (waterColor) non-negative; the per-channel tint goes into that color.
     float leastTransmitted = min(s.transmittance.r, min(s.transmittance.g, s.transmittance.b));
     s.opacity = clamp(1.0 - (1.0 - s.fresnel) * leastTransmitted, 0.0, 1.0);
-    // Seen from above, the water mixes its reflection with what lies beneath in linear light (waterColor), as
-    // Bedrock's deferred water does in HDR and the lighting pass does for DH's water. The mix needn't fit the
-    // one opacity the blend allows over the scene (a weighted sum in linear light is brighter than the same sum
-    // of encoded colours): drawn opaque, with what lies beneath taken from the scene copy. (Mixed in encoded
-    // colours, the near water's reflections came out much weaker than DH's water beside it.)
+    // Seen from above, the water adds its reflection to what lies beneath in HDR and tone maps the sum (waterColor),
+    // as Bedrock's deferred water does and the lighting pass does for DH's water. That needn't fit the one
+    // opacity the blend allows over the scene: drawn opaque, with what lies beneath taken from the scene copies.
+    // (Mixed in encoded colours, the near water's reflections came out much weaker than DH's water beside it.)
     if (UnderwaterParams.x < 0.5) {
         s.opacity = 1.0;
     }
@@ -406,7 +395,7 @@ vec4 screenSpaceReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
             if (bDepth > 0.0 && b.z - viewDistance(bDepth) < max(length(back - front) * 4.0, 0.5)) {
                 vec2 hit = clamp(b.xy, vec2(0.0), size - 1.0);
                 // Fade towards the screen's edges, where the reflected scene runs out.
-                return vec4(texelFetch(u_SceneColor, ivec2(hit), 0).rgb, screenEdgeFade(hit, size));
+                return vec4(texelFetch(u_LitFlags, ivec2(hit), 0).rgb, screenEdgeFade(hit, size));
             }
         }
         previous = point;
@@ -490,7 +479,7 @@ vec4 distantReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
         ivec2 hitPixel;
         if (distantSceneAt(back, size, flipY, sceneBack, rayBack, hitPixel)
                 && rayBack - sceneBack < max(length(back - front) * 4.0, 1.0)) {
-            return vec4(texelFetch(u_SceneColor, hitPixel, 0).rgb, screenEdgeFade(vec2(hitPixel), size));
+            return vec4(texelFetch(u_LitFlags, hitPixel, 0).rgb, screenEdgeFade(vec2(hitPixel), size));
         }
         previous = point;
     }
@@ -604,7 +593,7 @@ vec3 waterColor(WaterSurface s, float albedo) {
             probe = toDisplay(locallyExposed(bedrockSkyReflection(mirror, s.roughness, normalize(SunDirection.xyz),
                     normalize(MoonDirection.xyz)) * iblFade));
         }
-        vec3 reflection = mix(probe, traced.rgb * toSurface, traced.a);
+        vec3 reflection = mix(probe, toDisplay(locallyExposed(traced.rgb)) * toSurface, traced.a);
         vec3 target = clamp(s.fresnel * reflection + (1.0 - s.fresnel) * behind, 0.0, 1.0);
         return clamp((target - (1.0 - s.opacity) * behind) / max(s.opacity, 1e-3), 0.0, 1.0);
     }
@@ -632,9 +621,8 @@ vec3 waterColor(WaterSurface s, float albedo) {
     // Which way the framebuffer's y runs relative to clip space (screenFlipped, set in main).
     bool flipY = screenFlipped;
 
-    // Reflection: the scene where the mirror ray lands (already locally exposed), else the sky gradient
-    // (locally exposed here, as the water is drawn after that pass) (with the same horizon handling
-    // as the deferred pass's reflections).
+    // Reflection: the lighting pass's HDR scene where the mirror ray lands, else the sky (with the same horizon
+    // handling as the deferred pass's reflections).
     vec3 mirror = reflect(-s.v, s.n);
     // Seen at a low angle, a ripple can tilt the mirror ray below the water's plane, where it can only find the
     // sky; DH's flat water beside it always reflects upwards and found the far shore (a seam between them).
@@ -642,16 +630,20 @@ vec3 waterColor(WaterSurface s, float albedo) {
     if (UnderwaterParams.x < 0.5 && mirror.y < 0.02) {
         mirror = normalize(vec3(mirror.x, 0.02 + 0.5 * abs(mirror.y), mirror.z));
     }
+    // The reflection, what lies beneath and the surface's fog are added in HDR (this renderer's units, before
+    // exposure) and exposed, locally exposed and tone mapped once, as the lighting pass does for DH's water and
+    // Bedrock's deferred water does: the marches read the lighting pass's HDR scene (u_LitFlags), not the
+    // finished picture. (Scaled after the tone map, the near water's reflections of terrain differed from the
+    // far water's beside it.)
     vec3 skyReflection;
     if (AtmosphereZenith.w > 0.5) {
         // Bedrock's sky probe is its sky (the atmosphere function), so the water reflects the same sky.
-        skyReflection = toDisplay(locallyExposed(bedrockSkyReflection(mirror, s.roughness, sunDir, moonDir) * iblFade));
+        skyReflection = bedrockSkyReflection(mirror, s.roughness, sunDir, moonDir) * iblFade;
     } else {
         float horizonShare = 0.3 * (1.0 - clamp(mirror.y * 0.5 + 0.5, 0.0, 1.0));
-        skyReflection = toDisplay(locallyExposed(mix(SkyColor.rgb, SkyHorizonColor.rgb, horizonShare) * iblFade));
+        skyReflection = mix(SkyColor.rgb, SkyHorizonColor.rgb, horizonShare) * iblFade;
         // Rougher texels see a blurrier sky; here the reflected sky leans towards its average.
-        skyReflection = mix(skyReflection, toDisplay(locallyExposed(mix(SkyColor.rgb, SkyHorizonColor.rgb, 0.15) * iblFade)),
-                s.roughness);
+        skyReflection = mix(skyReflection, mix(SkyColor.rgb, SkyHorizonColor.rgb, 0.15) * iblFade, s.roughness);
     }
     // Bedrock's SSR is mirror-only: full up to roughness 0.3, gone by 0.4.
     float ssrWeight = 1.0 - smoothstep(0.3, 0.4, s.roughness);
@@ -666,8 +658,6 @@ vec3 waterColor(WaterSurface s, float albedo) {
         }
     }
     vec3 reflection = mix(skyReflection, traced.rgb, traced.a * ssrWeight);
-    // In linear light from here (displayToLinear): the colours above are encoded for the screen.
-    vec3 reflectionLinear = displayToLinear(reflection);
     // The reflection views (the flicker test's): 11 where each reflection comes from (red: the screen-space
     // march's hit, green: the far march's against Distant Horizons' depth, blue: the sky's share), 12 the
     // reflected sky alone, 13 the reflected scene alone. Drawn opaque (waterSurface).
@@ -675,9 +665,9 @@ vec3 waterColor(WaterSurface s, float albedo) {
     if (reflectionView == 11) {
         return vec3(nearHit * ssrWeight, farHit * ssrWeight, 0.15 + 0.85 * (1.0 - traced.a * ssrWeight));
     } else if (reflectionView == 12) {
-        return skyReflection;
+        return toDisplay(locallyExposed(skyReflection));
     } else if (reflectionView == 13) {
-        return traced.rgb * traced.a * ssrWeight;
+        return toDisplay(locallyExposed(traced.rgb * traced.a * ssrWeight));
     }
 
     // Sun glint.
@@ -693,17 +683,22 @@ vec3 waterColor(WaterSurface s, float albedo) {
     }
 
     vec3 behind = texelFetch(u_SceneColor, ivec2(gl_FragCoord.xy), 0).rgb;
+    // What lies beneath, from the lighting pass's HDR scene. Java draws entities and particles over that pass's
+    // picture (and bloom adds to it), which its HDR scene doesn't hold: their difference is added through the
+    // water after the tone map, as before.
+    vec3 beneath = texelFetch(u_LitFlags, ivec2(gl_FragCoord.xy), 0).rgb;
+    vec3 drawnOver = behind - toDisplay(locallyExposed(beneath));
     // Bedrock's water only absorbs (WaterExtinction); light scattered in the water comes from volumetric fog.
-    vec3 transmitted = displayToLinear(behind) * s.transmittance;
+    vec3 transmitted = beneath * s.transmittance;
     if (s.scatters) {
         // Beyond the water column map, the water's own scattered light (the lighting pass adds it within).
-        transmitted += displayToLinear(toDisplay(locallyExposed(waterInScatter(normalize(v_Position), s.path, s.beneathLit,
+        transmitted += waterInScatter(normalize(v_Position), s.path, s.beneathLit,
                 // The surface's sky light (one level up for the water block's own dimming of it), as the
                 // lighting pass takes its column's.
                 min(VolumeCamera.x, s.beneathSky >= 0.0 ? waterSkyAccess(s.beneathSky)
-                        : waterSkyAccess(clamp(levels.y + 1.0 / 15.0, 0.0, 1.0)))))));
+                        : waterSkyAccess(clamp(levels.y + 1.0 / 15.0, 0.0, 1.0))));
     }
-    vec3 surfaceLight = specularScale * reflectionLinear + displayToLinear(toDisplay(locallyExposed(glint)));
+    vec3 surfaceLight = specularScale * reflection + glint;
     // DeferredWater fogs the surface's own light like terrain: towards the sky radiance (blended to the
     // underground colour where sky light is low) times its alpha F, by the distance fog. What shows through
     // was fogged by the lighting pass already.
@@ -711,19 +706,21 @@ vec3 waterColor(WaterSurface s, float albedo) {
         float fog = bedrockFogAmount(length(v_Position));
         if (fog > 0.0) {
             float open = max(sqrt(VolumeCamera.x) * 15.0 / 16.0, levels.y);
-            vec3 fogColor = toDisplay(locallyExposed(
-                    bedrockSkyRadiance(normalize(v_Position), sunDir, moonDir) * AtmosphereHorizon.w * open));
-            surfaceLight = mix(surfaceLight, displayToLinear(fogColor) * s.fresnel, fog);
+            vec3 fogColor = bedrockSkyRadiance(normalize(v_Position), sunDir, moonDir) * AtmosphereHorizon.w * open;
+            surfaceLight = mix(surfaceLight, fogColor * s.fresnel, fog);
         }
         // Then the volumetric fog between the camera and the surface.
         vec3 fogTransmittance;
         vec3 fogLight = surfaceFog(normalize(v_Position), length(v_Position), fogTransmittance);
-        surfaceLight = surfaceLight * fogTransmittance + displayToLinear(toDisplay(locallyExposed(fogLight))) * s.fresnel;
+        surfaceLight = surfaceLight * fogTransmittance + fogLight * s.fresnel;
     }
     if (abs(DebugParams.w - 5.0) < 0.5) {
         transmitted = vec3(0.0); // the surface view: its reflection and glint alone
+        drawnOver = vec3(0.0);
     }
-    vec3 target = linearToDisplay(surfaceLight + (1.0 - s.fresnel) * transmitted);
+    vec3 target = toDisplay(locallyExposed(surfaceLight + (1.0 - s.fresnel) * transmitted))
+            + (1.0 - s.fresnel) * s.transmittance * drawnOver;
+    target = clamp(target, 0.0, 1.0);
     return clamp((target - (1.0 - s.opacity) * behind) / max(s.opacity, 1e-3), 0.0, 1.0);
 }
 
@@ -771,7 +768,11 @@ void main() {
         // The water texel's grey (untinted: Bedrock's G-buffer gets water_still_grey's colour), linear.
         float albedo = toLinear(vec3(dot(color.rgb, vec3(0.2126, 0.7152, 0.0722)))).r;
         vec3 shaded = abs(DebugParams.w - 6.0) < 0.5 ? vec3(0.95, 0.85, 0.0) : waterColor(surface, albedo);
-        fragColor = calculateFinalColor(vec4(shaded, surface.opacity));
+        // Not through Sodium's fog (calculateFinalColor): the water's shading does Bedrock's fog itself, and
+        // Sodium's blends a chunk's water towards Java's fog colour while the chunk fades in (fadeFactor) and
+        // near the render distance's edge (a flash of other lighting as water chunks came in; a band before
+        // DH's water).
+        fragColor = vec4(shaded, surface.opacity);
         #endif
         return;
     }
