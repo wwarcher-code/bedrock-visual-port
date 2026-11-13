@@ -42,7 +42,7 @@ import org.lwjgl.system.MemoryStack;
  * <p>Captured as Bedrock regenerates its probe (reflection_probe_regen_configuration.shared.json): every 600
  * frames, every 100 game ticks, after the camera moves 500 blocks, or when the sky's brightness changes by 3.
  * Sodium hands over only the sections the camera sees, so for a few frames before each capture its culling
- * passes every section ({@link #wantsAllSections}), and the faces are drawn from that frame's sections.
+ * passes every section ({@link #wantsAllSections}), and the faces are then drawn one a frame.
  */
 public final class SceneProbe {
 	static final int FACE_SIZE = 256;
@@ -95,6 +95,8 @@ public final class SceneProbe {
 
 	private static boolean wantAll;
 	private static int waitFrames;
+	/** The next face to draw in a capture under way (one a frame, so a capture doesn't hitch). */
+	private static int nextFace;
 	private static boolean active;
 	private static int activeFace = -1;
 	private static boolean facesDrawn;
@@ -159,6 +161,7 @@ public final class SceneProbe {
 		if (level == null) {
 			return;
 		}
+		boolean done = false;
 		try {
 			create();
 			Vec3 camera = minecraft.gameRenderer.mainCamera().position();
@@ -171,43 +174,53 @@ public final class SceneProbe {
 				projection = new Matrix4f().scaling(1, -1, 1).mul(projection);
 			}
 			CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
-			for (int f = 0; f < 6; f++) {
-				Matrix4f view = new Matrix4f().setLookAt(0, 0, 0, DIRECTIONS[f].x, DIRECTIONS[f].y, DIRECTIONS[f].z,
-						UPS[f].x, UPS[f].y, UPS[f].z);
-				faceViewProjection[f] = new Matrix4f(projection).mul(view);
-				try (MemoryStack stack = MemoryStack.stackPush()) {
-					encoder.writeToBuffer(faceData[f].slice(), Std140Builder.onStack(stack, 128)
-							.putMat4f(faceViewProjection[f]).putMat4f(new Matrix4f(faceViewProjection[f]).invert()).get());
-				}
-				GBuffer gbuffer = faceGBuffers[f];
-				RenderPassDescriptor.Builder descriptor = RenderPassDescriptor.builder(() -> "Bedrock Visuals scene probe face");
-				for (GBuffer.Target target : GBuffer.Target.values()) {
-					descriptor.withColorAttachment(gbuffer.view(target), Optional.of(CLEAR));
-				}
-				descriptor.withDepthAttachment(gbuffer.depthView(), OptionalDouble.of(CLEAR_DEPTH));
-				active = true;
-				activeFace = f;
-				try (RenderPass pass = encoder.createRenderPass(descriptor.build())) {
-					RenderSystem.bindDefaultUniforms(pass);
-					pass.setUniform("u_MaterialTex", materials, sampler);
-					pass.setUniform("ProbeFace", faceData[f]);
-					chunks.renderGroup(ChunkSectionLayerGroup.OPAQUE, pass, sampler, blockAtlas, false);
-				} finally {
-					active = false;
-					activeFace = -1;
-				}
+			// One face a frame: all six in one frame drew every section six times over at once, a hitch every
+			// ten seconds or so. The camera moves a fraction of a block over the six frames, which the probe's
+			// blur hides.
+			int f = nextFace;
+			Matrix4f view = new Matrix4f().setLookAt(0, 0, 0, DIRECTIONS[f].x, DIRECTIONS[f].y, DIRECTIONS[f].z,
+					UPS[f].x, UPS[f].y, UPS[f].z);
+			faceViewProjection[f] = new Matrix4f(projection).mul(view);
+			try (MemoryStack stack = MemoryStack.stackPush()) {
+				encoder.writeToBuffer(faceData[f].slice(), Std140Builder.onStack(stack, 128)
+						.putMat4f(faceViewProjection[f]).putMat4f(new Matrix4f(faceViewProjection[f]).invert()).get());
 			}
-			facesDrawn = true;
-			capturedFrame = frame;
-			capturedTick = level.getGameTime();
-			capturedAt = camera;
-			capturedSkyDarken = level.getSkyDarken();
+			GBuffer gbuffer = faceGBuffers[f];
+			RenderPassDescriptor.Builder descriptor = RenderPassDescriptor.builder(() -> "Bedrock Visuals scene probe face");
+			for (GBuffer.Target target : GBuffer.Target.values()) {
+				descriptor.withColorAttachment(gbuffer.view(target), Optional.of(CLEAR));
+			}
+			descriptor.withDepthAttachment(gbuffer.depthView(), OptionalDouble.of(CLEAR_DEPTH));
+			active = true;
+			activeFace = f;
+			try (RenderPass pass = encoder.createRenderPass(descriptor.build())) {
+				RenderSystem.bindDefaultUniforms(pass);
+				pass.setUniform("u_MaterialTex", materials, sampler);
+				pass.setUniform("ProbeFace", faceData[f]);
+				chunks.renderGroup(ChunkSectionLayerGroup.OPAQUE, pass, sampler, blockAtlas, false);
+			} finally {
+				active = false;
+				activeFace = -1;
+			}
+			nextFace++;
+			if (nextFace >= 6) {
+				done = true;
+				facesDrawn = true;
+				capturedFrame = frame;
+				capturedTick = level.getGameTime();
+				capturedAt = camera;
+				capturedSkyDarken = level.getSkyDarken();
+			}
 		} catch (RuntimeException e) {
 			failed = true;
+			done = true;
 			BedrockVisualsClient.LOGGER.error("[sky] scene probe capture failed; reflections fall back to the sky alone", e);
 		} finally {
-			wantAll = false;
-			scheduleCull();
+			if (done) {
+				nextFace = 0;
+				wantAll = false;
+				scheduleCull();
+			}
 		}
 	}
 

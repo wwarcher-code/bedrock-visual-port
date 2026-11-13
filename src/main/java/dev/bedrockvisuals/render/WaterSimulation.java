@@ -33,7 +33,8 @@ import org.lwjgl.system.MemoryStack;
  *
  * <p>Nothing in Bedrock 1.26.60 reads the result: no other material samples it and the game never names the
  * material, and its water's waves come from the surface pass's sine octaves (WaterPass, water_waves.glsl). So
- * it runs only for the "water simulation" debug view, which shows its height field in the screen's corner.
+ * it runs only for the "water simulation" debug view, which shows its height field in the screen's corner
+ * (log-scaled: at the material's default properties its waves are some 1e-11 blocks high).
  */
 public final class WaterSimulation {
 	private static final int N = 512;
@@ -90,7 +91,7 @@ public final class WaterSimulation {
 
 	/** For the debug view, after Minecraft's main pass: steps the simulation and draws it in the corner. */
 	static void showOn(RenderTarget main) {
-		if (failed || main.width < N || main.height < N) {
+		if (failed) {
 			return;
 		}
 		try {
@@ -127,7 +128,9 @@ public final class WaterSimulation {
 				pass.setPipeline(RenderSystem.getCompiledPipeline(SHOW));
 				pass.setUniform("Height", pingViews[0], nearest);
 			});
-			encoder.copyTextureToTexture(shown, main.getColorTexture(), 0, 0, 0, 0, 0, N, N);
+			// The corner of the screen, as much of the field as fits.
+			encoder.copyTextureToTexture(shown, main.getColorTexture(), 0, 0, 0, 0, 0, Math.min(N, main.width),
+					Math.min(N, main.height));
 		} catch (RuntimeException e) {
 			failed = true;
 			BedrockVisualsClient.LOGGER.error("[water] the FFT water simulation failed", e);
