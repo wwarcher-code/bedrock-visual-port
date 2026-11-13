@@ -9,8 +9,13 @@ import com.mojang.renderpearl.api.textures.GpuTextureView;
 import java.nio.ByteBuffer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.core.BlockPos;
+import net.minecraft.core.SectionPos;
 import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.DataLayer;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.lighting.LayerLightEventListener;
 import net.minecraft.world.phys.Vec3;
 import org.lwjgl.system.MemoryUtil;
 
@@ -51,7 +56,19 @@ public final class LightVolume {
 	private LightVolume() {
 	}
 
-	/** Once a frame, before the lighting pass: refreshes the next few horizontal slices around the camera. */
+	/** Where the camera's block was when each slice was last written (the slice holds the blocks around that). */
+	private static final int[] SLICE_CAMERA_X = new int[SIZE_Y];
+	private static final int[] SLICE_CAMERA_Y = new int[SIZE_Y];
+	private static final int[] SLICE_CAMERA_Z = new int[SIZE_Y];
+	/** One slice's texels, reused. */
+	private static final byte[] SLICE = new byte[SIZE_XZ * SIZE_XZ * 4];
+
+	/**
+	 * Once a frame, before the lighting pass: refreshes the next few horizontal slices around the camera. Read
+	 * from the chunks' sections and the light engine's data layers directly, a chunk at a time (through
+	 * Level.getBrightness and getBlockState per block, three lookups each for some 50,000 blocks a frame, the scan
+	 * took several milliseconds of every frame).
+	 */
 	static void update() {
 		Minecraft minecraft = Minecraft.getInstance();
 		ClientLevel level = minecraft.level;
@@ -63,38 +80,86 @@ public final class LightVolume {
 		int cameraX = (int) Math.floor(camera.x);
 		int cameraY = (int) Math.floor(camera.y);
 		int cameraZ = (int) Math.floor(camera.z);
-		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-		ByteBuffer data = MemoryUtil.memAlloc(SIZE_XZ * SIZE_XZ * 4);
+		int minX = cameraX - SIZE_XZ / 2;
+		int minZ = cameraZ - SIZE_XZ / 2;
+		int maxX = minX + SIZE_XZ - 1;
+		int maxZ = minZ + SIZE_XZ - 1;
+		LayerLightEventListener skyLight = level.getLightEngine().getLayerListener(LightLayer.SKY);
+		LayerLightEventListener blockLight = level.getLightEngine().getLayerListener(LightLayer.BLOCK);
+		int topLightSection = level.getLightEngine().getMaxLightSection();
+		java.util.Map<net.minecraft.world.level.block.Block, float[]> colors = BlockLightColors.declared();
+		ByteBuffer data = MemoryUtil.memAlloc(SLICE.length);
 		try {
 			for (int n = 0; n < SLICES_PER_FRAME; n++) {
 				// The world y nearest the camera that falls on this slice.
 				int slice = nextSlice;
 				nextSlice = (nextSlice + 1) % SIZE_Y;
 				int y = cameraY - SIZE_Y / 2 + Math.floorMod(slice - (cameraY - SIZE_Y / 2), SIZE_Y);
-				data.clear();
-				java.util.Map<net.minecraft.world.level.block.Block, float[]> colors = BlockLightColors.declared();
+				int sectionY = SectionPos.blockToSectionCoord(y);
+				int localY = y & 15;
+				int layerBase = Math.floorMod(y, SIZE_Y) * SIZE_XZ * SIZE_XZ;
 				java.util.List<BlockLightColors.Emitter> sliceEmitters = new java.util.ArrayList<>();
-				for (int row = 0; row < SIZE_XZ; row++) {
-					int z = cameraZ - SIZE_XZ / 2 + Math.floorMod(row - (cameraZ - SIZE_XZ / 2), SIZE_XZ);
-					for (int column = 0; column < SIZE_XZ; column++) {
-						int x = cameraX - SIZE_XZ / 2 + Math.floorMod(column - (cameraX - SIZE_XZ / 2), SIZE_XZ);
-						pos.set(x, y, z);
-						int sky = level.getBrightness(LightLayer.SKY, pos);
-						int block = level.getBrightness(LightLayer.BLOCK, pos);
-						net.minecraft.world.level.block.state.BlockState state = level.getBlockState(pos);
-						boolean solid = state.isSolidRender();
-						SOLID[index(x, y, z)] = (byte) (solid ? 1 : 0);
-						if (!colors.isEmpty() && state.getLightEmission() > 0) {
-							float[] color = colors.get(state.getBlock());
-							if (color != null) {
-								sliceEmitters.add(new BlockLightColors.Emitter(x, y, z, state.getLightEmission(), color));
+				for (int chunkZ = minZ >> 4; chunkZ <= maxZ >> 4; chunkZ++) {
+					for (int chunkX = minX >> 4; chunkX <= maxX >> 4; chunkX++) {
+						LevelChunk chunk = level.getChunkSource().getChunk(chunkX, chunkZ, false);
+						LevelChunkSection section = null;
+						if (chunk != null) {
+							int index = chunk.getSectionIndexFromSectionY(sectionY);
+							if (index >= 0 && index < chunk.getSections().length) {
+								section = chunk.getSections()[index];
 							}
 						}
-						data.put((byte) (sky * 17)).put((byte) (block * 17)).put((byte) (solid ? 255 : 0)).put((byte) 255);
+						boolean empty = section == null || section.hasOnlyAir();
+						DataLayer block = blockLight.getDataLayerData(SectionPos.of(chunkX, sectionY, chunkZ));
+						// The sky light's layer; where this section has none, the light engine reads the bottom of
+						// the nearest one above in the column, or 15 when there is none (SkyLightSectionStorage).
+						DataLayer sky = skyLight.getDataLayerData(SectionPos.of(chunkX, sectionY, chunkZ));
+						int skyY = localY;
+						boolean openSky = false;
+						if (sky == null && level.dimensionType().hasSkyLight()) {
+							skyY = 0;
+							for (int above = sectionY + 1; sky == null && above <= topLightSection; above++) {
+								sky = skyLight.getDataLayerData(SectionPos.of(chunkX, above, chunkZ));
+							}
+							openSky = sky == null;
+						}
+						int fromX = Math.max(chunkX << 4, minX);
+						int toX = Math.min((chunkX << 4) + 15, maxX);
+						int fromZ = Math.max(chunkZ << 4, minZ);
+						int toZ = Math.min((chunkZ << 4) + 15, maxZ);
+						for (int z = fromZ; z <= toZ; z++) {
+							int row = Math.floorMod(z, SIZE_XZ);
+							for (int x = fromX; x <= toX; x++) {
+								int column = Math.floorMod(x, SIZE_XZ);
+								int skyLevel = openSky ? 15 : sky == null ? 0 : sky.get(x & 15, skyY, z & 15);
+								int blockLevel = block == null ? 0 : block.get(x & 15, localY, z & 15);
+								boolean solid = false;
+								if (!empty) {
+									BlockState state = section.getBlockState(x & 15, localY, z & 15);
+									solid = state.isSolidRender();
+									if (!colors.isEmpty() && state.getLightEmission() > 0) {
+										float[] color = colors.get(state.getBlock());
+										if (color != null) {
+											sliceEmitters.add(new BlockLightColors.Emitter(x, y, z, state.getLightEmission(), color));
+										}
+									}
+								}
+								SOLID[layerBase + row * SIZE_XZ + column] = (byte) (solid ? 1 : 0);
+								int texel = (row * SIZE_XZ + column) * 4;
+								SLICE[texel] = (byte) (skyLevel * 17);
+								SLICE[texel + 1] = (byte) (blockLevel * 17);
+								SLICE[texel + 2] = (byte) (solid ? 255 : 0);
+								SLICE[texel + 3] = (byte) 255;
+							}
+						}
 					}
 				}
-				data.flip();
+				data.clear();
+				data.put(SLICE).flip();
 				EMITTERS.set(slice, java.util.List.copyOf(sliceEmitters));
+				SLICE_CAMERA_X[slice] = cameraX;
+				SLICE_CAMERA_Y[slice] = cameraY;
+				SLICE_CAMERA_Z[slice] = cameraZ;
 				if (filled >= SIZE_Y - 1 && nextSlice == 0) {
 					BlockLightColors.rebuild(cameraX, cameraY, cameraZ);
 				}
@@ -129,14 +194,34 @@ public final class LightVolume {
 		return view;
 	}
 
+	/** The most the shader's range is pulled in by for the camera's travel since a slice was written. */
+	private static final int MAX_MARGIN_XZ = 56;
+	private static final int MAX_MARGIN_Y = 20;
+
 	/**
 	 * One vec4 for LightingData: the camera's world x, y, z modulo the volume's size (with their fractions), and
-	 * 1 once every slice has been filled.
+	 * 0 until every slice has been filled, then 1 + the margins the shader keeps from the volume's edges
+	 * (horizontal + 64 × vertical, in blocks). A slice holds the blocks around where the camera was when it was
+	 * written, and the camera has moved up to a full round of slices' worth since: within that much of the
+	 * volume's edge a texel can still hold the block a whole volume away (flying or falling fast, wrong light
+	 * and shadows flickered in at the volume's far side). After a teleport the volume is off until it has been
+	 * written through again.
 	 */
 	static void write(Std140Builder builder) {
 		Vec3 camera = Minecraft.getInstance().gameRenderer.mainCamera().position();
+		int cameraX = (int) Math.floor(camera.x);
+		int cameraY = (int) Math.floor(camera.y);
+		int cameraZ = (int) Math.floor(camera.z);
+		int marginXZ = 0;
+		int marginY = 0;
+		for (int slice = 0; slice < SIZE_Y; slice++) {
+			marginXZ = Math.max(marginXZ, Math.max(Math.abs(cameraX - SLICE_CAMERA_X[slice]),
+					Math.abs(cameraZ - SLICE_CAMERA_Z[slice])));
+			marginY = Math.max(marginY, Math.abs(cameraY - SLICE_CAMERA_Y[slice]));
+		}
+		boolean valid = view != null && filled >= SIZE_Y && marginXZ <= MAX_MARGIN_XZ && marginY <= MAX_MARGIN_Y;
 		builder.putVec4(wrap(camera.x, SIZE_XZ), wrap(camera.y, SIZE_Y), wrap(camera.z, SIZE_XZ),
-				view != null && filled >= SIZE_Y ? 1 : 0);
+				valid ? 1 + marginXZ + 64 * marginY : 0);
 	}
 
 	private static float wrap(double value, int size) {

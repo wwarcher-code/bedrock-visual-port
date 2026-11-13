@@ -5,20 +5,30 @@
 #ifndef BEDROCKVISUALS_LIGHT_VOLUME
 #define BEDROCKVISUALS_LIGHT_VOLUME
 
+// How far from the camera the volume can be read, horizontally (x) and vertically (y): its half size less the
+// margins LightVolume.java keeps for the camera's travel since each slice was written (LightVolumeOrigin.w: 0
+// when the volume isn't there, else 1 + horizontal margin + 64 × vertical margin).
+vec2 lightVolumeRange() {
+    float margins = max(LightVolumeOrigin.w - 1.0, 0.0);
+    float vertical = floor(margins / 64.0 + 0.001);
+    return vec2(63.0 - (margins - vertical * 64.0), 23.0 - vertical);
+}
+
+// Whether the camera-relative point p lies in the volume.
+bool inLightVolume(vec3 p) {
+    vec2 range = lightVolumeRange();
+    return LightVolumeOrigin.w > 0.5 && max(abs(p.x), abs(p.z)) <= range.x && abs(p.y) <= range.y;
+}
+
 // Sky light (x) and block light (y), 0 to 1, at the camera-relative point p; negative outside the volume.
 vec2 lightVolumeAt(vec3 p) {
-    if (LightVolumeOrigin.w < 0.5 || max(abs(p.x), abs(p.z)) > 63.0 || abs(p.y) > 23.0) {
+    if (!inLightVolume(p)) {
         return vec2(-1.0);
     }
     ivec3 cell = ivec3(floor(p + LightVolumeOrigin.xyz));
     cell = ivec3(int(mod(float(cell.x), 128.0)), int(mod(float(cell.y), 48.0)), int(mod(float(cell.z), 128.0)));
     ivec2 texel = ivec2((cell.y % 8) * 128 + cell.x, (cell.y / 8) * 128 + cell.z);
     return texelFetch(LIGHT_VOLUME, texel, 0).rg;
-}
-
-// Whether the camera-relative point p lies in the volume.
-bool inLightVolume(vec3 p) {
-    return LightVolumeOrigin.w > 0.5 && max(abs(p.x), abs(p.z)) <= 63.0 && abs(p.y) <= 23.0;
 }
 
 // Whether the block at world-grid cell (camera-relative, floored) is solid and opaque.
@@ -78,6 +88,7 @@ float voxelRayVisibility(vec3 from, vec3 direction, int maxCells) {
     ivec3 stepDir = ivec3(sign(direction));
     vec3 inv = 1.0 / max(abs(direction), vec3(1e-6));
     vec3 tMax = (vec3(stepDir) * (vec3(cell) + 0.5 - origin) + 0.5) * inv;
+    vec2 range = lightVolumeRange();
     for (int i = 0; i < maxCells; i++) {
         if (tMax.x < tMax.y && tMax.x < tMax.z) {
             cell.x += stepDir.x;
@@ -90,7 +101,7 @@ float voxelRayVisibility(vec3 from, vec3 direction, int maxCells) {
             tMax.z += inv.z;
         }
         vec3 p = vec3(cell) + 0.5 - fract(LightVolumeOrigin.xyz);
-        if (max(abs(p.x), abs(p.z)) > 63.0 || abs(p.y) > 23.0) {
+        if (max(abs(p.x), abs(p.z)) > range.x || abs(p.y) > range.y) {
             return 1.0;
         }
         if (solidCell(cell)) {

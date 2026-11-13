@@ -88,6 +88,11 @@ tasks.named('runClient') {
 	maxHeapSize = providers.gradleProperty('gameMemory').getOrElse('16G')
 	// ZGC (generational, the only kind in Java 25): short pauses, so fewer stutters with Distant Horizons.
 	jvmArgs '-XX:+UseZGC'
+	// -PbvScript=<file>: the mod runs lines appended to that file (devtools.ScriptRunner; headless testing).
+	def script = providers.gradleProperty('bvScript')
+	if (script.isPresent()) {
+		jvmArgs "-Dbedrockvisuals.script=${script.get()}"
+	}
 	def world = providers.gradleProperty('quickPlay')
 	if (world.isPresent()) {
 		args '--quickPlaySingleplayer', world.get()

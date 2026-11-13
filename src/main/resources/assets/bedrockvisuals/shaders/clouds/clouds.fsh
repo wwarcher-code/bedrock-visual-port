@@ -145,7 +145,14 @@ void main() {
         discard;
     }
     #ifdef OIT_ALPHA_ONLY
+    // The depth bounds phase takes the clouds' opacity without the fade at the mesh's edge, as vanilla's cloud
+    // shader leaves its fog fade out of that phase: it drops fragments under 1% opacity, and the later phases
+    // would then draw the nearly faded ones at depths outside the bounds (they came out black along the horizon).
+    #ifdef OIT_DEPTH_BOUNDS
+    executeAlphaOnlyPhase(gl_FragCoord.z, CLOUD_OPACITY);
+    #else
     executeAlphaOnlyPhase(gl_FragCoord.z, cloudAlpha());
+    #endif
     #else
     vec4 color = cloudColor();
     #ifdef OIT_ACCUMULATE

@@ -24,6 +24,7 @@ layout(location = 2) in vec2 v_FragDistance;
 layout(location = 3) in float fadeFactor;
 layout(location = 4) in vec2 v_LightCoord;
 layout(location = 5) in vec3 v_Position;
+layout(location = 6) flat in vec2 v_FaceTexCoord; // which sprite the face shows (terrain.vsh)
 
 uniform sampler2D u_BlockTex;
 uniform sampler2D u_GBufferDepth;  // opaque terrain behind the water, reversed depth, 0 where there is none
@@ -134,8 +135,8 @@ bool inRect(vec2 uv, vec4 rect) {
 }
 
 bool isWater() {
-    return Scattering.w > 0.5 && (inRect(v_TexCoord, StillRect) || inRect(v_TexCoord, FlowRect)
-            || inRect(v_TexCoord, OverlayRect));
+    return Scattering.w > 0.5 && (inRect(v_FaceTexCoord, StillRect) || inRect(v_FaceTexCoord, FlowRect)
+            || inRect(v_FaceTexCoord, OverlayRect));
 }
 
 // Distance from the camera along the view axis, from a depth value. With w = -z, depth = (P22 z + P32) / -z,
@@ -192,7 +193,7 @@ void surfaceTexel(out vec3 tangentNormal, out float roughness, out float metalne
 }
 
 void surfaceTexelOf(int frame, out vec3 tangentNormal, out vec4 mers) {
-    vec4 rect = inRect(v_TexCoord, StillRect) ? StillRect : inRect(v_TexCoord, FlowRect) ? FlowRect : OverlayRect;
+    vec4 rect = inRect(v_FaceTexCoord, StillRect) ? StillRect : inRect(v_FaceTexCoord, FlowRect) ? FlowRect : OverlayRect;
     vec2 local = (v_TexCoord - rect.xy) / max(rect.zw - rect.xy, vec2(1e-6));
     float spriteTexels = max(round((rect.z - rect.x) / u_TexelSize.x), 1.0);
     ivec2 mapSize = textureSize(u_WaterNormal, 0);
@@ -797,7 +798,13 @@ void main() {
         // Sodium's blends a chunk's water towards Java's fog colour while the chunk fades in (fadeFactor) and
         // near the render distance's edge (a flash of other lighting as water chunks came in; a band before
         // DH's water).
-        fragColor = vec4(shaded, surface.opacity);
+        // (With improved transparency on, the accumulation phase still needs its colour weighted and
+        // premultiplied, which calculateFinalColor did.)
+        vec4 result = vec4(shaded, surface.opacity);
+        #ifdef OIT_ACCUMULATE
+        result = sampleColorForAccumulation(result);
+        #endif
+        fragColor = result;
         #endif
         return;
     }

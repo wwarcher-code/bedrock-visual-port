@@ -19,6 +19,11 @@ layout(location = 3) out float fadeFactor;
 
 layout(location = 4) out vec2 v_LightCoord;
 layout(location = 5) out vec3 v_Position;
+// The provoking vertex's texture coordinate, unchanged across the face: which sprite the face shows. Tested
+// per fragment from the interpolated coordinate, a row of pixels where interpolation landed a hair outside the
+// water sprite's rectangle was taken for some other translucent block and drawn as plain, unlit texture (a thin
+// line across the water at a fixed distance, and specks).
+layout(location = 6) flat out vec2 v_FaceTexCoord;
 
 uniform isamplerBuffer u_SectionTimeInfo;
 
@@ -71,6 +76,7 @@ void main() {
 #endif
 
     v_TexCoord = (_vert_tex_diffuse_coord_bias * u_TexCoordShrink) + _vert_tex_diffuse_coord;
+    v_FaceTexCoord = v_TexCoord;
     v_LightCoord = _vert_tex_light_coord;
     v_Position = position;
 }

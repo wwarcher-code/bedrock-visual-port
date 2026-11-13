@@ -29,5 +29,6 @@ public class BedrockVisualsClient implements ClientModInitializer {
 		DeferredRenderer.register();
 		TestCapture.register();
 		DevCommands.register();
+		dev.bedrockvisuals.devtools.ScriptRunner.register();
 	}
 }

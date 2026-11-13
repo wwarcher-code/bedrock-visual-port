@@ -5,6 +5,7 @@ import com.mojang.renderpearl.api.commands.RenderPass;
 import com.mojang.renderpearl.api.textures.FilterMode;
 import com.mojang.renderpearl.api.pipeline.BindGroupLayout;
 import com.mojang.renderpearl.api.pipeline.ColorTargetState;
+import com.mojang.renderpearl.api.pipeline.DepthStencilState;
 import com.mojang.renderpearl.api.pipeline.RenderPipeline;
 import com.mojang.renderpearl.api.pipeline.UniformType;
 import dev.bedrockvisuals.BedrockVisualsClient;
@@ -95,6 +96,15 @@ public final class CloudPass {
 		List<ColorTargetState> targets = vanilla.getColorTargetStates();
 		for (int i = 0; i < targets.size(); i++) {
 			builder.withColorTargetState(i, targets.get(i));
+		}
+		// Tested against the terrain's depth but not written: Distant Horizons takes Minecraft's depth as what
+		// hides its terrain, and where the far cloud mesh had written its depth over the sky, DH's picture was
+		// left empty behind it: black streaks along the horizon wherever the cloud mesh fades out. Nothing drawn
+		// after the clouds needs their depth (weather and the world border are nearer).
+		DepthStencilState depth = vanilla.getDepthStencilState();
+		if (depth != null) {
+			builder.withDepthStencilState(java.util.Optional.of(new DepthStencilState(depth.depthTest(), false,
+					depth.depthBiasScaleFactor(), depth.depthBiasConstant())));
 		}
 		return builder.build();
 	}
