@@ -403,14 +403,23 @@ vec3 waterHaze(vec3 dir, float tIn, float tOut, out vec3 transmittance) {
     for (int i = 0; i < STEPS; i++) {
         vec3 p = dir * (tIn + (float(i) + jitter) * stepLength);
         WaterColumn column;
-        float surfaceSky = 1.0; // past the map: open water
+        float surfaceSky = -1.0;
         float depth = max(tIn * dir.y - p.y, 0.0);
         if (waterColumnAt(waterTestPoint(p), column)) {
             surfaceSky = column.roof > 0.0 && p.y + WaterColumnOrigin.y < column.roof ? column.skyUnder : column.sky;
             depth = max(column.surface - WaterColumnOrigin.y - p.y, 0.0);
         }
         vec2 here = lightVolumeAt(p);
-        float sky = here.x >= 0.0 ? min(here.x + depth / 15.0, max(surfaceSky, here.x)) : surfaceSky;
+        float sky;
+        if (surfaceSky >= 0.0) {
+            sky = here.x >= 0.0 ? min(here.x + depth / 15.0, max(surfaceSky, here.x)) : surfaceSky;
+        } else {
+            // A step in a column with no water mapped (a pillar's or a wall's, as the path runs past it): its own
+            // sky light, not open water's (taken as full sky, the water beside a cave's pillars glowed blue).
+            // Past the map, open water.
+            bool mapped = WaterColumnOrigin.w > 0.5 && max(abs(p.x), abs(p.z)) <= WATER_COLUMN_RANGE;
+            sky = here.x >= 0.0 ? here.x : mapped ? 0.0 : 1.0;
+        }
         // No sun in water under the terrain's surface (a cave's pool): the shadow map holds only what Sodium
         // draws, so in a cave at noon the haze was sunlit everywhere but under the pillars' own shadows.
         float sun = sky > 0.0001 && !underTerrain(p) ? volumeShadow(p, l) * cloudShadow(p, l) : 0.0;
