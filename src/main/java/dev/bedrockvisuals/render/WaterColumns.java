@@ -73,6 +73,14 @@ public final class WaterColumns {
 	private static final long[] checkedChunk = new long[32 * 32];
 	private static final boolean[] drawnChunk = new boolean[32 * 32];
 	/**
+	 * Per chunk of the map: whether Sodium had built the section of its surface (at its centre) when last
+	 * checked. The hold (heldUntil) starts when that first happens, not when the sea level's section (drawnChunk)
+	 * is built: on land that one is underground, and Sodium builds it only once its occlusion search reaches it,
+	 * often with the player a chunk or two away; held then, a chunk long on screen went to DH's picture for a few
+	 * frames as the player walked up to it.
+	 */
+	private static final boolean[] surfaceChunk = new boolean[32 * 32];
+	/**
 	 * The frame until which a chunk Sodium has just started drawing is held back: marked in the map (alpha 2)
 	 * so the lighting pass shows DH's picture there and the water pass leaves its water out, until whatever
 	 * lights it has caught up (a frame or two came in with other lighting even with the map current).
@@ -156,18 +164,22 @@ public final class WaterColumns {
 					int cz = cameraChunkZ + dz;
 					int index = Math.floorMod(cz, 32) * 32 + Math.floorMod(cx, 32);
 					long key = chunkKey(cx, cz);
-					boolean drawn = level.getChunkSource().getChunk(cx, cz, false) != null && sodiumDraws(cx, seaY, cz);
+					LevelChunk loaded = level.getChunkSource().getChunk(cx, cz, false);
+					boolean drawn = loaded != null && sodiumDraws(cx, seaY, cz);
+					boolean surface = loaded != null && sodiumDraws(cx, surfaceY(loaded, seaY), cz);
 					boolean holdEnds = checkedChunk[index] == key && drawn && heldUntil[index] != 0
 							&& heldUntil[index] <= frame;
-					if (checkedChunk[index] == key && drawnChunk[index] == drawn && !holdEnds) {
+					if (checkedChunk[index] == key && drawnChunk[index] == drawn && surfaceChunk[index] == surface
+							&& !holdEnds) {
 						continue;
 					}
 					boolean first = checkedChunk[index] != key;
-					if (drawn && !holdEnds && (first || !drawnChunk[index])) {
+					if (drawn && surface && !holdEnds && (first || !surfaceChunk[index])) {
 						heldUntil[index] = frame + HOLD_FRAMES;
 					}
 					checkedChunk[index] = key;
 					drawnChunk[index] = drawn;
+					surfaceChunk[index] = surface;
 					if (holdEnds || !drawn) {
 						heldUntil[index] = 0;
 					}
@@ -339,6 +351,14 @@ public final class WaterColumns {
 		double dz = nearestToZero(chunkZ * 16 - 1 - cameraZ, chunkZ * 16 + 17 - cameraZ);
 		double radius = renderDistance * 16.0;
 		return dx * dx + dz * dz < radius * radius && renderer.isSectionReady(chunkX, y >> 4, chunkZ);
+	}
+
+	/** The height of the chunk's top block at its centre (its surface, trees and all), else the sea's. */
+	private static int surfaceY(LevelChunk chunk, int seaY) {
+		if (!chunk.hasPrimedHeightmap(Heightmap.Types.WORLD_SURFACE)) {
+			return seaY;
+		}
+		return Math.max(chunk.getHeight(Heightmap.Types.WORLD_SURFACE, 8, 8) - 1, chunk.getMinY());
 	}
 
 	/** The point of [low, high] nearest zero. */
