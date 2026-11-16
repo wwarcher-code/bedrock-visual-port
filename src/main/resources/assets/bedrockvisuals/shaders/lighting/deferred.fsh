@@ -314,7 +314,8 @@ vec3 volumetricFog(vec3 dir, float distance, out vec3 transmittance) {
             // reaches (PopulateVolume's DirectionalLightSkyLightHeuristicToggles.y test).
             float columnSky = max(waterColumnSkyLight(p), 0.0);
             stepAmbient = SkyColor.rgb * waterSkyAccess(columnSky) * 0.07957747;
-            stepSun = columnSky > 0.0001 ? 1.0 : 0.0;
+            // And none in water under the terrain's surface (a cave's pool), which the shadow map can't see.
+            stepSun = columnSky > 0.0001 && !underTerrain(p) ? 1.0 : 0.0;
         } else {
             float density = clamp(VolumeHeight.x * p.y + VolumeHeight.y, 0.0, 1.0) * VolumeHeight.w;
             extinction = vec3(VolumeAir.w * density);

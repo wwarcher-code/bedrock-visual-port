@@ -196,6 +196,32 @@ public final class WaterColumns {
 		}
 	}
 
+	/** Each column's terrain top above the level's floor, as last mapped (0 unknown), by wrapped position. */
+	private static final short[] TERRAIN_TOP = new short[SIZE * SIZE];
+
+	/**
+	 * The world y of the first block above the column's terrain: the highest motion-blocking block, leaves aside,
+	 * and below any water on it (the height map counts water, and the sea's floor under it would count as
+	 * under the surface: no sun on the sea bed). Integer.MIN_VALUE when the column isn't mapped.
+	 */
+	static int terrainTop(int x, int z) {
+		int top = TERRAIN_TOP[Math.floorMod(x, SIZE) + Math.floorMod(z, SIZE) * SIZE];
+		return top == 0 ? Integer.MIN_VALUE : top + minY;
+	}
+
+	private static int terrainTopOf(LevelChunk chunk, BlockPos.MutableBlockPos pos, int x, int z) {
+		if (!chunk.hasPrimedHeightmap(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES)) {
+			return 0;
+		}
+		int top = chunk.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x & 15, z & 15);
+		pos.set(x, top - 1, z);
+		while (top > minY && !chunk.getFluidState(pos).isEmpty()) {
+			top--;
+			pos.setY(top - 1);
+		}
+		return Math.max(0, Math.min(top - minY, 0x3FFF));
+	}
+
 	/**
 	 * One texel, 16 bits a channel: r the surface height × 16 above the level's floor (0 when there's no
 	 * water); g the lowest water block's y above the floor (low 12 bits) and the sky light reaching the water
@@ -287,13 +313,10 @@ public final class WaterColumns {
 				any = true;
 			}
 		}
-		// The terrain's top in the column (the first block above the highest motion-blocking one, leaves aside),
-		// above the level's floor: what lies below it is under the surface, for the cave check (deferred.fsh).
-		int terrainTop = 0;
-		if (rendered && chunk.hasPrimedHeightmap(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES)) {
-			terrainTop = Math.max(0, Math.min(chunk.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x & 15, z & 15)
-					- minY, 0x3FFF));
-		}
+		// The terrain's top in the column above the level's floor (0 unknown): what lies below it is under the
+		// surface, for the cave check (deferred.fsh, LightVolume).
+		int terrainTop = rendered ? terrainTopOf(chunk, pos, x, z) : 0;
+		TERRAIN_TOP[Math.floorMod(x, SIZE) + Math.floorMod(z, SIZE) * SIZE] = (short) terrainTop;
 		int flag = !rendered ? 0 : held(x >> 4, z >> 4) ? 2 : 1;
 		data.putShort((short) surface).putShort((short) ((bottom & 0xFFF) | (sky << 12)))
 				.putShort((short) ((roof & 0xFFF) | (skyBelow << 12)))

@@ -270,7 +270,9 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
     // pass's flag and got this pass's deep-water fallback on top, saturated blue.
     if (opaque > 0.0) {
         vec3 beneath = v_Position * (viewDistance(opaque) / max(viewDistance(gl_FragCoord.z), 1e-4));
-        s.beneathLit = surfaceFogShadow(beneath);
+        // The shadow map holds nothing over caves (Sodium's cave culling): water under the terrain's surface
+        // is in shade (its scattered light lit teal in a cave's pool at noon).
+        s.beneathLit = underTerrain(beneath + vec3(0.0, 0.05, 0.0)) ? 0.0 : surfaceFogShadow(beneath);
         s.beneathSky = waterColumnSkyLight(waterTestPoint(beneath));
     }
     // Its own flag rather than the same test here: this pass reconstructs the point from the water's geometry
@@ -699,7 +701,8 @@ vec3 waterColor(WaterSurface s, float albedo) {
     // Sun glint.
     float nDotL = max(dot(s.n, sunDir), 0.0);
     vec3 glint = vec3(0.0);
-    if (nDotL > 0.0) {
+    // No glint on water under the terrain's surface (a cave's pool glinted in the noon sun: an orange blob).
+    if (nDotL > 0.0 && !underTerrain(v_Position + vec3(0.0, 0.1, 0.0))) {
         float nDotV = max(dot(s.n, s.v), 1e-4);
         vec3 h = normalize(sunDir + s.v);
         float fresnel = WATER_F0 + (1.0 - WATER_F0) * pow(1.0 - max(dot(h, s.v), 0.0), 5.0);
