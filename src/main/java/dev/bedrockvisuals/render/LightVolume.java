@@ -27,7 +27,8 @@ import org.lwjgl.system.MemoryUtil;
  * levels for {@link #SIZE_XZ} x {@link #SIZE_Y} x {@link #SIZE_XZ} blocks around the camera, wrapping on world
  * coordinates (so a block always sits at the same texel), its horizontal slices side by side in a 2D texture,
  * {@link #TILES_X} across. A few slices are refreshed each frame. Blue is 1 where the block is solid and opaque
- * (isSolidRender): what the point lights' shadows are traced through.
+ * (isSolidRender): what the point lights' shadows are traced through. Alpha is 1 below the column's terrain surface
+ * (the motion-blocking height map, leaves aside).
  */
 public final class LightVolume {
 	static final int SIZE_XZ = 128;
@@ -123,6 +124,14 @@ public final class LightVolume {
 							}
 							openSky = sky == null;
 						}
+						// The top of the column's terrain (leaves aside): a block below it lies under the surface.
+						net.minecraft.world.level.levelgen.Heightmap surface = null;
+						if (chunk != null) {
+							var heightmap = net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES;
+							if (chunk.hasPrimedHeightmap(heightmap)) {
+								surface = chunk.getOrCreateHeightmapUnprimed(heightmap);
+							}
+						}
 						int fromX = Math.max(chunkX << 4, minX);
 						int toX = Math.min((chunkX << 4) + 15, maxX);
 						int fromZ = Math.max(chunkZ << 4, minZ);
@@ -149,7 +158,10 @@ public final class LightVolume {
 								SLICE[texel] = (byte) (skyLevel * 17);
 								SLICE[texel + 1] = (byte) (blockLevel * 17);
 								SLICE[texel + 2] = (byte) (solid ? 255 : 0);
-								SLICE[texel + 3] = (byte) 255;
+								// Alpha: 1 under the column's surface, where a ray that leaves the volume upwards still
+								// has terrain over it (the cave check, light_volume.glsl).
+								boolean covered = surface != null && y < surface.getFirstAvailable(x & 15, z & 15);
+								SLICE[texel + 3] = (byte) (covered ? 255 : 0);
 							}
 						}
 					}

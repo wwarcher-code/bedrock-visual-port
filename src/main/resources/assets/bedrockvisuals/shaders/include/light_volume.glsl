@@ -77,8 +77,19 @@ float voxelVisibility(vec3 from, vec3 to) {
     return 1.0;
 }
 
+// Whether the block at world-grid cell (camera-relative, floored) lies under its column's terrain surface.
+bool coveredCell(ivec3 cameraCell) {
+    ivec3 cell = cameraCell + ivec3(floor(LightVolumeOrigin.xyz));
+    cell = ivec3(int(mod(float(cell.x), 128.0)), int(mod(float(cell.y), 48.0)), int(mod(float(cell.z), 128.0)));
+    ivec2 texel = ivec2((cell.y % 8) * 128 + cell.x, (cell.y / 8) * 128 + cell.z);
+    return texelFetch(LIGHT_VOLUME, texel, 0).a > 0.5;
+}
+
 // Whether a ray from the camera-relative point from along direction (unit) meets a solid block before it leaves
-// the volume or has crossed maxCells blocks: 0 blocked, 1 clear.
+// the volume or has crossed maxCells blocks: 0 blocked, 1 clear. A ray that leaves the volume (or runs out of
+// steps) still under the terrain's surface counts as blocked: the volume reaches only 23 blocks up and down, and
+// in a cave taller than that the rays from its floor ran out before they met its roof (sunlit patches deep in
+// big caves).
 float voxelRayVisibility(vec3 from, vec3 direction, int maxCells) {
     if (!inLightVolume(from)) {
         return 1.0;
@@ -89,6 +100,7 @@ float voxelRayVisibility(vec3 from, vec3 direction, int maxCells) {
     vec3 inv = 1.0 / max(abs(direction), vec3(1e-6));
     vec3 tMax = (vec3(stepDir) * (vec3(cell) + 0.5 - origin) + 0.5) * inv;
     vec2 range = lightVolumeRange();
+    ivec3 inside = cell;
     for (int i = 0; i < maxCells; i++) {
         if (tMax.x < tMax.y && tMax.x < tMax.z) {
             cell.x += stepDir.x;
@@ -102,13 +114,14 @@ float voxelRayVisibility(vec3 from, vec3 direction, int maxCells) {
         }
         vec3 p = vec3(cell) + 0.5 - fract(LightVolumeOrigin.xyz);
         if (max(abs(p.x), abs(p.z)) > range.x || abs(p.y) > range.y) {
-            return 1.0;
+            return coveredCell(inside) ? 0.0 : 1.0;
         }
         if (solidCell(cell)) {
             return 0.0;
         }
+        inside = cell;
     }
-    return 1.0;
+    return coveredCell(inside) ? 0.0 : 1.0;
 }
 
 #endif
