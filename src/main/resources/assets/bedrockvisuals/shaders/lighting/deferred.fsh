@@ -1059,8 +1059,13 @@ void main() {
     // out of the shadow map, and the sun reached cave floors that had some sky light. Any ray from a cave to the
     // sun crosses the rock right around it: where the sky light isn't full, the blocks towards the light are
     // walked through the light volume's solid-block channel, and the first solid one shades the point.
+    // Farther from the camera than the light volume reaches (23 blocks up or down, 63 across), a point under its
+    // column's terrain surface (the water column map's height map) is taken as shaded: in a big cave the lit
+    // ledges high above the camera were out of the volume's reach and kept the shadow map's sun.
     if (skyLight < 0.999 && casterVisibility > 0.0) {
-        casterVisibility *= voxelRayVisibility(position + nCaster * 0.05, moonCasts ? moonDir : sunDir, 64);
+        vec3 from = position + nCaster * 0.05;
+        casterVisibility *= inLightVolume(from) ? voxelRayVisibility(from, moonCasts ? moonDir : sunDir, 64)
+                : underTerrain(from) ? 0.0 : 1.0;
     }
     if (DebugParams.w > 6.5 && DebugParams.w < 10.5) {
         // The far terrain views (GBufferDebugView; the flicker test compares frames of each): each input to

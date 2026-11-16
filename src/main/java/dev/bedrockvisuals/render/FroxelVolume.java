@@ -38,6 +38,7 @@ public final class FroxelVolume {
 			.withUniform("ShadowMap3", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("CloudShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightVolumeMap", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("WaterColumnMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("AtmosphereData", UniformType.UNIFORM_BUFFER)
 			// Declared by common.glsl, which the shader includes; every declared block must be bound.
@@ -92,6 +93,8 @@ public final class FroxelVolume {
 				pass.setUniform("CloudShadowMap", CloudShadows.view() != null ? CloudShadows.view() : fallback,
 						RenderSystem.getSamplerCache().getRepeat(FilterMode.NEAREST));
 				pass.setUniform("LightVolumeMap", LightVolume.view() != null ? LightVolume.view() : fallback, nearest);
+				// Its terrain heights: no sun in the air under the surface beyond the light volume (caves).
+				pass.setUniform("WaterColumnMap", WaterColumns.view() != null ? WaterColumns.view() : fallback, nearest);
 				pass.setUniform("LightingData", lightingData);
 				pass.setUniform("AtmosphereData", atmosphereData);
 				pass.setUniform("GradingData", LightingPass.gradingData());

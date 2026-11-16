@@ -202,7 +202,8 @@ public final class WaterColumns {
 	 * (high 4); b the height of the underside of the first ledge under the surface with water beneath it (0
 	 * for none; low 12 bits) and the sky light of the water just under it (high 4); a 1 where the column's
 	 * chunk is drawn by Sodium (else any water is Distant Horizons' seabed under the sea, see below), 2 while
-	 * that chunk is held back after it first appears ({@link #heldUntil}).
+	 * that chunk is held back after it first appears ({@link #heldUntil}) (low 2 bits), and the column's terrain top
+	 * above the floor (the rest).
 	 */
 	private static void encode(ByteBuffer data, ClientLevel level, BlockPos.MutableBlockPos pos, int x, int z) {
 		int surface = 0;
@@ -286,9 +287,17 @@ public final class WaterColumns {
 				any = true;
 			}
 		}
+		// The terrain's top in the column (the first block above the highest motion-blocking one, leaves aside),
+		// above the level's floor: what lies below it is under the surface, for the cave check (deferred.fsh).
+		int terrainTop = 0;
+		if (rendered && chunk.hasPrimedHeightmap(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES)) {
+			terrainTop = Math.max(0, Math.min(chunk.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x & 15, z & 15)
+					- minY, 0x3FFF));
+		}
+		int flag = !rendered ? 0 : held(x >> 4, z >> 4) ? 2 : 1;
 		data.putShort((short) surface).putShort((short) ((bottom & 0xFFF) | (sky << 12)))
 				.putShort((short) ((roof & 0xFFF) | (skyBelow << 12)))
-				.putShort((short) (!rendered ? 0 : held(x >> 4, z >> 4) ? 2 : 1));
+				.putShort((short) (flag | (terrainTop << 2)));
 	}
 
 	/**

@@ -18,6 +18,9 @@ uniform sampler2D LightVolumeMap;  // sky and block light around the camera (Lig
 #include <bedrockvisuals:froxels.glsl>
 #define LIGHT_VOLUME LightVolumeMap
 #include <bedrockvisuals:light_volume.glsl>
+uniform sampler2D WaterColumnMap;
+#define WATER_COLUMNS WaterColumnMap
+#include <bedrockvisuals:water_columns.glsl>
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 scatterOut;
@@ -107,6 +110,8 @@ void main() {
             if (stepSun > 0.0 && here.x < 0.999) {
                 stepSun *= voxelRayVisibility(p, l, 24);
             }
+        } else if (underTerrain(p)) {
+            stepSun = 0.0; // beyond the volume, in a cave or under an overhang
         }
         if (water && p.y < UnderwaterMedium.w) {
             extinction = UnderwaterMedium.rgb;

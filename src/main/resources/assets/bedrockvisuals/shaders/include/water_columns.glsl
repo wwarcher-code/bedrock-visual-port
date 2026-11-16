@@ -21,10 +21,11 @@ struct WaterColumn {
     float sky;
     float skyUnder;
     bool loaded;  // Sodium draws Java's chunk (else its water is DH's seabed under the sea: WaterColumns.java)
+    float terrainTop; // the first height above the column's terrain (leaves aside), in the map's frame; 0 unknown
 };
 
 bool waterColumnAt(vec3 p, out WaterColumn c) {
-    c = WaterColumn(0.0, 0.0, 0.0, 0.0, 0.0, false);
+    c = WaterColumn(0.0, 0.0, 0.0, 0.0, 0.0, false, 0.0);
     if (WaterColumnOrigin.w < 0.5 || max(abs(p.x), abs(p.z)) > WATER_COLUMN_RANGE) {
         return false;
     }
@@ -35,8 +36,11 @@ bool waterColumnAt(vec3 p, out WaterColumn c) {
     c.sky = floor(column.g / 4096.0) / 15.0;
     c.roof = mod(column.b, 4096.0);
     c.skyUnder = floor(column.b / 4096.0) / 15.0;
-    // 2: a chunk Sodium has just started drawing, held back for a few frames (columnHeld): not yet Java's.
-    c.loaded = column.a > 0.5 && column.a < 1.5;
+    // Alpha's low 2 bits: 1 a chunk Sodium draws, 2 one it has just started drawing, held back for a few frames
+    // (columnHeld): not yet Java's. The rest: the terrain's top.
+    float flag = mod(column.a, 4.0);
+    c.loaded = flag > 0.5 && flag < 1.5;
+    c.terrainTop = floor(column.a / 4.0);
     return c.surface > 0.0;
 }
 
@@ -47,7 +51,18 @@ bool columnHeld(vec3 p) {
         return false;
     }
     ivec2 texel = ivec2(mod(floor(p.xz + WaterColumnOrigin.xz), 512.0));
-    return texelFetch(WATER_COLUMNS, texel, 0).a * 65535.0 > 1.5;
+    return mod(floor(texelFetch(WATER_COLUMNS, texel, 0).a * 65535.0 + 0.5), 4.0) > 1.5;
+}
+
+// Whether the camera-relative point p lies under its column's terrain surface (leaves aside), in a column the
+// map has: in a cave, or under an overhang. False where the map doesn't know.
+bool underTerrain(vec3 p) {
+    if (WaterColumnOrigin.w < 0.5 || max(abs(p.x), abs(p.z)) > WATER_COLUMN_RANGE) {
+        return false;
+    }
+    ivec2 texel = ivec2(mod(floor(p.xz + WaterColumnOrigin.xz), 512.0));
+    float top = floor(floor(texelFetch(WATER_COLUMNS, texel, 0).a * 65535.0 + 0.5) / 4.0);
+    return top > 0.5 && p.y + WaterColumnOrigin.y < top - 0.01;
 }
 
 // How far below the water's surface the camera-relative point p is (blocks), or -1 when it isn't in the top
