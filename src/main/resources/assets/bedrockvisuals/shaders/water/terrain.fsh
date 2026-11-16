@@ -569,7 +569,8 @@ vec3 surfaceFog(vec3 dir, float distance, out vec3 transmittance) {
         float density = clamp(VolumeHeight.x * p.y + VolumeHeight.y, 0.0, 1.0);
         vec3 extinction = vec3(max(VolumeAir.w * density, 1e-6));
         vec3 scattering = extinction * VolumeAir.rgb * (1.0 - bedrockFogAmount(t));
-        float visibility = surfaceFogShadow(p) * surfaceFogCloudShadow(p, l);
+        // No sun in a cave's air, whose roof the shadow map can't see.
+        float visibility = underTerrain(p) ? 0.0 : surfaceFogShadow(p) * surfaceFogCloudShadow(p, l);
         vec3 source = scattering * (ambient + light * phase * visibility);
         vec3 stepTransmittance = exp(-extinction * stepLength);
         inScattered += transmittance * source * (1.0 - stepTransmittance) / extinction;

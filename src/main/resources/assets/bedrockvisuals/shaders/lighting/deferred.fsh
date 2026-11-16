@@ -321,6 +321,7 @@ vec3 volumetricFog(vec3 dir, float distance, out vec3 transmittance) {
             extinction = vec3(VolumeAir.w * density);
             scattering = extinction * VolumeAir.rgb;
             g = VolumeHeight.z;
+            stepSun = underTerrain(p) ? 0.0 : 1.0; // no sun in a cave's air (the shadow map can't see its roof)
         }
         scattering *= 1.0 - bedrockFogAmount(t);
         float visibility = volumeShadow(p, l) * cloudShadow(p, l) * stepSun;
@@ -410,7 +411,9 @@ vec3 waterHaze(vec3 dir, float tIn, float tOut, out vec3 transmittance) {
         }
         vec2 here = lightVolumeAt(p);
         float sky = here.x >= 0.0 ? min(here.x + depth / 15.0, max(surfaceSky, here.x)) : surfaceSky;
-        float sun = sky > 0.0001 ? volumeShadow(p, l) * cloudShadow(p, l) : 0.0;
+        // No sun in water under the terrain's surface (a cave's pool): the shadow map holds only what Sodium
+        // draws, so in a cave at noon the haze was sunlit everywhere but under the pillars' own shadows.
+        float sun = sky > 0.0001 && !underTerrain(p) ? volumeShadow(p, l) * cloudShadow(p, l) : 0.0;
         vec3 source = UnderwaterScattering.rgb * ((SkyColor.rgb * waterSkyAccess(sky)
                 + BlockLightColor.rgb * blockLightColor(max(here.y, 0.0))) * 0.07957747 + light * phase * sun);
         scattered += source * exp(-sigma * (float(i) * stepLength)) * stepShare;
