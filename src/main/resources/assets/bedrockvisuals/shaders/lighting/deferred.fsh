@@ -284,7 +284,7 @@ vec3 volumetricFog(vec3 dir, float distance, out vec3 transmittance) {
     float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
     bool moonCasts = ShadowParams.w > 0.5;
     vec3 l = normalize(moonCasts ? MoonDirection.xyz : SunDirection.xyz);
-    vec3 light = moonCasts ? MoonColor.rgb : SunColor.rgb;
+    vec3 light = moonCasts ? moonLight() : sunLight();
     float cosine = dot(l, -dir);
     vec3 ambient = SkyColor.rgb * VolumeCamera.x * 0.07957747;
     vec3 inScattered = vec3(0.0);
@@ -392,7 +392,7 @@ vec3 waterHaze(vec3 dir, float tIn, float tOut, out vec3 transmittance) {
     }
     bool moon = ShadowParams.w > 0.5;
     vec3 l = normalize(moon ? MoonDirection.xyz : SunDirection.xyz);
-    vec3 light = moon ? MoonColor.rgb : SunColor.rgb;
+    vec3 light = moon ? moonLight() : sunLight();
     float phase = phaseHG(UnderwaterScattering.w, dot(l, -dir));
     vec3 sigma = waterScatterExtinction();
     const int STEPS = 8;
@@ -843,7 +843,7 @@ vec3 distantWaterSurface(vec3 below, vec3 ray, float surface, float ground, vec3
         vec3 h = normalize(sunDir + v);
         float fh = 0.02 + 0.98 * pow(1.0 - max(dot(h, v), 0.0), 5.0);
         float geometry = smithG1(nDotV, ROUGHNESS) * smithG1(nDotL, ROUGHNESS);
-        glint = SunColor.rgb * fh * ggx(max(dot(n, h), 0.0), ROUGHNESS) * geometry / (4.0 * nDotV);
+        glint = sunLight() * fh * ggx(max(dot(n, h), 0.0), ROUGHNESS) * geometry / (4.0 * nDotV);
     }
     // What lies beneath and the water's own light exactly as for the near water's (the lighting pass under
     // Java's water): WaterExtinction along the view, and the water's haze along this pixel's path (waterHaze,
@@ -1166,8 +1166,8 @@ void main() {
     sunVisibility = min(sunVisibility, distantHeightShadow(snapped, sunDir, mapped >= 0.0));
     moonVisibility = min(moonVisibility, distantHeightShadow(snapped, moonDir, mapped >= 0.0));
 
-    vec3 color = directLight(nSun, v, sunDir, SunColor.rgb * sunVisibility, diffuseColor, f0, roughness);
-    color += directLight(nMoon, v, moonDir, MoonColor.rgb * moonVisibility, diffuseColor, f0, roughness);
+    vec3 color = directLight(nSun, v, sunDir, sunLight() * sunVisibility, diffuseColor, f0, roughness);
+    color += directLight(nMoon, v, moonDir, moonLight() * moonVisibility, diffuseColor, f0, roughness);
     color *= causticsMultiplier(position, n);
     // Bedrock's point lights (DiscreteIndirectCombinedLightingPass with PointLightShading): each declared light
     // block lights the surface from its centre out to its radius (its light level in blocks), by

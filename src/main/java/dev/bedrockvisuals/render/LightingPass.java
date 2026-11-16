@@ -137,9 +137,9 @@ public final class LightingPass {
 			Std140Builder builder = Std140Builder.onStack(stack, DATA_SIZE)
 					.putMat4f(inverseViewProjection);
 			putVec4(builder, light.sunDirection(), 0);
-			putVec4(builder, light.sun(), 0);
+			putVec4(builder, light.sun(), ShadowPass.lightShare(light, false));
 			putVec4(builder, light.moonDirection(), 0);
-			putVec4(builder, light.moon(), 0);
+			putVec4(builder, light.moon(), ShadowPass.lightShare(light, true));
 			putVec4(builder, light.sky(), 0);
 			putVec4(builder, light.ambient(), 0);
 			putVec4(builder, light.blockLight(), 0);

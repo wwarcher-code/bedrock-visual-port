@@ -78,6 +78,43 @@ float bvCascade(sampler2D map, int cascade, vec3 p, float slope) {
     return clip.z >= texture(map, uv).r - bias ? 1.0 : 0.0;
 }
 
+// Bedrock's texel quantization (common.glsl, snapToTexel), for entities: the point the sun and moon are tested
+// at, moved within the face to the centre of its texel of the entity's own texture (entity models aren't on
+// the block grid). From the screen-space derivatives of the position and texture coordinates, taken in main
+// before any discard; on a flat face they hold exactly. Shadow edges then follow the model's pixels instead of
+// cutting across them. Left where the face is seen edge-on or the move would be more than a quarter block.
+vec3 bvDpx;
+vec3 bvDpy;
+vec2 bvDux;
+vec2 bvDuy;
+
+vec3 bvSnapToTexel(vec3 p, vec2 uv) {
+    vec2 size = vec2(textureSize(Sampler0, 0));
+    vec2 dux = bvDux * size;
+    vec2 duy = bvDuy * size;
+    float det = dux.x * duy.y - duy.x * dux.y;
+    if (abs(det) < 1e-6) {
+        return p;
+    }
+    vec2 texel = uv * size;
+    vec2 toCentre = floor(texel) + 0.5 - texel;
+    // The screen offset s with dux × s.x + duy × s.y = toCentre.
+    vec2 s = vec2(duy.y * toCentre.x - duy.x * toCentre.y, dux.x * toCentre.y - dux.y * toCentre.x) / det;
+    vec3 offset = bvDpx * s.x + bvDpy * s.y;
+    return dot(offset, offset) < 0.0625 ? p + offset : p;
+}
+
+// The face's own normal (flat across it, unlike the interpolated one), turned to the side n is on.
+vec3 bvFaceNormal(vec3 n) {
+    vec3 face = cross(bvDpx, bvDpy);
+    float length2 = dot(face, face);
+    if (length2 < 1e-20) {
+        return n;
+    }
+    face *= inversesqrt(length2);
+    return dot(face, n) < 0.0 ? -face : face;
+}
+
 // The darkest of the cascades the point falls in, faded out over the shadow range's last 8 blocks; -1 when
 // there's no shadow map or the point is in none of them.
 float bvShadow(vec3 p, vec3 n, vec3 towardsLight) {
@@ -85,7 +122,10 @@ float bvShadow(vec3 p, vec3 n, vec3 towardsLight) {
         return -1.0;
     }
     float grazing = clamp(1.0 - dot(n, towardsLight), 0.0, 1.0);
-    vec3 q = p + n * ShadowParams.z * grazing;
+    // Plus a texel of the shadow map's finest cascade (1/48 block) out along the face: the model's own faces
+    // are in the map too, off the terrain's block grid, and with the terrain's bias alone they shaded
+    // themselves in speckles.
+    vec3 q = p + n * (ShadowParams.z * grazing + 0.02);
     float nDotL = max(dot(n, towardsLight), 0.04);
     float slope = sqrt(1.0 - nDotL * nDotL) / nDotL;
     float visibility = 2.0;
@@ -119,12 +159,13 @@ vec3 bvLit(vec3 albedo, vec3 n, vec3 v) {
     bool moonCasts = ShadowParams.w > 0.5;
     float skyFallback = pow(skyLight, 4.0);
     float skyGuard = skyLight > 0.0 ? 1.0 : 0.0;
-    float mapped = bvShadow(bvPosition, n, moonCasts ? moonDir : sunDir);
+    vec3 face = bvFaceNormal(n);
+    float mapped = bvShadow(bvSnapToTexel(bvPosition, texCoord0), face, moonCasts ? moonDir : sunDir);
     float casterVisibility = mapped < 0.0 ? skyFallback : mapped * skyGuard;
     float sunVisibility = moonCasts ? skyFallback : casterVisibility;
     float moonVisibility = moonCasts ? casterVisibility : skyFallback;
-    vec3 color = albedo / 3.14159265 * (SunColor.rgb * sunVisibility * max(dot(n, sunDir), 0.0)
-            + MoonColor.rgb * moonVisibility * max(dot(n, moonDir), 0.0));
+    vec3 color = albedo / 3.14159265 * (sunLight() * sunVisibility * max(dot(n, sunDir), 0.0)
+            + moonLight() * moonVisibility * max(dot(n, moonDir), 0.0));
     float cameraSky = sqrt(VolumeCamera.x) * 15.0 / 16.0;
     float skyCurve = skyLight * mix(pow(skyLight, 4.0), skyLight * skyLight, cameraSky);
     vec3 indirect = max(BlockLightColor.rgb * blockLightColor(blockLight) + SkyColor.rgb * skyCurve, AmbientColor.rgb);
@@ -193,6 +234,10 @@ vec4 calculateFinalColor(vec4 color) {
 }
 
 void main() {
+    bvDpx = dFdx(bvPosition);
+    bvDpy = dFdy(bvPosition);
+    bvDux = dFdx(texCoord0);
+    bvDuy = dFdy(texCoord0);
     vec4 color = texture(Sampler0, texCoord0);
 
     #ifdef OIT_ADDITIVE

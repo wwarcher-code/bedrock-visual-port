@@ -191,7 +191,7 @@ vec3 waterTransmittanceTo(vec3 p, vec3 dir) {
 vec3 waterInScatter(vec3 dir, float path, float sunVisibility, float skyAccess) {
     bool moon = ShadowParams.w > 0.5;
     vec3 l = normalize(moon ? MoonDirection.xyz : SunDirection.xyz);
-    vec3 light = moon ? MoonColor.rgb : SunColor.rgb;
+    vec3 light = moon ? moonLight() : sunLight();
     float g = UnderwaterScattering.w;
     float cosine = dot(l, -dir);
     float phase = (1.0 - g * g) * 0.07957747 / pow(max(1.0 + g * (2.0 * cosine + g), 1e-4), 1.5);

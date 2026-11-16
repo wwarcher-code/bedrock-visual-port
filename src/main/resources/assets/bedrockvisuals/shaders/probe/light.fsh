@@ -66,7 +66,7 @@ void main() {
 
     bool moonCasts = ShadowParams.w > 0.5;
     vec3 l = normalize(moonCasts ? MoonDirection.xyz : SunDirection.xyz);
-    vec3 radiance = moonCasts ? MoonColor.rgb : SunColor.rgb;
+    vec3 radiance = moonCasts ? moonLight() : sunLight();
     float mapped = probeShadow(position, n);
     float skyGuard = skyLight > 0.0 ? 1.0 : 0.0;
     float visibility = mapped < 0.0 ? pow(skyLight, 4.0) : mapped * skyGuard;

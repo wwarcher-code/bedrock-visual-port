@@ -7,9 +7,9 @@
 layout(std140) uniform LightingData {
     mat4 InverseViewProjection; // clip space to camera-relative world space
     vec4 SunDirection;          // towards the sun
-    vec4 SunColor;              // linear RGB times illuminance
+    vec4 SunColor;              // linear RGB times illuminance; w: its share as the directional light (sunLight)
     vec4 MoonDirection;
-    vec4 MoonColor;
+    vec4 MoonColor;             // w as SunColor's
     vec4 SkyColor;              // fill light from the sky, before sky-light falloff
     vec4 AmbientColor;          // floor everywhere
     vec4 BlockLightColor;
@@ -42,6 +42,17 @@ layout(std140) uniform LightingData {
     vec4 LightVolumeOrigin;     // xyz: the camera's world position modulo the light volume's size; w: 1 when
                                 // the volume is filled (LightVolume.java)
 };
+
+// The sun's and the moon's light on the level: Bedrock lights it with one directional light, the sun while it's
+// above the horizon and then the moon, fading out near the horizon (ShadowPass.lightShare). SunColor and
+// MoonColor alone are the bodies' own (their discs in the sky, the clouds).
+vec3 sunLight() {
+    return SunColor.rgb * SunColor.w;
+}
+
+vec3 moonLight() {
+    return MoonColor.rgb * MoonColor.w;
+}
 
 // Bedrock's water extinction along a view ray from the camera (Underwater.java): the path through water is
 // capped where the ray leaves the water through its surface above the camera.

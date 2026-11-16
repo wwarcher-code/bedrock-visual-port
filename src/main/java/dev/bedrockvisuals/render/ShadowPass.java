@@ -62,8 +62,18 @@ public final class ShadowPass {
 	static final float[] SLOPE_BIAS_BLOCKS = {1e-5f * BEDROCK_DEPTH_BLOCKS, 2e-5f * BEDROCK_DEPTH_BLOCKS,
 			4e-5f * BEDROCK_DEPTH_BLOCKS, 6e-5f * BEDROCK_DEPTH_BLOCKS};
 	public static final float DEPTH_RANGE = 256;
-	/** Below this height above the horizon the light grazes the terrain too flatly to shadow usefully. */
-	private static final float MIN_ELEVATION = 0.03f;
+	/**
+	 * Below this height above the horizon (about 0.3°) the map isn't drawn: the light grazes the terrain too flatly
+	 * to shadow usefully, and its share of the light (lightShare) is under a tenth by then.
+	 */
+	private static final float MIN_ELEVATION = 0.005f;
+	/**
+	 * Over its last this much height above the horizon (2°) the directional light fades out (lightShare). TUNE:
+	 * Bedrock lights the level with one directional light, through its shadow map; at sunset its sun curve is
+	 * still at 14 of 100 on the horizon and reaches 0 some 7° below it, and a sun below the horizon is shadowed
+	 * by the ground. Without a map that low, a fade stands in.
+	 */
+	static final float HORIZON_FADE = 0.035f;
 	/** How far the light moves before the shadow map turns to follow it (ShadowProjection.steppedDirection). */
 	static final float DIRECTION_STEP = (float) Math.toRadians(360.0 / 1800.0);
 	/** The direction the shadow map is drawn from; null until the first map, or after sun and moon swap. */
@@ -119,7 +129,27 @@ public final class ShadowPass {
 		return valid && !disabled ? heldDirection : null;
 	}
 
-	/** Whether the map was cast from the moon rather than the sun. */
+	/** Whether the moon, not the sun, is Bedrock's one directional light: once the sun is below the horizon. */
+	static boolean moonIsTheLight(LightingState light) {
+		return light.sunDirection().y <= 0;
+	}
+
+	/**
+	 * How much of the sun's (or the moon's) light reaches the level as its directional light, 0 to 1: none
+	 * from the one that isn't the directional light, and the one that is fading out over its last
+	 * {@link #HORIZON_FADE} above the horizon. Bedrock has the one light; here the other lit every face turned
+	 * towards it with no shadow at all (at sunset, every block side towards the sunset, the sun under the
+	 * horizon).
+	 */
+	static float lightShare(LightingState light, boolean moon) {
+		if (moon != moonIsTheLight(light)) {
+			return 0;
+		}
+		float y = moon ? light.moonDirection().y : light.sunDirection().y;
+		return Math.clamp(y / HORIZON_FADE, 0f, 1f);
+	}
+
+	/** Whether the map was cast from the moon rather than the sun (or, with no map, would be). */
 	public static boolean fromMoon() {
 		return fromMoon;
 	}
@@ -153,13 +183,15 @@ public final class ShadowPass {
 		if (disabled) {
 			return;
 		}
-		boolean moon = light.sunDirection().y < MIN_ELEVATION;
+		// Bedrock's one directional light: the sun while it's above the horizon, then the moon.
+		boolean moon = moonIsTheLight(light);
 		Vector3f current = moon ? light.moonDirection() : light.sunDirection();
-		if (current.y < MIN_ELEVATION) {
-			return;
-		}
 		if (moon != fromMoon) {
 			heldDirection = null;
+		}
+		fromMoon = moon;
+		if (current.y < MIN_ELEVATION) {
+			return;
 		}
 		heldDirection = ShadowProjection.steppedDirection(current, heldDirection, DIRECTION_STEP);
 		Vector3f towardsLight = heldDirection;
@@ -170,7 +202,6 @@ public final class ShadowPass {
 			BedrockVisualsClient.LOGGER.error("[shadows] shadow pass failed; shadows disabled until restart", e);
 			return;
 		}
-		fromMoon = moon;
 		valid = true;
 		if (!reported) {
 			reported = true;

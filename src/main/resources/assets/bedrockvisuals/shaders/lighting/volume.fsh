@@ -81,7 +81,7 @@ void main() {
 
     bool moonCasts = ShadowParams.w > 0.5;
     vec3 l = normalize(moonCasts ? MoonDirection.xyz : SunDirection.xyz);
-    vec3 light = moonCasts ? MoonColor.rgb : SunColor.rgb;
+    vec3 light = moonCasts ? moonLight() : sunLight();
     float cosine = dot(l, -dir);
     vec3 ambient = SkyColor.rgb * VolumeCamera.x * 0.07957747;
     vec3 inScattered = vec3(0.0);

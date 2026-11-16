@@ -557,7 +557,7 @@ vec3 surfaceFog(vec3 dir, float distance, out vec3 transmittance) {
     float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
     bool moonCasts = ShadowParams.w > 0.5;
     vec3 l = normalize(moonCasts ? MoonDirection.xyz : SunDirection.xyz);
-    vec3 light = moonCasts ? MoonColor.rgb : SunColor.rgb;
+    vec3 light = moonCasts ? moonLight() : sunLight();
     float g = VolumeHeight.z;
     float cosine = dot(l, -dir);
     float phase = (1.0 - g * g) * 0.07957747 / pow(max(1.0 + g * (2.0 * cosine + g), 1e-4), 1.5);
@@ -709,7 +709,7 @@ vec3 waterColor(WaterSurface s, float albedo) {
         float fresnel = WATER_F0 + (1.0 - WATER_F0) * pow(1.0 - max(dot(h, s.v), 0.0), 5.0);
         float r = max(s.roughness, 0.05);  // Bedrock's floor
         float geometry = smithG1(nDotV, r) * smithG1(nDotL, r);
-        glint = SunColor.rgb * fresnel * ggx(max(dot(s.n, h), 0.0), r) * geometry / (4.0 * nDotV) * sky;
+        glint = sunLight() * fresnel * ggx(max(dot(s.n, h), 0.0), r) * geometry / (4.0 * nDotV) * sky;
     }
 
     vec3 behind = texelFetch(u_SceneColor, ivec2(gl_FragCoord.xy), 0).rgb;
