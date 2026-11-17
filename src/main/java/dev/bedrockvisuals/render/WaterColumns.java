@@ -89,8 +89,8 @@ public final class WaterColumns {
 	/** Frames a new chunk is held back. */
 	private static final int HOLD_FRAMES = 5;
 	private static long frame;
-	/** Chunks mapped again at most per frame. */
-	private static final int CHUNKS_PER_FRAME = 64;
+	/** How long a frame may spend mapping changed chunks again (after the first). */
+	private static final long REMAP_BUDGET_NANOS = 1_000_000;
 
 	private WaterColumns() {
 	}
@@ -115,21 +115,51 @@ public final class WaterColumns {
 		// Never past the texture's last row (writing outside it ends the game without a Java error).
 		int rows = Math.min(ROWS_PER_FRAME, SIZE - firstRow);
 		nextRow = (nextRow + rows) % SIZE;
-		ByteBuffer data = MemoryUtil.memAlloc(SIZE * ROWS_PER_FRAME * 8);
+		// The band: columns outside the chunks mapped one by one (remapChangedChunks), which are past the loaded
+		// chunks (Distant Horizons' heights, cheap) or past the chunks it follows. The chunks it follows are left
+		// out: they're mapped when they change. Mapped here with the rest every frame, the ocean's columns (each
+		// walked down through its water) made the band's cost swing with what lay under it, several times a
+		// second: up to some 15 ms over the sea, a push and pull felt in the camera's motion.
+		ByteBuffer data = MemoryUtil.memAlloc(SIZE * 8);
 		try {
 			BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+			int seaY = level.getSeaLevel() - 1;
 			for (int r = 0; r < rows; r++) {
 				int row = firstRow + r;
 				// The world z nearest the camera that falls on this row.
 				int z = cameraZ - SIZE / 2 + Math.floorMod(row - (cameraZ - SIZE / 2), SIZE);
-				for (int column = 0; column < SIZE; column++) {
-					int x = cameraX - SIZE / 2 + Math.floorMod(column - (cameraX - SIZE / 2), SIZE);
-					encode(data, level, pos, x, z);
+				int spanStart = -1;
+				int lastChunkX = Integer.MIN_VALUE;
+				LevelChunk chunk = null;
+				boolean rendered = false;
+				boolean followed = false;
+				data.clear();
+				for (int column = 0; column <= SIZE; column++) {
+					if (column < SIZE) {
+						int x = cameraX - SIZE / 2 + Math.floorMod(column - (cameraX - SIZE / 2), SIZE);
+						if (x >> 4 != lastChunkX) {
+							lastChunkX = x >> 4;
+							chunk = level.getChunkSource().getChunk(x >> 4, z >> 4, false);
+							rendered = chunk != null && sodiumDraws(x >> 4, seaY, z >> 4);
+							followed = followed(x >> 4, z >> 4);
+						}
+						if (!followed) {
+							if (spanStart < 0) {
+								spanStart = column;
+								data.clear();
+							}
+							encode(data, level, pos, x, z, chunk, rendered);
+							continue;
+						}
+					}
+					if (spanStart >= 0) {
+						data.flip();
+						RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, data, 0, 0, spanStart,
+								row, column - spanStart, 1);
+						spanStart = -1;
+					}
 				}
 			}
-			data.flip();
-			RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, data, 0, 0, 0, firstRow, SIZE,
-					rows);
 		} finally {
 			MemoryUtil.memFree(data);
 		}
@@ -147,58 +177,102 @@ public final class WaterColumns {
 	}
 
 	/**
-	 * Maps again, this frame, the chunks around the render distance whose drawn state changed, and those whose
-	 * hold has just ended.
+	 * Whether the chunk is one {@link #remapChangedChunks} follows and maps itself (drawn by Sodium, checked
+	 * since it came into reach): the band leaves it alone.
+	 */
+	private static boolean followed(int chunkX, int chunkZ) {
+		int index = Math.floorMod(chunkZ, 32) * 32 + Math.floorMod(chunkX, 32);
+		return checkedChunk[index] == chunkKey(chunkX, chunkZ) && drawnChunk[index];
+	}
+
+	/** Chunks whose blocks or light changed since they were last mapped (ClientLevelMixin). */
+	private static final it.unimi.dsi.fastutil.longs.LongOpenHashSet DIRTY = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
+	/** Per chunk of the map: due to be mapped again (a change in it, from DIRTY). */
+	private static final boolean[] dirtyChunk = new boolean[32 * 32];
+
+	/** A block or the light changed in the chunk (Minecraft marking it for a rebuild): it's mapped again. */
+	public static void markDirty(int chunkX, int chunkZ) {
+		synchronized (DIRTY) {
+			DIRTY.add(chunkKey(chunkX, chunkZ));
+		}
+	}
+
+	/**
+	 * Maps again the chunks around the render distance whose drawn state changed, whose hold has just ended, or
+	 * whose blocks or light changed: nearest first, for at most {@link #REMAP_BUDGET_NANOS} a frame (a new row
+	 * of chunks comes into reach as the camera crosses a chunk border, a burst of them at once).
 	 */
 	private static void remapChangedChunks(ClientLevel level, int cameraChunkX, int cameraChunkZ) {
 		frame++;
+		synchronized (DIRTY) {
+			for (it.unimi.dsi.fastutil.longs.LongIterator it = DIRTY.iterator(); it.hasNext();) {
+				long key = it.nextLong();
+				int cx = (int) (key >> 32);
+				int cz = (int) key;
+				int index = Math.floorMod(cz, 32) * 32 + Math.floorMod(cx, 32);
+				if (checkedChunk[index] == key) {
+					dirtyChunk[index] = true;
+				}
+			}
+			DIRTY.clear();
+		}
 		int reach = Math.min(renderDistance + 2, 15);
 		int seaY = level.getSeaLevel() - 1;
-		int done = 0;
+		long start = System.nanoTime();
+		boolean mappedOne = false;
 		ByteBuffer data = null;
 		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
 		try {
-			for (int dz = -reach; dz <= reach && done < CHUNKS_PER_FRAME; dz++) {
-				for (int dx = -reach; dx <= reach && done < CHUNKS_PER_FRAME; dx++) {
-					int cx = cameraChunkX + dx;
-					int cz = cameraChunkZ + dz;
-					int index = Math.floorMod(cz, 32) * 32 + Math.floorMod(cx, 32);
-					long key = chunkKey(cx, cz);
-					LevelChunk loaded = level.getChunkSource().getChunk(cx, cz, false);
-					boolean drawn = loaded != null && sodiumDraws(cx, seaY, cz);
-					boolean surface = loaded != null && sodiumDraws(cx, surfaceY(loaded, seaY), cz);
-					boolean holdEnds = checkedChunk[index] == key && drawn && heldUntil[index] != 0
-							&& heldUntil[index] <= frame;
-					if (checkedChunk[index] == key && drawnChunk[index] == drawn && surfaceChunk[index] == surface
-							&& !holdEnds) {
-						continue;
-					}
-					boolean first = checkedChunk[index] != key;
-					if (drawn && surface && !holdEnds && (first || !surfaceChunk[index])) {
-						heldUntil[index] = frame + HOLD_FRAMES;
-					}
-					checkedChunk[index] = key;
-					drawnChunk[index] = drawn;
-					surfaceChunk[index] = surface;
-					if (holdEnds || !drawn) {
-						heldUntil[index] = 0;
-					}
-					if (first && !drawn) {
-						continue; // newly in reach and not drawn: the row band has it as it is
-					}
-					if (data == null) {
-						data = MemoryUtil.memAlloc(16 * 16 * 8);
-					}
-					data.clear();
-					for (int z = cz * 16; z < cz * 16 + 16; z++) {
-						for (int x = cx * 16; x < cx * 16 + 16; x++) {
-							encode(data, level, pos, x, z);
+			for (int ring = 0; ring <= reach; ring++) {
+				for (int dz = -ring; dz <= ring; dz++) {
+					int step = dz == -ring || dz == ring ? 1 : 2 * ring;
+					for (int dx = -ring; dx <= ring; dx += Math.max(step, 1)) {
+						if (mappedOne && System.nanoTime() - start > REMAP_BUDGET_NANOS) {
+							return;
 						}
+						int cx = cameraChunkX + dx;
+						int cz = cameraChunkZ + dz;
+						int index = Math.floorMod(cz, 32) * 32 + Math.floorMod(cx, 32);
+						long key = chunkKey(cx, cz);
+						LevelChunk loaded = level.getChunkSource().getChunk(cx, cz, false);
+						boolean drawn = loaded != null && sodiumDraws(cx, seaY, cz);
+						boolean surface = loaded != null && sodiumDraws(cx, surfaceY(loaded, seaY), cz);
+						boolean holdEnds = checkedChunk[index] == key && drawn && heldUntil[index] != 0
+								&& heldUntil[index] <= frame;
+						boolean dirty = checkedChunk[index] == key && dirtyChunk[index];
+						if (checkedChunk[index] == key && drawnChunk[index] == drawn && surfaceChunk[index] == surface
+								&& !holdEnds && !dirty) {
+							continue;
+						}
+						boolean first = checkedChunk[index] != key;
+						if (drawn && surface && !holdEnds && (first || !surfaceChunk[index])) {
+							heldUntil[index] = frame + HOLD_FRAMES;
+						}
+						checkedChunk[index] = key;
+						drawnChunk[index] = drawn;
+						surfaceChunk[index] = surface;
+						dirtyChunk[index] = false;
+						if (holdEnds || !drawn) {
+							heldUntil[index] = 0;
+						}
+						if (first && !drawn) {
+							continue; // newly in reach and not drawn: the row band has it as it is
+						}
+						if (data == null) {
+							data = MemoryUtil.memAlloc(16 * 16 * 8);
+						}
+						data.clear();
+						boolean rendered = loaded != null && drawn;
+						for (int z = cz * 16; z < cz * 16 + 16; z++) {
+							for (int x = cx * 16; x < cx * 16 + 16; x++) {
+								encode(data, level, pos, x, z, loaded, rendered);
+							}
+						}
+						data.flip();
+						RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, data, 0, 0,
+								Math.floorMod(cx * 16, SIZE), Math.floorMod(cz * 16, SIZE), 16, 16);
+						mappedOne = true;
 					}
-					data.flip();
-					RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, data, 0, 0,
-							Math.floorMod(cx * 16, SIZE), Math.floorMod(cz * 16, SIZE), 16, 16);
-					done++;
 				}
 			}
 		} finally {
@@ -243,17 +317,20 @@ public final class WaterColumns {
 	 * that chunk is held back after it first appears ({@link #heldUntil}) (low 2 bits), and the column's terrain top
 	 * above the floor (the rest).
 	 */
-	private static void encode(ByteBuffer data, ClientLevel level, BlockPos.MutableBlockPos pos, int x, int z) {
+	/**
+	 * @param chunk the column's chunk, or null where it isn't loaded
+	 * @param rendered whether Sodium draws it (sodiumDraws at the sea's level): only those are Java's water.
+	 *            Minecraft keeps a ring of chunks loaded past those it renders, where Distant Horizons draws the
+	 *            water instead; mapped as Java's, DH's water there was taken for ground under Java's water (a
+	 *            dark band beyond the chunk border).
+	 */
+	private static void encode(ByteBuffer data, ClientLevel level, BlockPos.MutableBlockPos pos, int x, int z,
+			LevelChunk chunk, boolean rendered) {
 		int surface = 0;
 		int bottom = 0;
 		int sky = 0;
 		int roof = 0;
 		int skyBelow = 0;
-		LevelChunk chunk = level.getChunkSource().getChunk(x >> 4, z >> 4, false);
-		// Only chunks Sodium draws: Minecraft keeps a ring of chunks loaded past those it renders, where
-		// Distant Horizons draws the water instead; mapped as Java's, DH's water there was taken for ground
-		// under Java's water (a dark band beyond the chunk border).
-		boolean rendered = chunk != null && sodiumDraws(x >> 4, level.getSeaLevel() - 1, z >> 4);
 		if (rendered) {
 			// MOTION_BLOCKING counts fluids, so the block under it is the top water block if there is one.
 			int top = chunk.getHeight(Heightmap.Types.MOTION_BLOCKING, x & 15, z & 15);

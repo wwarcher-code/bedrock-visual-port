@@ -98,9 +98,14 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 		DistantTerrain.setSource(adapter);
 	}
 
-	/** For topSolidY, on the height map's worker thread only. */
+	/**
+	 * For topSolidY, on the height map's worker thread only: DH's data for the tile being read, released after
+	 * each tile (releaseHeightCache). Its data sources hold arrays checked out of DH's pools, which closing the
+	 * cache returns: dropped unclosed (it was replaced every 65536 queries), the garbage collector reclaimed
+	 * them, which DH reports in chat as "Insufficient memory detected", and the soft cache held as much of DH's
+	 * data as the heap would take until then.
+	 */
 	private com.seibel.distanthorizons.api.interfaces.data.IDhApiTerrainDataCache heightCache;
-	private int heightQueries;
 
 	@Override
 	public int topSolidY(int x, int z) {
@@ -108,8 +113,7 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 		if (level == null) {
 			return NO_HEIGHT;
 		}
-		// A soft cache, renewed now and then so it doesn't hold the whole world's data.
-		if (heightCache == null || ++heightQueries % 65536 == 0) {
+		if (heightCache == null) {
 			heightCache = DhApi.Delayed.terrainRepo.createSoftCache();
 		}
 		var result = DhApi.Delayed.terrainRepo.getColumnDataAtBlockPos(level, x, z, heightCache);
@@ -127,6 +131,13 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 			}
 		}
 		return top;
+	}
+
+	@Override
+	public void releaseHeightCache() {
+		if (heightCache != null) {
+			heightCache.clear();
+		}
 	}
 
 	@Override

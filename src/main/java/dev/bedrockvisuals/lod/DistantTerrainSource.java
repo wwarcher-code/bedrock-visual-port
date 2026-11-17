@@ -53,6 +53,13 @@ public interface DistantTerrainSource {
 		return NO_HEIGHT;
 	}
 
+	/**
+	 * Lets go of whatever the source keeps for {@link #topSolidY} (Distant Horizons: its data cache, which holds
+	 * terrain data checked out of its pools). Called by the same background thread after each tile it reads.
+	 */
+	default void releaseHeightCache() {
+	}
+
 	/** How the source's water is drawn, for diagnostics. */
 	default String waterStatus() {
 		return "as the source draws it";

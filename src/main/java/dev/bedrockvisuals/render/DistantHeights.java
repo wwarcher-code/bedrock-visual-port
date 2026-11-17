@@ -64,6 +64,7 @@ public final class DistantHeights {
 		if (minecraft.level != lastLevel) {
 			// Another world or dimension: the old heights would cast its shadows here.
 			lastLevel = minecraft.level;
+			generation++;
 			java.util.Arrays.fill(heights, (short) 0);
 			for (int i = 0; i < dirtyRows.length(); i++) {
 				dirtyRows.set(i, -1L);
@@ -80,24 +81,50 @@ public final class DistantHeights {
 		upload();
 	}
 
+	/** Cells along a tile's side: 64 blocks, one of Distant Horizons' data sections at its finest detail. */
+	private static final int TILE = 8;
+	private static final int TILES = SIZE / TILE;
+	/** Per tile of the map (wrapping like it): the world tile it last read completely, else Long.MIN_VALUE. */
+	private static final long[] tileRead = new long[TILES * TILES];
+	/** How often the tiles already read are read again, for terrain Distant Horizons has changed since. */
+	private static final long FULL_REFRESH_NANOS = 300_000_000_000L;
+	/** Bumped on a new level: the worker forgets which tiles it has read. */
+	private static volatile int generation;
+
+	/**
+	 * Reads the map tile by tile in rings outwards from the camera's tile, so the nearest far terrain arrives
+	 * first, letting go of the source's data after each tile. A tile read completely (every cell had data) isn't
+	 * read again until the camera has moved far enough for its texels to hold another one, or every five
+	 * minutes. Before, the whole map (a million columns) was read again every five seconds, through one cache
+	 * that kept everything it touched.
+	 */
 	private static void work(DistantTerrainSource source) {
+		java.util.Arrays.fill(tileRead, Long.MIN_VALUE);
+		int seen = generation;
+		long lastFull = System.nanoTime();
 		try {
 			while (running) {
-				int cx = centerX;
-				int cz = centerZ;
+				if (seen != generation || System.nanoTime() - lastFull > FULL_REFRESH_NANOS) {
+					seen = generation;
+					lastFull = System.nanoTime();
+					java.util.Arrays.fill(tileRead, Long.MIN_VALUE);
+				}
+				int tx = Math.floorDiv(centerX, TILE);
+				int tz = Math.floorDiv(centerZ, TILE);
 				boolean moved = false;
-				// Rings outwards from the camera's cell, so the nearest far terrain arrives first.
-				for (int ring = 0; ring < SIZE / 2 && running && !moved; ring++) {
+				for (int ring = 0; ring < TILES / 2 && running && !moved; ring++) {
 					for (int dz = -ring; dz <= ring && !moved; dz++) {
-						int step = (dz == -ring || dz == ring) ? 1 : 2 * ring;
-						for (int dx = -ring; dx <= ring; dx += Math.max(step, 1)) {
-							sample(source, cx + dx, cz + dz);
+						int step = dz == -ring || dz == ring ? 1 : 2 * ring;
+						for (int dx = -ring; dx <= ring && !moved; dx += Math.max(step, 1)) {
+							readTile(source, tx + dx, tz + dz);
+							moved = Math.abs(Math.floorDiv(centerX, TILE) - tx) > RECENTER / TILE
+									|| Math.abs(Math.floorDiv(centerZ, TILE) - tz) > RECENTER / TILE
+									|| seen != generation;
 						}
-						moved = Math.abs(centerX - cx) > RECENTER || Math.abs(centerZ - cz) > RECENTER;
 					}
 				}
 				if (!moved) {
-					// The whole map is done: refresh it now and then for terrain DH loads later.
+					// Every tile in reach is read or has nothing yet: look again for terrain DH loads later.
 					Thread.sleep(5000);
 				}
 			}
@@ -107,10 +134,32 @@ public final class DistantHeights {
 			failed = true;
 			BedrockVisualsClient.LOGGER.warn("[distant] couldn't read Distant Horizons' terrain heights; far terrain "
 					+ "casts no shadows", e);
+		} finally {
+			source.releaseHeightCache();
 		}
 	}
 
-	private static void sample(DistantTerrainSource source, int cellX, int cellZ) {
+	private static void readTile(DistantTerrainSource source, int tileX, int tileZ) {
+		int index = Math.floorMod(tileZ, TILES) * TILES + Math.floorMod(tileX, TILES);
+		long key = ((long) tileX << 32) ^ (tileZ & 0xFFFFFFFFL);
+		if (tileRead[index] == key) {
+			return;
+		}
+		boolean complete = true;
+		try {
+			for (int z = 0; z < TILE; z++) {
+				for (int x = 0; x < TILE; x++) {
+					complete &= sample(source, tileX * TILE + x, tileZ * TILE + z);
+				}
+			}
+		} finally {
+			source.releaseHeightCache();
+		}
+		tileRead[index] = complete ? key : Long.MIN_VALUE;
+	}
+
+	/** Reads one cell; whether the source had data for it. */
+	private static boolean sample(DistantTerrainSource source, int cellX, int cellZ) {
 		int top = source.topSolidY(cellX * CELL + CELL / 2, cellZ * CELL + CELL / 2);
 		int value = top == DistantTerrainSource.NO_HEIGHT ? 0 : Math.max(1, Math.min(65535, top - minY));
 		int tx = Math.floorMod(cellX, SIZE);
@@ -123,6 +172,7 @@ public final class DistantHeights {
 				any = true;
 			}
 		}
+		return value != 0;
 	}
 
 	private static void upload() {
