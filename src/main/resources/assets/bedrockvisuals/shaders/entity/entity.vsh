@@ -58,6 +58,7 @@ layout(location = 8) out vec3 bvPosition;   // camera-relative world position
 layout(location = 9) out vec3 bvNormal;     // world normal
 layout(location = 10) out vec4 bvColor;     // vertex colour without Minecraft's side shading
 layout(location = 11) out vec2 bvLight;     // block and sky light, 0 to 1
+layout(location = 12) out vec4 bvClip;      // clip position, for reading the fog grid at this pixel
 
 vec3 bvWorld(vec4 clip) {
     vec4 world = InverseViewProjection * clip;
@@ -71,6 +72,7 @@ void main() {
     bvNormal = normalize(bvAlong - bvPosition + vec3(1e-6));
     bvColor = Color;
     bvLight = clamp(vec2(UV2) / 240.0, 0.0, 1.0);
+    bvClip = gl_Position;
 
     sphericalVertexDistance = fog_spherical_distance(Position);
     cylindricalVertexDistance = fog_cylindrical_distance(Position);

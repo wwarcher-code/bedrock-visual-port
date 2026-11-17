@@ -50,8 +50,29 @@ abstract class LevelRendererMixin {
 			FeatureRenderDispatcher.PreparedFrame frame, boolean arg4, boolean arg5, CallbackInfo ci) {
 		RenderTarget main = targets.main.get();
 		EntityPass.setInLevelPass(true);
+		// arg1: improved transparency (the OIT passes draw the translucent entities).
 		DeferredRenderer.beforeMainPass(chunks, main, chunkLayerSampler,
-				(TextureAtlas) textureManager.getTexture(TextureAtlas.LOCATION_BLOCKS), frame::executeSolid);
+				(TextureAtlas) textureManager.getTexture(TextureAtlas.LOCATION_BLOCKS), frame::executeSolid,
+				arg1 ? null : frame::executeTranslucent);
+	}
+
+	/** The solid entities, when the deferred renderer drew them before the water (DeferredRenderer). */
+	@Redirect(method = "executeSolid", at = @At(value = "INVOKE",
+			target = "Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher$PreparedFrame;executeSolid(Lcom/mojang/renderpearl/api/commands/RenderPass;)V"))
+	private void bedrockvisuals$skipEarlySolidEntities(FeatureRenderDispatcher.PreparedFrame frame, RenderPass pass) {
+		if (!DeferredRenderer.solidEntitiesDrawn()) {
+			frame.executeSolid(pass);
+		}
+	}
+
+	/** The translucent entities, likewise. */
+	@Redirect(method = "executeClassicTransparency", at = @At(value = "INVOKE",
+			target = "Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher$PreparedFrame;executeTranslucent(Lcom/mojang/renderpearl/api/commands/RenderPass;)V"))
+	private void bedrockvisuals$skipEarlyTranslucentEntities(FeatureRenderDispatcher.PreparedFrame frame,
+			RenderPass pass) {
+		if (!DeferredRenderer.translucentEntitiesDrawn()) {
+			frame.executeTranslucent(pass);
+		}
 	}
 
 	@Redirect(method = "executeSolid", at = @At(value = "INVOKE",
@@ -75,6 +96,7 @@ abstract class LevelRendererMixin {
 	private void bedrockvisuals$showDebugView(GpuBufferSlice fog, boolean arg1, ChunkSectionsToRender chunks,
 			FeatureRenderDispatcher.PreparedFrame frame, boolean arg4, boolean arg5, CallbackInfo ci) {
 		EntityPass.setInLevelPass(false);
+		DeferredRenderer.afterMainPass();
 		GBufferDebugView.apply(targets.main.get());
 	}
 }

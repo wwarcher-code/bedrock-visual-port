@@ -4,7 +4,11 @@ import dev.bedrockvisuals.lod.DistantTerrain;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.renderpearl.api.commands.RenderPass;
+import com.mojang.renderpearl.api.commands.RenderPassDescriptor;
 import com.mojang.renderpearl.api.textures.GpuSampler;
+import java.util.OptionalDouble;
+import java.util.function.Consumer;
 import dev.bedrockvisuals.BedrockVisualsClient;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
@@ -38,6 +42,10 @@ public final class DeferredRenderer {
 	private static String lastReason = "";
 	private static boolean reported;
 
+	private static boolean solidEntitiesDrawn;
+	private static boolean translucentEntitiesDrawn;
+	private static boolean earlyEntitiesFailed;
+
 	private DeferredRenderer() {
 	}
 
@@ -53,10 +61,18 @@ public final class DeferredRenderer {
 		});
 	}
 
-	/** Called just before Minecraft opens its main render pass. */
-	/** @param solidEntities Minecraft's executeSolid for this frame's prepared entity draws (entity shadows) */
+	/**
+	 * Called just before Minecraft opens its main render pass.
+	 *
+	 * @param solidEntities Minecraft's executeSolid for this frame's prepared entity draws (entity shadows, and
+	 *            the entities drawn here before the water: drawEntitiesBeforeWater)
+	 * @param translucentEntities its executeTranslucent, with classic transparency (null with improved
+	 *            transparency, where they go through the OIT passes)
+	 */
 	public static void beforeMainPass(ChunkSectionsToRender chunks, RenderTarget main, GpuSampler sampler,
-			TextureAtlas blockAtlas, java.util.function.Consumer<com.mojang.renderpearl.api.commands.RenderPass> solidEntities) {
+			TextureAtlas blockAtlas, Consumer<RenderPass> solidEntities, Consumer<RenderPass> translucentEntities) {
+		solidEntitiesDrawn = false;
+		translucentEntitiesDrawn = false;
 		// Before the flags reset: whether the last frame drew Bedrock's sky decides who draws the clouds.
 		CloudPass.updateDistantClouds();
 		replacedTerrain = false;
@@ -116,6 +132,7 @@ public final class DeferredRenderer {
 			replacedTerrain = terrain;
 			replacedSky = light.atmosphere() != null;
 			framesLit++;
+			drawEntitiesBeforeWater(main, solidEntities, translucentEntities);
 			WaterPass.prepare(blockAtlas, main, true);
 			// The water's screen-space reflections, accumulated over frames (ReflectionPass).
 			ReflectionPass.render(gbuffer);
@@ -127,6 +144,57 @@ public final class DeferredRenderer {
 			lightingFailed = true;
 			BedrockVisualsClient.LOGGER.error("[lighting] deferred lighting failed; vanilla terrain until restart", e);
 		}
+	}
+
+	/**
+	 * Draws the frame's entities (Minecraft's solid ones, and with classic transparency its translucent ones)
+	 * into the lit frame now, before the water copies the scene beneath it (WaterPass.prepare): the water's
+	 * shader composes the whole picture through its surface from that copy, so entities Minecraft drew after it
+	 * (in its main pass, before the water) were painted over wherever they were under water. The main pass
+	 * then skips them (LevelRendererMixin). They're drawn in Minecraft's order (solid, then translucent, both
+	 * before the water) with the terrain's depth already in the frame.
+	 */
+	private static void drawEntitiesBeforeWater(RenderTarget main, Consumer<RenderPass> solidEntities,
+			Consumer<RenderPass> translucentEntities) {
+		if (earlyEntitiesFailed || solidEntities == null) {
+			return;
+		}
+		RenderPassDescriptor descriptor = RenderPassDescriptor.builder(() -> "Bedrock Visuals entities before the water")
+				.withColorAttachment(main.getColorTextureView())
+				.withDepthAttachment(main.getDepthTextureView(), OptionalDouble.empty())
+				.build();
+		try (RenderPass pass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(descriptor)) {
+			RenderSystem.bindDefaultUniforms(pass);
+			solidEntitiesDrawn = true;
+			solidEntities.accept(pass);
+			if (translucentEntities != null) {
+				translucentEntitiesDrawn = true;
+				translucentEntities.accept(pass);
+			}
+		} catch (RuntimeException e) {
+			// Part of them may be drawn: the main pass draws them again this frame, and from the next on as before.
+			earlyEntitiesFailed = true;
+			solidEntitiesDrawn = false;
+			translucentEntitiesDrawn = false;
+			BedrockVisualsClient.LOGGER.error("[entities] drawing entities before the water failed; "
+					+ "they're drawn in Minecraft's pass (and hidden under water) until restart", e);
+		}
+	}
+
+	/** Whether this frame's solid entities were drawn before the water (the main pass skips them). */
+	public static boolean solidEntitiesDrawn() {
+		return solidEntitiesDrawn;
+	}
+
+	/** Whether this frame's translucent entities were drawn before the water (the main pass skips them). */
+	public static boolean translucentEntitiesDrawn() {
+		return translucentEntitiesDrawn;
+	}
+
+	/** After the main pass: the next frame decides again. */
+	public static void afterMainPass() {
+		solidEntitiesDrawn = false;
+		translucentEntitiesDrawn = false;
 	}
 
 	/** Logs why a frame wasn't fully lit, at most once every few seconds so a run of them doesn't flood the log. */

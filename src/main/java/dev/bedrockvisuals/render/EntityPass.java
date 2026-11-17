@@ -34,6 +34,9 @@ public final class EntityPass {
 			.withUniform("ShadowMap2", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("ShadowMap3", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("WaterColumnMap", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("DistantData", UniformType.UNIFORM_BUFFER)
+			.withUniform("FroxelScatter", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("FroxelTransmittance", UniformType.COMBINED_IMAGE_SAMPLER)
 			).build();
 	private static final Identifier ENTITY_SHADER = Identifier.withDefaultNamespace("core/entity");
 	private static final Identifier SHADER = Identifier.fromNamespaceAndPath("bedrockvisuals", "entity/entity");
@@ -55,6 +58,7 @@ public final class EntityPass {
 	public static boolean appliesTo(RenderPipeline pipeline) {
 		return !failed && inLevelPass && DeferredRenderer.replacesSky() && LightingPass.lightingData() != null
 				&& LightingPass.atmosphereData() != null && LightingPass.gradingData() != null
+				&& LightingPass.distantData() != null
 				&& ENTITY_SHADER.equals(pipeline.getShaders().get(ShaderType.FRAGMENT));
 	}
 
@@ -88,6 +92,13 @@ public final class EntityPass {
 			pass.setUniform("ShadowMap" + c, map != null ? map : fallback, nearest);
 		}
 		pass.setUniform("WaterColumnMap", WaterColumns.view() != null ? WaterColumns.view() : fallback, nearest);
+		// The fog grid (FroxelVolume), when there is one this frame (DistantData's FroxelParams say so).
+		GpuSampler linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
+		pass.setUniform("DistantData", LightingPass.distantData());
+		pass.setUniform("FroxelScatter", FroxelVolume.scatterView() != null ? FroxelVolume.scatterView() : fallback,
+				linear);
+		pass.setUniform("FroxelTransmittance", FroxelVolume.transmittanceView() != null
+				? FroxelVolume.transmittanceView() : fallback, linear);
 		LocalExposure.bind(pass);
 	}
 

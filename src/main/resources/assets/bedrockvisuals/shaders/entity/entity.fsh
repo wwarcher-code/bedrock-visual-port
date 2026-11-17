@@ -22,6 +22,19 @@ uniform sampler2D WaterColumnMap;
 #define WATER_COLUMNS WaterColumnMap
 #include <bedrockvisuals:water_columns.glsl>
 
+// The lighting pass's DistantData block (shared with the clouds), for FroxelParams: whether this frame's fog grid
+// is there.
+layout(std140) uniform DistantData {
+    mat4 DistantInverseProjection;
+    vec4 DistantParams;
+    vec4 DistantLightmap;
+    vec4 DistantHeightOrigin;
+    vec4 FroxelParams;
+};
+uniform sampler2D FroxelScatter;      // Bedrock's fog grid (FroxelVolume): in-scattered light to each slice
+uniform sampler2D FroxelTransmittance; // and the transmittance
+#include <bedrockvisuals:froxels.glsl>
+
 uniform sampler2D Sampler0;
 
 #ifdef DISSOLVE
@@ -62,6 +75,7 @@ layout(location = 8) in vec3 bvPosition;
 layout(location = 9) in vec3 bvNormal;
 layout(location = 10) in vec4 bvColor;
 layout(location = 11) in vec2 bvLight;
+layout(location = 12) in vec4 bvClip;
 
 #ifndef OIT_ALPHA_ONLY
 layout(location = 0) out vec4 fragColor;
@@ -196,6 +210,25 @@ vec3 bvMedium(vec3 color) {
                     * AtmosphereHorizon.w;
             color = mix(color, sky, fog);
         }
+    }
+    // Bedrock's volumetric fog between the camera and the entity, from the same grid the terrain reads
+    // (lighting/deferred.fsh, fogTo): it dims the entity and adds the light the air scatters in front of it.
+    // Seen from above under mapped water, the grid is read down to the water's surface, the water's own share
+    // being added above.
+    if (FroxelParams.x > 0.5) {
+        vec2 uv = bvClip.xy / bvClip.w * 0.5 + 0.5;
+        vec3 forward = froxelForward(InverseViewProjection);
+        vec3 through = bvPosition;
+        if (UnderwaterParams.x < 0.5 && dir.y < -1e-3) {
+            float depth = depthBelowWaterSurface(waterTestPoint(bvPosition));
+            if (depth >= 0.0) {
+                through = dir * ((bvPosition.y + depth) / dir.y);
+            }
+        }
+        vec3 fogTransmittance;
+        vec3 fogLight = froxelFog(FroxelScatter, FroxelTransmittance, uv, max(dot(through, forward), 0.0),
+                fogTransmittance);
+        color = color * fogTransmittance + fogLight;
     }
     return color;
 }
