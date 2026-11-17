@@ -3,6 +3,7 @@ package dev.bedrockvisuals.render;
 import com.mojang.blaze3d.buffers.Std140Builder;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.renderpearl.api.GpuFormat;
+import dev.bedrockvisuals.devtools.FrameTimes;
 import com.mojang.renderpearl.api.device.GpuDevice;
 import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
@@ -33,8 +34,11 @@ import org.lwjgl.system.MemoryUtil;
  * <p>The map covers 512×512 columns (past any vanilla render distance this renderer is used at: with 256, the
  * last 10 to 20 blocks of water before Distant Horizons' fell outside it, a band of water shaded by the water
  * pass's fallback) and wraps on world coordinates, so a column always sits at the same
- * texel. It refreshes {@link #ROWS_PER_FRAME} rows a frame, covering the columns nearest the camera, so all
- * of it is redone every 16 frames.
+ * texel. The chunks Sodium draws are mapped when they change (remapChangedChunks); the rest, Distant Horizons'
+ * heights past them, are visited {@link #ROWS_PER_FRAME} rows a frame (all of them every 16 frames) and written
+ * again only where those heights or the chunk on the texels changed. The mod's per-frame CPU cost here was 0.5 to
+ * 0.75 ms on average, rising to about 2 ms every 16 frames, as the whole band was encoded again; it's now 0.1 to
+ * 0.4 ms.
  */
 public final class WaterColumns {
 	static final int SIZE = 512;
@@ -89,8 +93,10 @@ public final class WaterColumns {
 	/** Frames a new chunk is held back. */
 	private static final int HOLD_FRAMES = 5;
 	private static long frame;
+	/** The most chunks out from the camera's chunk that remapChangedChunks follows (the map's half-width, 16, less one). */
+	private static final int REMAP_REACH = 15;
 	/** How long a frame may spend mapping changed chunks again (after the first). */
-	private static final long REMAP_BUDGET_NANOS = 1_000_000;
+	private static final long REMAP_BUDGET_NANOS = 500_000;
 
 	private WaterColumns() {
 	}
@@ -111,6 +117,12 @@ public final class WaterColumns {
 		renderDistance = minecraft.options.getEffectiveRenderDistance();
 		int cameraX = (int) Math.floor(camera.x);
 		int cameraZ = (int) Math.floor(camera.z);
+		if (level != lastLevel) {
+			lastLevel = level;
+			java.util.Arrays.fill(segmentKey, Long.MIN_VALUE);
+		}
+		epoch = DistantHeights.epoch() * 2 + (seaFallback ? 1 : 0);
+		int windowX = cameraX - SIZE / 2;
 		int firstRow = nextRow;
 		// Never past the texture's last row (writing outside it ends the game without a Java error).
 		int rows = Math.min(ROWS_PER_FRAME, SIZE - firstRow);
@@ -124,47 +136,126 @@ public final class WaterColumns {
 		try {
 			BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
 			int seaY = level.getSeaLevel() - 1;
+			// Unless the window starts on a chunk border, its first and last chunks share a run of columns, each
+			// holding part of it, split where the window starts: the first chunk's part has slots of its own, and
+			// the split is part of both keys.
+			int split = Math.floorMod(windowX, 16);
+			// The column holding the window's first x: the world x drops by SIZE there.
+			int wrapColumn = Math.floorMod(windowX, SIZE);
+			// Whether every chunk Sodium may draw is in reach of remapChangedChunks: then a run whose stored key still
+			// matches can't have started being drawn since (that chunk would have been remapped, clearing its key),
+			// and the chunk needn't even be looked up.
+			boolean followsAll = renderDistance + 2 <= REMAP_REACH;
 			for (int r = 0; r < rows; r++) {
 				int row = firstRow + r;
 				// The world z nearest the camera that falls on this row.
 				int z = cameraZ - SIZE / 2 + Math.floorMod(row - (cameraZ - SIZE / 2), SIZE);
+				int chunkZ = z >> 4;
 				int spanStart = -1;
-				int lastChunkX = Integer.MIN_VALUE;
-				LevelChunk chunk = null;
-				boolean rendered = false;
-				boolean followed = false;
-				data.clear();
-				for (int column = 0; column <= SIZE; column++) {
+				int column = 0;
+				while (column <= SIZE) {
+					boolean skip = true;
+					int x = 0;
+					int run = 0;
+					LevelChunk chunk = null;
+					boolean rendered = false;
 					if (column < SIZE) {
-						int x = cameraX - SIZE / 2 + Math.floorMod(column - (cameraX - SIZE / 2), SIZE);
-						if (x >> 4 != lastChunkX) {
-							lastChunkX = x >> 4;
-							chunk = level.getChunkSource().getChunk(x >> 4, z >> 4, false);
-							rendered = chunk != null && sodiumDraws(x >> 4, seaY, z >> 4);
-							followed = followed(x >> 4, z >> 4);
-						}
-						if (!followed) {
-							if (spanStart < 0) {
-								spanStart = column;
-								data.clear();
+						// A run of columns in one chunk.
+						x = windowX + Math.floorMod(column - windowX, SIZE);
+						run = Math.min(16 - (x & 15), (column < wrapColumn ? wrapColumn : SIZE) - column);
+						int chunkX = x >> 4;
+						skip = followed(chunkX, chunkZ);
+						if (!skip) {
+							// Columns Sodium doesn't draw hold only Distant Horizons' heights: unchanged since this
+							// row's part of the chunk was last written (same chunk, same heights), they're left as they
+							// are. Encoded again every pass, they cost some 0.5 ms a frame.
+							int segment = row * (SIZE / 16) + Math.floorMod(chunkX, SIZE / 16);
+							long key = chunkKey(chunkX, chunkZ);
+							if (split != 0 && (chunkX == windowX >> 4 || chunkX == (windowX + SIZE - 1) >> 4)) {
+								key ^= (split + 1) * 0x9E3779B97F4A7C15L;
+								if (chunkX == windowX >> 4) {
+									segment = SIZE * (SIZE / 16) + row;
+								}
 							}
-							encode(data, level, pos, x, z, chunk, rendered);
-							continue;
+							int version = DistantHeights.version(chunkX, chunkZ);
+							boolean unchanged = segmentKey[segment] == key && segmentVersion[segment] == version
+									&& segmentEpoch[segment] == epoch;
+							if (unchanged && followsAll) {
+								skip = true;
+							} else {
+								chunk = level.getChunkSource().getChunk(chunkX, chunkZ, false);
+								rendered = chunk != null && sodiumDraws(chunkX, seaY, chunkZ);
+								if (rendered) {
+									segmentKey[segment] = Long.MIN_VALUE; // Java's own water: always mapped
+								} else if (unchanged) {
+									skip = true;
+								} else {
+									segmentKey[segment] = key;
+									segmentVersion[segment] = version;
+									segmentEpoch[segment] = epoch;
+								}
+							}
 						}
 					}
-					if (spanStart >= 0) {
+					if (!skip) {
+						if (spanStart < 0) {
+							spanStart = column;
+							data.clear();
+						}
+						for (int i = 0; i < run; i++) {
+							encode(data, level, pos, x + i, z, chunk, rendered);
+						}
+						bandColumns += run;
+						ChunkChanges.mark(x >> 4, chunkZ); // its terrain tops, which the light volume reads
+					} else if (spanStart >= 0) {
 						data.flip();
 						RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, data, 0, 0, spanStart,
 								row, column - spanStart, 1);
 						spanStart = -1;
 					}
+					column += Math.max(run, 1);
 				}
 			}
 		} finally {
 			MemoryUtil.memFree(data);
 		}
+		FrameTimes.section(FrameTimes.Metric.WATER_COLUMNS);
 		remapChangedChunks(level, cameraX >> 4, cameraZ >> 4);
+		FrameTimes.section(FrameTimes.Metric.WATER_REMAP);
+		if (FrameTimes.recording()) {
+			int followedCount = 0;
+			for (boolean drawn : drawnChunk) {
+				followedCount += drawn ? 1 : 0;
+			}
+			FrameTimes.count(FrameTimes.Metric.BAND_COLUMNS, bandColumns);
+			FrameTimes.count(FrameTimes.Metric.REMAPPED_CHUNKS, remapped);
+			FrameTimes.count(FrameTimes.Metric.DIRTY_MARKS, DIRTY_MARKS.getAndSet(0));
+			FrameTimes.count(FrameTimes.Metric.FOLLOWED_CHUNKS, followedCount);
+		}
+		bandColumns = 0;
+		remapped = 0;
 	}
+
+	/**
+	 * Per row of the map and chunk-wide run of its columns (16 columns): the world chunk last written there by the
+	 * band from Distant Horizons' heights (Long.MIN_VALUE: none, or written otherwise since), with the heights'
+	 * version for that chunk (DistantHeights.version) and the state they were read in ({@link #epoch}).
+	 */
+	private static final long[] segmentKey = new long[SIZE * (SIZE / 16) + SIZE];
+	private static final int[] segmentVersion = new int[SIZE * (SIZE / 16) + SIZE];
+	private static final int[] segmentEpoch = new int[SIZE * (SIZE / 16) + SIZE];
+	/** Whether DH's heights can be read at all, and the dimension's sea fallback: a change rewrites every segment. */
+	private static int epoch;
+	private static Object lastLevel;
+
+	static {
+		java.util.Arrays.fill(segmentKey, Long.MIN_VALUE);
+	}
+
+	/** Counts for FrameTimes. */
+	private static int bandColumns;
+	private static int remapped;
+	private static final java.util.concurrent.atomic.AtomicInteger DIRTY_MARKS = new java.util.concurrent.atomic.AtomicInteger();
 
 	/** Whether the chunk is held back (just started being drawn; see {@link #heldUntil}). */
 	private static boolean held(int chunkX, int chunkZ) {
@@ -185,13 +276,14 @@ public final class WaterColumns {
 		return checkedChunk[index] == chunkKey(chunkX, chunkZ) && drawnChunk[index];
 	}
 
-	/** Chunks whose blocks or light changed since they were last mapped (ClientLevelMixin). */
+	/** Chunks whose blocks or light changed since they were last mapped (LevelExtractorMixin). */
 	private static final it.unimi.dsi.fastutil.longs.LongOpenHashSet DIRTY = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
 	/** Per chunk of the map: due to be mapped again (a change in it, from DIRTY). */
 	private static final boolean[] dirtyChunk = new boolean[32 * 32];
 
 	/** A block or the light changed in the chunk (Minecraft marking it for a rebuild): it's mapped again. */
 	public static void markDirty(int chunkX, int chunkZ) {
+		DIRTY_MARKS.incrementAndGet();
 		synchronized (DIRTY) {
 			DIRTY.add(chunkKey(chunkX, chunkZ));
 		}
@@ -216,7 +308,7 @@ public final class WaterColumns {
 			}
 			DIRTY.clear();
 		}
-		int reach = Math.min(renderDistance + 2, 15);
+		int reach = Math.min(renderDistance + 2, REMAP_REACH);
 		int seaY = level.getSeaLevel() - 1;
 		long start = System.nanoTime();
 		boolean mappedOne = false;
@@ -272,6 +364,13 @@ public final class WaterColumns {
 						RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, data, 0, 0,
 								Math.floorMod(cx * 16, SIZE), Math.floorMod(cz * 16, SIZE), 16, 16);
 						mappedOne = true;
+						remapped++;
+						ChunkChanges.mark(cx, cz); // its terrain tops, which the light volume reads
+						// Written here: if the band takes the chunk over again, it writes it afresh.
+						for (int r = 0; r < 16; r++) {
+							segmentKey[Math.floorMod(cz * 16 + r, SIZE) * (SIZE / 16) + Math.floorMod(cx, SIZE / 16)] =
+									Long.MIN_VALUE;
+						}
 					}
 				}
 			}

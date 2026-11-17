@@ -167,6 +167,7 @@ public final class DistantHeights {
 		int index = tz * SIZE + tx;
 		if (heights[index] != (short) value) {
 			heights[index] = (short) value;
+			VERSIONS.incrementAndGet(versionIndex(Math.floorDiv(cellX * CELL, 16), Math.floorDiv(cellZ * CELL, 16)));
 			dirtyRows.getAndUpdate(tz >> 6, bits -> bits | (1L << (tz & 63)));
 			if (value != 0) {
 				any = true;
@@ -224,6 +225,34 @@ public final class DistantHeights {
 		int index = Math.floorMod(Math.floorDiv(z, CELL), SIZE) * SIZE + Math.floorMod(Math.floorDiv(x, CELL), SIZE);
 		int value = heights[index] & 0xFFFF;
 		return value == 0 ? Integer.MIN_VALUE : value + minY;
+	}
+
+	/** Chunks along the map's side (it wraps on this, so no two chunks in it share a counter). */
+	private static final int CHUNKS = SIZE * CELL / 16;
+	/**
+	 * Per chunk of the map, wrapping like it: bumped whenever a height in the chunk changes. (Wrapping every 32
+	 * chunks instead, as the water column map does, changes anywhere in the map's 8 km bumped the counters of the
+	 * chunks around the camera: the water map wrote hundreds of unchanged chunks again every pass.)
+	 */
+	private static final java.util.concurrent.atomic.AtomicIntegerArray VERSIONS =
+			new java.util.concurrent.atomic.AtomicIntegerArray(CHUNKS * CHUNKS);
+
+	private static int versionIndex(int chunkX, int chunkZ) {
+		return Math.floorMod(chunkZ, CHUNKS) * CHUNKS + Math.floorMod(chunkX, CHUNKS);
+	}
+
+	/** The version of the heights in the chunk (see VERSIONS): what {@link #topAt} gives there changes with it. */
+	static int version(int chunkX, int chunkZ) {
+		return VERSIONS.get(versionIndex(chunkX, chunkZ));
+	}
+
+	/**
+	 * Changes whenever {@link #topAt} may change everywhere: a new level, or the map switched on or off (DH's
+	 * composite taken over or given back, the worker failed or started, the first heights).
+	 */
+	static int epoch() {
+		boolean on = !failed && any && worker != null && DeferredRenderer.ownsDistantComposite();
+		return generation * 2 + (on ? 1 : 0);
 	}
 
 	/** The map, or null before there is one. */

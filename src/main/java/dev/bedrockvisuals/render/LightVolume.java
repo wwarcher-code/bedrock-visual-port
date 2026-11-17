@@ -61,11 +61,10 @@ public final class LightVolume {
 	private static final int[] SLICE_CAMERA_X = new int[SIZE_Y];
 	private static final int[] SLICE_CAMERA_Y = new int[SIZE_Y];
 	private static final int[] SLICE_CAMERA_Z = new int[SIZE_Y];
-	/** One slice's texels, reused. */
-	private static final byte[] SLICE = new byte[SIZE_XZ * SIZE_XZ * 4];
 
 	/**
-	 * Once a frame, before the lighting pass: refreshes the next few horizontal slices around the camera. Read
+	 * Once a frame, before the lighting pass: refreshes the next few horizontal slices around the camera, only
+	 * the chunk-sized parts of them that may have changed (see the loop). Read
 	 * from the chunks' sections and the light engine's data layers directly, a chunk at a time (through
 	 * Level.getBrightness and getBlockState per block, three lookups each for some 50,000 blocks a frame, the scan
 	 * took several milliseconds of every frame).
@@ -89,93 +88,176 @@ public final class LightVolume {
 		LayerLightEventListener blockLight = level.getLightEngine().getLayerListener(LightLayer.BLOCK);
 		int topLightSection = level.getLightEngine().getMaxLightSection();
 		java.util.Map<net.minecraft.world.level.block.Block, float[]> colors = BlockLightColors.declared();
-		ByteBuffer data = MemoryUtil.memAlloc(SLICE.length);
+		ByteBuffer data = null;
 		try {
 			for (int n = 0; n < SLICES_PER_FRAME; n++) {
 				// The world y nearest the camera that falls on this slice.
 				int slice = nextSlice;
 				nextSlice = (nextSlice + 1) % SIZE_Y;
+				int visit = ++sliceVisits[slice];
 				int y = cameraY - SIZE_Y / 2 + Math.floorMod(slice - (cameraY - SIZE_Y / 2), SIZE_Y);
 				int sectionY = SectionPos.blockToSectionCoord(y);
 				int localY = y & 15;
 				int layerBase = Math.floorMod(y, SIZE_Y) * SIZE_XZ * SIZE_XZ;
-				java.util.List<BlockLightColors.Emitter> sliceEmitters = new java.util.ArrayList<>();
+				byte[] texels = SLICES[slice];
+				boolean changed = false;
 				for (int chunkZ = minZ >> 4; chunkZ <= maxZ >> 4; chunkZ++) {
 					for (int chunkX = minX >> 4; chunkX <= maxX >> 4; chunkX++) {
 						LevelChunk chunk = level.getChunkSource().getChunk(chunkX, chunkZ, false);
-						LevelChunkSection section = null;
-						if (chunk != null) {
-							int index = chunk.getSectionIndexFromSectionY(sectionY);
-							if (index >= 0 && index < chunk.getSections().length) {
-								section = chunk.getSections()[index];
-							}
-						}
-						boolean empty = section == null || section.hasOnlyAir();
-						DataLayer block = blockLight.getDataLayerData(SectionPos.of(chunkX, sectionY, chunkZ));
-						// The sky light's layer; where this section has none, the light engine reads the bottom of
-						// the nearest one above in the column, or 15 when there is none (SkyLightSectionStorage).
-						DataLayer sky = skyLight.getDataLayerData(SectionPos.of(chunkX, sectionY, chunkZ));
-						int skyY = localY;
-						boolean openSky = false;
-						if (sky == null && level.dimensionType().hasSkyLight()) {
-							skyY = 0;
-							for (int above = sectionY + 1; sky == null && above <= topLightSection; above++) {
-								sky = skyLight.getDataLayerData(SectionPos.of(chunkX, above, chunkZ));
-							}
-							openSky = sky == null;
-						}
 						int fromX = Math.max(chunkX << 4, minX);
 						int toX = Math.min((chunkX << 4) + 15, maxX);
 						int fromZ = Math.max(chunkZ << 4, minZ);
 						int toZ = Math.min((chunkZ << 4) + 15, maxZ);
-						for (int z = fromZ; z <= toZ; z++) {
-							int row = Math.floorMod(z, SIZE_XZ);
-							for (int x = fromX; x <= toX; x++) {
-								int column = Math.floorMod(x, SIZE_XZ);
-								int skyLevel = openSky ? 15 : sky == null ? 0 : sky.get(x & 15, skyY, z & 15);
-								int blockLevel = block == null ? 0 : block.get(x & 15, localY, z & 15);
-								boolean solid = false;
-								if (!empty) {
-									BlockState state = section.getBlockState(x & 15, localY, z & 15);
-									solid = state.isSolidRender();
-									if (!colors.isEmpty() && state.getLightEmission() > 0) {
-										float[] color = colors.get(state.getBlock());
-										if (color != null) {
-											sliceEmitters.add(new BlockLightColors.Emitter(x, y, z, state.getLightEmission(), color));
-										}
-									}
-								}
-								SOLID[layerBase + row * SIZE_XZ + column] = (byte) (solid ? 1 : 0);
-								int texel = (row * SIZE_XZ + column) * 4;
-								SLICE[texel] = (byte) (skyLevel * 17);
-								SLICE[texel + 1] = (byte) (blockLevel * 17);
-								SLICE[texel + 2] = (byte) (solid ? 255 : 0);
-								// Alpha: 1 under the column's terrain surface (WaterColumns.terrainTop), where a ray that
-								// leaves the volume upwards still has terrain over it (the cave check, light_volume.glsl).
-								boolean covered = y < WaterColumns.terrainTop(x, z);
-								SLICE[texel + 3] = (byte) (covered ? 255 : 0);
-							}
+						// The part of this slice the chunk covers: scanned again only when something in it may differ
+						// from when it was last scanned (another chunk or part of one, another height, a change in the
+						// chunk: ChunkChanges), and in any case once in REFRESH_VISITS visits of the slice, staggered
+						// over the parts (a change the stamps missed lasts that long at most). Scanned in full every
+						// time, the volume cost some 0.5 ms of every frame, and more while flying.
+						int part = slice * PARTS + Math.floorMod(chunkZ, PART_SIDE) * PART_SIDE
+								+ Math.floorMod(chunkX, PART_SIDE);
+						long key = ((long) chunkX << 32) ^ (chunkZ & 0xFFFFFFFFL);
+						int range = (fromX & 15) | (toX & 15) << 4 | (fromZ & 15) << 8 | (toZ & 15) << 12;
+						int stamp = ChunkChanges.stamp(chunkX, chunkZ);
+						boolean refresh = (visit + part) % REFRESH_VISITS == 0;
+						if (!refresh && partKey[part] == key && partRange[part] == range && partY[part] == y
+								&& partStamp[part] == stamp && partChunk[part] == chunk) {
+							continue;
 						}
+						partKey[part] = key;
+						partRange[part] = range;
+						partY[part] = y;
+						partStamp[part] = stamp;
+						partChunk[part] = chunk;
+						partEmitters[part] = scan(level, chunk, chunkX, chunkZ, y, sectionY, localY, layerBase,
+								fromX, toX, fromZ, toZ, texels, skyLight, blockLight, topLightSection, colors);
+						changed = true;
 					}
 				}
-				data.clear();
-				data.put(SLICE).flip();
-				EMITTERS.set(slice, java.util.List.copyOf(sliceEmitters));
 				SLICE_CAMERA_X[slice] = cameraX;
 				SLICE_CAMERA_Y[slice] = cameraY;
 				SLICE_CAMERA_Z[slice] = cameraZ;
+				if (changed || filled < SIZE_Y) {
+					// The slice's light colour sources: those of the parts now in it.
+					java.util.List<BlockLightColors.Emitter> sliceEmitters = null;
+					for (int chunkZ = minZ >> 4; chunkZ <= maxZ >> 4; chunkZ++) {
+						for (int chunkX = minX >> 4; chunkX <= maxX >> 4; chunkX++) {
+							java.util.List<BlockLightColors.Emitter> found = partEmitters[slice * PARTS
+									+ Math.floorMod(chunkZ, PART_SIDE) * PART_SIDE + Math.floorMod(chunkX, PART_SIDE)];
+							if (found != null) {
+								if (sliceEmitters == null) {
+									sliceEmitters = new java.util.ArrayList<>();
+								}
+								sliceEmitters.addAll(found);
+							}
+						}
+					}
+					EMITTERS.set(slice, sliceEmitters == null ? java.util.List.of() : java.util.List.copyOf(sliceEmitters));
+					if (data == null) {
+						data = MemoryUtil.memAlloc(texels.length);
+					}
+					data.clear();
+					data.put(texels).flip();
+					int tileX = (slice % TILES_X) * SIZE_XZ;
+					int tileY = (slice / TILES_X) * SIZE_XZ;
+					RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, data, 0, 0, tileX, tileY,
+							SIZE_XZ, SIZE_XZ);
+				}
 				if (filled >= SIZE_Y - 1 && nextSlice == 0) {
 					BlockLightColors.rebuild(cameraX, cameraY, cameraZ);
 				}
-				int tileX = (slice % TILES_X) * SIZE_XZ;
-				int tileY = (slice / TILES_X) * SIZE_XZ;
-				RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, data, 0, 0, tileX, tileY,
-						SIZE_XZ, SIZE_XZ);
 				filled = Math.min(SIZE_Y, filled + 1);
 			}
 		} finally {
-			MemoryUtil.memFree(data);
+			if (data != null) {
+				MemoryUtil.memFree(data);
+			}
 		}
+	}
+
+	/** Chunks along each side of the parts' grid: the volume spans 9 chunks at most (8 when on chunk borders). */
+	private static final int PART_SIDE = SIZE_XZ / 16 + 1;
+	private static final int PARTS = PART_SIDE * PART_SIDE;
+	/** A part is scanned again at least once in this many visits of its slice. */
+	private static final int REFRESH_VISITS = 8;
+	/** Each slice's texels as last uploaded. */
+	private static final byte[][] SLICES = new byte[SIZE_Y][SIZE_XZ * SIZE_XZ * 4];
+	private static final int[] sliceVisits = new int[SIZE_Y];
+	/** Per slice and chunk-sized part of it (wrapping on the parts' grid): what it was last scanned for. */
+	private static final long[] partKey = new long[SIZE_Y * PARTS];
+	private static final int[] partRange = new int[SIZE_Y * PARTS];
+	private static final int[] partY = new int[SIZE_Y * PARTS];
+	private static final int[] partStamp = new int[SIZE_Y * PARTS];
+	private static final Object[] partChunk = new Object[SIZE_Y * PARTS];
+	@SuppressWarnings("unchecked")
+	private static final java.util.List<BlockLightColors.Emitter>[] partEmitters = new java.util.List[SIZE_Y * PARTS];
+
+	static {
+		java.util.Arrays.fill(partKey, Long.MIN_VALUE);
+	}
+
+	/**
+	 * Reads one chunk's part of a slice (the blocks fromX..toX, fromZ..toZ at height y) into the slice's texels
+	 * and SOLID, from the chunk's section and the light engine's data layers directly; returns its pack-coloured
+	 * light blocks, or null for none.
+	 */
+	private static java.util.List<BlockLightColors.Emitter> scan(ClientLevel level, LevelChunk chunk, int chunkX,
+			int chunkZ, int y, int sectionY, int localY, int layerBase, int fromX, int toX, int fromZ, int toZ,
+			byte[] texels, LayerLightEventListener skyLight, LayerLightEventListener blockLight, int topLightSection,
+			java.util.Map<net.minecraft.world.level.block.Block, float[]> colors) {
+		java.util.List<BlockLightColors.Emitter> emitters = null;
+		LevelChunkSection section = null;
+		if (chunk != null) {
+			int index = chunk.getSectionIndexFromSectionY(sectionY);
+			if (index >= 0 && index < chunk.getSections().length) {
+				section = chunk.getSections()[index];
+			}
+		}
+		boolean empty = section == null || section.hasOnlyAir();
+		DataLayer block = blockLight.getDataLayerData(SectionPos.of(chunkX, sectionY, chunkZ));
+		// The sky light's layer; where this section has none, the light engine reads the bottom of the nearest one
+		// above in the column, or 15 when there is none (SkyLightSectionStorage).
+		DataLayer sky = skyLight.getDataLayerData(SectionPos.of(chunkX, sectionY, chunkZ));
+		int skyY = localY;
+		boolean openSky = false;
+		if (sky == null && level.dimensionType().hasSkyLight()) {
+			skyY = 0;
+			for (int above = sectionY + 1; sky == null && above <= topLightSection; above++) {
+				sky = skyLight.getDataLayerData(SectionPos.of(chunkX, above, chunkZ));
+			}
+			openSky = sky == null;
+		}
+		for (int z = fromZ; z <= toZ; z++) {
+			int row = Math.floorMod(z, SIZE_XZ);
+			for (int x = fromX; x <= toX; x++) {
+				int column = Math.floorMod(x, SIZE_XZ);
+				int skyLevel = openSky ? 15 : sky == null ? 0 : sky.get(x & 15, skyY, z & 15);
+				int blockLevel = block == null ? 0 : block.get(x & 15, localY, z & 15);
+				boolean solid = false;
+				if (!empty) {
+					BlockState state = section.getBlockState(x & 15, localY, z & 15);
+					solid = state.isSolidRender();
+					if (!colors.isEmpty() && state.getLightEmission() > 0) {
+						float[] color = colors.get(state.getBlock());
+						if (color != null) {
+							if (emitters == null) {
+								emitters = new java.util.ArrayList<>();
+							}
+							emitters.add(new BlockLightColors.Emitter(x, y, z, state.getLightEmission(), color));
+						}
+					}
+				}
+				SOLID[layerBase + row * SIZE_XZ + column] = (byte) (solid ? 1 : 0);
+				int texel = (row * SIZE_XZ + column) * 4;
+				texels[texel] = (byte) (skyLevel * 17);
+				texels[texel + 1] = (byte) (blockLevel * 17);
+				texels[texel + 2] = (byte) (solid ? 255 : 0);
+				// Alpha: 1 under the column's terrain surface (WaterColumns.terrainTop), where a ray that leaves the
+				// volume upwards still has terrain over it (the cave check, light_volume.glsl).
+				boolean covered = y < WaterColumns.terrainTop(x, z);
+				texels[texel + 3] = (byte) (covered ? 255 : 0);
+			}
+		}
+		return emitters;
 	}
 
 	private static void create() {

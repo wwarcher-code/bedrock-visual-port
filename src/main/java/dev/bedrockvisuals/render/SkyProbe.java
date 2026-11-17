@@ -66,6 +66,8 @@ public final class SkyProbe {
 	private static int frame;
 	private static boolean drawn;
 	private static boolean failed;
+	/** The base was redrawn and its mips haven't been filtered from it yet. */
+	private static boolean mipsPending;
 
 	private SkyProbe() {
 	}
@@ -94,19 +96,31 @@ public final class SkyProbe {
 		// The scene probe's faces, when it captured terrain this frame (they are lit with this frame's data).
 		SceneProbe.ensure();
 		boolean newScene = SceneProbe.lightFaces(encoder, lightingData, atmosphereData);
-		boolean due = !drawn || ++frame % INTERVAL == 0 || SettingsBlend.snapping() || newScene;
-		if (!due) {
+		boolean now = !drawn || SettingsBlend.snapping() || newScene;
+		boolean due = now || ++frame % INTERVAL == 0;
+		// The base and the mips filtered from it are drawn two frames apart, so each frame of the round carries
+		// at most half the work (all at once, the GPU's frame time rose by some 0.5 ms every fourth frame). When
+		// the probe is needed at once (the first, a jump in time, a teleport, a new scene), both are drawn now.
+		boolean mipsDue = now || (mipsPending && frame % INTERVAL == INTERVAL / 2);
+		if (!due && !mipsDue) {
 			return;
 		}
 		try {
 			create();
-			draw(encoder, baseView, "base", pass -> {
-				pass.setPipeline(RenderSystem.getCompiledPipeline(BASE));
-				SceneProbe.bindFaces(pass);
-				pass.setUniform("LightingData", lightingData);
-				pass.setUniform("AtmosphereData", atmosphereData);
-				pass.setUniform("GradingData", LightingPass.gradingData());
-			});
+			if (due) {
+				draw(encoder, baseView, "base", pass -> {
+					pass.setPipeline(RenderSystem.getCompiledPipeline(BASE));
+					SceneProbe.bindFaces(pass);
+					pass.setUniform("LightingData", lightingData);
+					pass.setUniform("AtmosphereData", atmosphereData);
+					pass.setUniform("GradingData", LightingPass.gradingData());
+				});
+				mipsPending = true;
+			}
+			if (!mipsDue) {
+				return;
+			}
+			mipsPending = false;
 			for (int m = 0; m < MIPS; m++) {
 				int mip = m;
 				draw(encoder, mipViews[m], "mip " + m, pass -> {

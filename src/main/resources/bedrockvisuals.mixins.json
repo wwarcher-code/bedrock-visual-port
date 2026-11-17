@@ -5,9 +5,9 @@
 	"compatibilityLevel": "JAVA_25",
 	"client": [
 		"distanthorizons.MinecraftClientWrapperMixin",
-		"minecraft.ClientLevelMixin",
 		"minecraft.CloudRendererMixin",
 		"minecraft.CloudRendererPrepareMixin",
+		"minecraft.LevelExtractorMixin",
 		"minecraft.LevelRendererMixin",
 		"minecraft.LightmapMixin",
 		"minecraft.PreparedRenderTypeMixin",

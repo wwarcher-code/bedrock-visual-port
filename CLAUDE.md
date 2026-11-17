@@ -12,3 +12,9 @@
   - The Bedrock data the mod reads is found under `/XboxGames/Minecraft for Windows/Content` and
     `~/bedrock-samples` (link the copies kept in the scratchpad there).
   - Behaviour on the developer's GPU and real frame rates still need the developer's own runs.
+- On the developer's PC (an RTX 3080 Ti), sessions can drive the game themselves: `.\gradlew.bat runClient
+  "-PquickPlay=New World (1)" "-PbvScript=<file>"` and append lines to the file. Besides the lines above:
+  `screenshot <file>` (the game's picture as PNG), `frametimes <seconds> <file>` (per-frame CPU times of the
+  mod's work, GPU times from timestamp queries, heap; CSV plus a `.summary.txt` with average, p99, worst 1% and
+  max: devtools/FrameTimes.java), `vsync on|off`, `maxfps <n>` (260 unlimited), `move <blocks per second>`
+  (flies on along the view; 0 stops), `wait <seconds>`, `quit`. Keep outputs under `run\perf\` (ignored by git).

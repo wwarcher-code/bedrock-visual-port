@@ -10,6 +10,7 @@ import com.mojang.renderpearl.api.textures.GpuSampler;
 import java.util.OptionalDouble;
 import java.util.function.Consumer;
 import dev.bedrockvisuals.BedrockVisualsClient;
+import dev.bedrockvisuals.devtools.FrameTimes;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.minecraft.client.KeyMapping;
@@ -71,6 +72,16 @@ public final class DeferredRenderer {
 	 */
 	public static void beforeMainPass(ChunkSectionsToRender chunks, RenderTarget main, GpuSampler sampler,
 			TextureAtlas blockAtlas, Consumer<RenderPass> solidEntities, Consumer<RenderPass> translucentEntities) {
+		FrameTimes.beginFrame();
+		try {
+			renderBeforeMainPass(chunks, main, sampler, blockAtlas, solidEntities, translucentEntities);
+		} finally {
+			FrameTimes.endMod();
+		}
+	}
+
+	private static void renderBeforeMainPass(ChunkSectionsToRender chunks, RenderTarget main, GpuSampler sampler,
+			TextureAtlas blockAtlas, Consumer<RenderPass> solidEntities, Consumer<RenderPass> translucentEntities) {
 		solidEntitiesDrawn = false;
 		translucentEntitiesDrawn = false;
 		// Before the flags reset: whether the last frame drew Bedrock's sky decides who draws the clouds.
@@ -85,34 +96,47 @@ public final class DeferredRenderer {
 		boolean ownsDistant = enabled && !lightingFailed;
 		DistantTerrain.source().ifPresent(source -> source.setRendererOwnsComposite(ownsDistant));
 		ownsDistantComposite = ownsDistant;
+		FrameTimes.section(FrameTimes.Metric.PASSES_CPU);
 		Underwater.update();
+		FrameTimes.section(FrameTimes.Metric.UNDERWATER);
 		WaterColumns.update();
+		FrameTimes.section(FrameTimes.Metric.WATER_COLUMNS);
 		DistantHeights.update();
+		FrameTimes.section(FrameTimes.Metric.DISTANT_HEIGHTS);
 		WaterPass.updateExtinction();
+		FrameTimes.section(FrameTimes.Metric.WATER_EXTINCTION);
 		LightVolume.update();
+		FrameTimes.section(FrameTimes.Metric.LIGHT_VOLUME);
 		BlockLightColors.update();
+		FrameTimes.section(FrameTimes.Metric.BLOCK_LIGHT_COLORS);
 		PointLights.update();
+		FrameTimes.section(FrameTimes.Metric.POINT_LIGHTS);
 		// Placeholders and buffers the water and cloud passes bind are created here, outside any render pass
 		// (uploads can't happen while one is open).
 		CloudShadows.viewOrEmpty();
 		LocalExposure.ensureData();
 		WaterPass.prepare(blockAtlas, main, false);
 		LightingState light = enabled && !lightingFailed ? LightingState.current() : null;
+		FrameTimes.section(FrameTimes.Metric.PASSES_CPU);
 		if (light != null) {
 			SceneProbe.beginFrame();
 			ShadowPass.render(chunks, sampler, blockAtlas.getTextureView(), light);
 		}
+		FrameTimes.section(FrameTimes.Metric.SHADOW_CPU);
 		GBufferPass.render(chunks, main, sampler, blockAtlas.getTextureView(), MaterialAtlas.view(blockAtlas));
+		FrameTimes.section(FrameTimes.Metric.GBUFFER_CPU);
 		if (light != null && light.atmosphere() != null && GBufferPass.hasTerrain()) {
 			// The reflection probe's scene, when a capture is due (SceneProbe).
 			SceneProbe.capture(chunks, sampler, blockAtlas.getTextureView(), MaterialAtlas.view(blockAtlas),
 					GBufferPass.projection());
 		}
+		FrameTimes.section(FrameTimes.Metric.SCENE_PROBE_CPU);
 		if (light == null) {
 			return;
 		}
 		// Entities into the shadow cascades too, before the lighting pass reads them.
 		EntityShadows.render(solidEntities, GBufferPass.projection(), GBufferPass.modelView());
+		FrameTimes.section(FrameTimes.Metric.ENTITY_SHADOWS_CPU);
 		boolean terrain = GBufferPass.hasTerrain();
 		// With no terrain this frame the G-buffer is still cleared (all sky), so the pass still draws the sky:
 		// otherwise Java's sky would come back for a frame. Only a failed G-buffer stops it.
@@ -127,6 +151,7 @@ public final class DeferredRenderer {
 		GBuffer gbuffer = GBufferPass.gbuffer();
 		try {
 			LightingPass.render(main, gbuffer, GBufferPass.projection(), GBufferPass.modelView(), light);
+			FrameTimes.section(FrameTimes.Metric.LIGHTING_CPU);
 			RenderSystem.getDevice().createCommandEncoder().copyTextureToTexture(gbuffer.depth(),
 					main.getDepthTexture(), 0, 0, 0, 0, 0, main.width, main.height);
 			replacedTerrain = terrain;
@@ -193,6 +218,7 @@ public final class DeferredRenderer {
 
 	/** After the main pass: the next frame decides again. */
 	public static void afterMainPass() {
+		FrameTimes.afterMain();
 		solidEntitiesDrawn = false;
 		translucentEntitiesDrawn = false;
 	}
