@@ -96,7 +96,7 @@ public final class EntityShadows {
 	 * @param projection, modelView the camera matrices of this frame (the G-buffer's)
 	 */
 	static void render(Consumer<RenderPass> solidEntities, Matrix4fc projection, Matrix4fc modelView) {
-		if (failed || solidEntities == null || !ShadowPass.isValid() || ShadowPass.unusedColorView() == null
+		if (failed || solidEntities == null || !ShadowPass.isValid() || ShadowPass.unusedColorView(ShadowPass.CASCADES - 1) == null
 				|| projection == null || modelView == null) {
 			return;
 		}
@@ -105,6 +105,10 @@ public final class EntityShadows {
 		frameDraws = 0;
 		try {
 			for (int c = 0; c < ShadowPass.CASCADES; c++) {
+				// Only into maps drawn this frame: a map kept from the last frame already holds its entities.
+				if (!ShadowPass.redrawn(c)) {
+					continue;
+				}
 				if (DATA[c] == null) {
 					int index = c;
 					DATA[c] = RenderSystem.getDevice().createBuffer(() -> "Bedrock Visuals entity shadow data " + index,
@@ -116,7 +120,7 @@ public final class EntityShadows {
 				}
 				int index = c;
 				RenderPassDescriptor descriptor = RenderPassDescriptor.builder(() -> "Bedrock Visuals entity shadows " + index)
-						.withColorAttachment(ShadowPass.unusedColorView())
+						.withColorAttachment(ShadowPass.unusedColorView(c))
 						.withDepthAttachment(ShadowPass.depthView(c), OptionalDouble.empty())
 						.build();
 				cascade = c;

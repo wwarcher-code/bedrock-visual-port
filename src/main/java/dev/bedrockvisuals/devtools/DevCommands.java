@@ -25,6 +25,7 @@ public final class DevCommands {
 			  /bv capture [name]  same as F9, or one section: flicker, scene (times, debug, horizon, underwater,
 			                      rain), spots, or one spot by name; a sheet-<section>.png set per section
 			  /bv flicker         the flicker test alone (far terrain and reflections), where you stand (about 30 seconds)
+			  /bv quality [tier performance|quality]   show or pick one of Bedrock's graphics presets
 			  /bv status          copy the diagnostics report to the clipboard""";
 
 	private DevCommands() {
@@ -132,7 +133,26 @@ public final class DevCommands {
 									command(spot.get().teleport());
 									return 1;
 								})))
-						.then(ClientCommands.literal("status").executes(c -> {
+						.then(ClientCommands.literal("quality").executes(c -> {
+								feedback(c.getSource(), "Quality: " + dev.bedrockvisuals.render.Quality.status() + ". Bedrock's presets: "
+										+ String.join(", ", dev.bedrockvisuals.render.Quality.presets().stream()
+												.map(p -> p.tier() + " " + p.name().toLowerCase(java.util.Locale.ROOT)).toList())
+										+ ". /bv quality <tier> <performance|quality> picks one.");
+								return 1;
+							}).then(ClientCommands.argument("tier", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, 9))
+									.then(ClientCommands.argument("preset", StringArgumentType.word()).suggests((c, builder) -> {
+										builder.suggest("performance");
+										builder.suggest("quality");
+										return builder.buildFuture();
+									}).executes(c -> {
+										int tier = com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(c, "tier");
+										String preset = StringArgumentType.getString(c, "preset");
+										boolean ok = dev.bedrockvisuals.render.Quality.select(tier, preset, true);
+										feedback(c.getSource(), ok ? "Quality: " + dev.bedrockvisuals.render.Quality.status()
+												: "Bedrock has no preset \"" + tier + " " + preset + "\" (/bv quality lists them).");
+										return ok ? 1 : 0;
+									}))))
+							.then(ClientCommands.literal("status").executes(c -> {
 							DiagnosticsReport report = new DiagnosticsReport("Bedrock Visuals status");
 							report.lightingAt("now");
 							report.logExcerpt(Minecraft.getInstance().gameDirectory.toPath());

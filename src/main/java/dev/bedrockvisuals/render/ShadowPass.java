@@ -12,6 +12,7 @@ import com.mojang.renderpearl.api.textures.GpuSampler;
 import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
 import dev.bedrockvisuals.BedrockVisualsClient;
+import dev.bedrockvisuals.bedrock.QualitySettings;
 import java.util.OptionalDouble;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayerGroup;
@@ -38,29 +39,40 @@ public final class ShadowPass {
 	 * lighting snaps its lookups to, so where an edge falls within a shadow texel can't move it a whole grid step
 	 * the wrong way when the map turns to follow the sun (at 2048 it could, about a third of the time).
 	 */
+	/** The finest cascade's texels across (the texel size the lighting pass is given). */
 	public static final int RESOLUTION = 2048;
+	/** Cascade slots. A preset with fewer cascades fills the last ones, so slot 3 is always the outermost. */
 	public static final int CASCADES = 4;
-	/** max_shadow_distance. */
+	/** max_shadow_distance (128 at every PC level). */
 	public static final float RANGE = 128;
-	/** Blocks each cascade covers around the camera: 1/6, 1/3, 1/2 and all of the range. */
-	static final float[] HALF_EXTENTS = {RANGE / 6, RANGE / 3, RANGE / 2, RANGE};
 	/**
 	 * Blocks per unit of Bedrock's shadow depth. Every cascade is looked up through the one CascadesShadowProj
 	 * (GPU capture 1), whose depth row is the light direction at 0.0057868 per block.
 	 */
 	static final float BEDROCK_DEPTH_BLOCKS = 1f / 0.0057868f;
-	/**
-	 * Depth bias per cascade, in blocks: Bedrock's CascadesParameters.y (0.000275, 0.0015, 0.00275, 0.003, the
-	 * PC ultra configuration, as captured) in its depth units.
+
+	/*
+	 * Per slot, from the quality preset's shadow level (Quality.shadows, Bedrock's shadow_configuration.pc.json;
+	 * ultra, as captured: 4 cascades of 2048² over 1/6, 1/3, 1/2 and all of the range):
 	 */
-	static final float[] BIAS_BLOCKS = {0.000275f * BEDROCK_DEPTH_BLOCKS, 0.0015f * BEDROCK_DEPTH_BLOCKS,
-			0.00275f * BEDROCK_DEPTH_BLOCKS, 0.003f * BEDROCK_DEPTH_BLOCKS};
-	/**
-	 * Slope bias per cascade, in blocks per tan(acos(max(N·L, NdLFloor 0.04))): CascadesParameters.z (1e-5,
-	 * 2e-5, 4e-5, 6e-5) in Bedrock's depth units.
-	 */
-	static final float[] SLOPE_BIAS_BLOCKS = {1e-5f * BEDROCK_DEPTH_BLOCKS, 2e-5f * BEDROCK_DEPTH_BLOCKS,
-			4e-5f * BEDROCK_DEPTH_BLOCKS, 6e-5f * BEDROCK_DEPTH_BLOCKS};
+	/** Blocks the cascade covers around the camera (its range × max_shadow_distance). */
+	private static final float[] HALF_EXTENTS = new float[CASCADES];
+	/** Depth bias in blocks: Bedrock's bias (CascadesParameters.y) in its depth units. */
+	private static final float[] BIAS_BLOCKS = new float[CASCADES];
+	/** Slope bias in blocks per tan(acos(max(N·L, NdLFloor 0.04))): Bedrock's slope_bias (CascadesParameters.z). */
+	private static final float[] SLOPE_BIAS_BLOCKS = new float[CASCADES];
+	/** The map's size; 0 for a slot the preset doesn't use. */
+	private static final int[] SIZE = new int[CASCADES];
+	/** Bedrock's update_frequency and update_offset: drawn every this many frames, staggered. */
+	private static final int[] FREQUENCY = new int[CASCADES];
+	private static final int[] OFFSET = new int[CASCADES];
+	/** Whether the slot's map was drawn this frame (else it's the last one, moved with the camera). */
+	private static final boolean[] REDRAWN = new boolean[CASCADES];
+	private static final Matrix4f[] DRAWN_MATRIX = {new Matrix4f(), new Matrix4f(), new Matrix4f(), new Matrix4f()};
+	private static final double[][] DRAWN_CAMERA = new double[CASCADES][3];
+	private static final Vector3f[] DRAWN_DIRECTION = new Vector3f[CASCADES];
+	private static QualitySettings.Shadows configured;
+	private static long frame;
 	public static final float DEPTH_RANGE = 256;
 	/**
 	 * Below this height above the horizon (about 0.3°) the map isn't drawn: the light grazes the terrain too flatly
@@ -87,8 +99,8 @@ public final class ShadowPass {
 	 * The pass carries a color attachment beside the depth, matched by the pipeline's color target
 	 * ({@link ShadowTerrainPipelines#UNUSED_COLOR}); nothing is written to it.
 	 */
-	private static GpuTexture unusedColor;
-	private static GpuTextureView unusedColorView;
+	private static final java.util.Map<Integer, GpuTexture> unusedColor = new java.util.HashMap<>();
+	private static final java.util.Map<Integer, GpuTextureView> unusedColorViews = new java.util.HashMap<>();
 	private static final GpuBuffer[] data = new GpuBuffer[CASCADES];
 
 	private static boolean active;
@@ -158,9 +170,52 @@ public final class ShadowPass {
 		return VIEW_PROJECTION[cascade];
 	}
 
-	/** The cascades' shared (unused) colour attachment, or null before the first map. */
-	static GpuTextureView unusedColorView() {
-		return unusedColorView;
+	/** The (unused) colour attachment matching the slot's map, or null before the first map. */
+	static GpuTextureView unusedColorView(int cascade) {
+		return unusedColorViews.get(Math.max(SIZE[cascade], 1));
+	}
+
+	/** Whether the slot's map was drawn this frame: entities are drawn into those only. */
+	static boolean redrawn(int cascade) {
+		return REDRAWN[cascade];
+	}
+
+	/**
+	 * Takes the quality preset's shadow level when it changes: its cascades fill the last slots, the maps are
+	 * made again at its sizes, and every map is drawn afresh.
+	 */
+	private static void configure() {
+		QualitySettings.Shadows shadows = Quality.shadows();
+		if (shadows == configured) {
+			return;
+		}
+		configured = shadows;
+		java.util.List<QualitySettings.Cascade> cascades = shadows.cascades();
+		int count = Math.min(cascades.size(), CASCADES);
+		int first = CASCADES - count;
+		for (int slot = 0; slot < CASCADES; slot++) {
+			DRAWN_DIRECTION[slot] = null;
+			REDRAWN[slot] = false;
+			if (slot < first) {
+				HALF_EXTENTS[slot] = 0;
+				BIAS_BLOCKS[slot] = 0;
+				SLOPE_BIAS_BLOCKS[slot] = 0;
+				SIZE[slot] = 0;
+				FREQUENCY[slot] = 1;
+				OFFSET[slot] = 0;
+				VIEW_PROJECTION[slot].zero(); // tests as outside: the lookups skip it
+				continue;
+			}
+			QualitySettings.Cascade cascade = cascades.get(slot - first);
+			HALF_EXTENTS[slot] = cascade.range() * shadows.maxDistance();
+			BIAS_BLOCKS[slot] = cascade.bias() * BEDROCK_DEPTH_BLOCKS;
+			SLOPE_BIAS_BLOCKS[slot] = cascade.slopeBias() * BEDROCK_DEPTH_BLOCKS;
+			SIZE[slot] = Math.clamp(cascade.resolution(), 64, 8192);
+			FREQUENCY[slot] = Math.max(1, cascade.updateFrequency());
+			OFFSET[slot] = cascade.updateOffset();
+		}
+		closeResources();
+		reported = false;
 	}
 
 	public static GpuTextureView depthView(int cascade) {
@@ -183,6 +238,7 @@ public final class ShadowPass {
 		if (disabled) {
 			return;
 		}
+		configure();
 		// Bedrock's one directional light: the sun while it's above the horizon, then the moon.
 		boolean moon = moonIsTheLight(light);
 		Vector3f current = moon ? light.moonDirection() : light.sunDirection();
@@ -205,9 +261,9 @@ public final class ShadowPass {
 		valid = true;
 		if (!reported) {
 			reported = true;
-			BedrockVisualsClient.LOGGER.info("[shadows] first shadows drawn: {} cascades of {}x{} out to {} blocks, "
-							+ "{} Sodium terrain draws, {} towards {}", CASCADES, RESOLUTION, RESOLUTION, (int) RANGE,
-					terrainDraws, moon ? "moon" : "sun", towardsLight);
+			BedrockVisualsClient.LOGGER.info("[shadows] first shadows drawn: {} cascades ({}) out to {} blocks, "
+							+ "{} Sodium terrain draws, {} towards {}", configured.cascades().size(),
+					java.util.Arrays.toString(SIZE), (int) RANGE, terrainDraws, moon ? "moon" : "sun", towardsLight);
 		}
 	}
 
@@ -217,15 +273,36 @@ public final class ShadowPass {
 		terrainDraws = 0;
 		Vec3 camera = Minecraft.getInstance().gameRenderer.mainCamera().position();
 		CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
+		frame++;
 		for (int c = 0; c < CASCADES; c++) {
+			REDRAWN[c] = false;
+			if (SIZE[c] == 0) {
+				continue; // a slot the preset doesn't use
+			}
+			// Bedrock draws its far cascades every other frame, staggered (update_frequency, update_offset). In
+			// between, the last map serves, its projection moved by the camera's travel since (the lookups are
+			// camera-relative). A new light direction redraws every map.
+			boolean due = DRAWN_DIRECTION[c] == null || !DRAWN_DIRECTION[c].equals(towardsLight)
+					|| (frame + OFFSET[c]) % FREQUENCY[c] == 0;
+			if (!due) {
+				VIEW_PROJECTION[c].set(DRAWN_MATRIX[c]).translate((float) (camera.x - DRAWN_CAMERA[c][0]),
+						(float) (camera.y - DRAWN_CAMERA[c][1]), (float) (camera.z - DRAWN_CAMERA[c][2]));
+				continue;
+			}
 			VIEW_PROJECTION[c].set(ShadowProjection.build(towardsLight, camera.x, camera.y, camera.z, HALF_EXTENTS[c],
-					DEPTH_RANGE, RESOLUTION));
+					DEPTH_RANGE, SIZE[c]));
+			DRAWN_MATRIX[c].set(VIEW_PROJECTION[c]);
+			DRAWN_CAMERA[c][0] = camera.x;
+			DRAWN_CAMERA[c][1] = camera.y;
+			DRAWN_CAMERA[c][2] = camera.z;
+			DRAWN_DIRECTION[c] = new Vector3f(towardsLight);
+			REDRAWN[c] = true;
 			try (MemoryStack stack = MemoryStack.stackPush()) {
 				encoder.writeToBuffer(data[c].slice(), Std140Builder.onStack(stack, 64).putMat4f(VIEW_PROJECTION[c]).get());
 			}
 			int cascade = c;
 			RenderPassDescriptor descriptor = RenderPassDescriptor.builder(() -> "Bedrock Visuals shadow cascade " + cascade)
-					.withColorAttachment(unusedColorView)
+					.withColorAttachment(unusedColorView(c))
 					.withDepthAttachment(depthView[c], OptionalDouble.of(CLEAR_DEPTH))
 					.build();
 			active = true;
@@ -246,15 +323,38 @@ public final class ShadowPass {
 		GpuDevice device = RenderSystem.getDevice();
 		for (int c = 0; c < CASCADES; c++) {
 			int cascade = c;
+			// An unused slot still binds a (1x1) map: the shaders declare all four.
+			int size = Math.max(SIZE[c], 1);
 			depth[c] = device.createTexture(() -> "Bedrock Visuals shadow cascade " + cascade,
 					GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING, GpuFormat.D32_FLOAT,
-					RESOLUTION, RESOLUTION, 1, 1);
+					size, size, 1, 1);
 			depthView[c] = device.createTextureView(depth[c]);
-			data[c] = device.createBuffer(() -> "Bedrock Visuals shadow data " + cascade,
-					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, 64);
+			if (data[c] == null) {
+				data[c] = device.createBuffer(() -> "Bedrock Visuals shadow data " + cascade,
+						GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, 64);
+			}
+			if (!unusedColor.containsKey(size)) {
+				GpuTexture color = device.createTexture(() -> "Bedrock Visuals shadow map color (unused) " + size,
+						GpuTexture.USAGE_RENDER_ATTACHMENT, GpuFormat.R8_UNORM, size, size, 1, 1);
+				unusedColor.put(size, color);
+				unusedColorViews.put(size, device.createTextureView(color));
+			}
 		}
-		unusedColor = device.createTexture(() -> "Bedrock Visuals shadow map color (unused)",
-				GpuTexture.USAGE_RENDER_ATTACHMENT, GpuFormat.R8_UNORM, RESOLUTION, RESOLUTION, 1, 1);
-		unusedColorView = device.createTextureView(unusedColor);
+	}
+
+	/** Lets the maps go (a new preset's sizes); they're made again before the next draw. */
+	private static void closeResources() {
+		for (int c = 0; c < CASCADES; c++) {
+			if (depth[c] != null) {
+				depthView[c].close();
+				depth[c].close();
+				depthView[c] = null;
+				depth[c] = null;
+			}
+		}
+		unusedColorViews.values().forEach(GpuTextureView::close);
+		unusedColor.values().forEach(GpuTexture::close);
+		unusedColorViews.clear();
+		unusedColor.clear();
 	}
 }

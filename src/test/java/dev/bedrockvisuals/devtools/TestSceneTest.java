@@ -43,7 +43,8 @@ class TestSceneTest {
 		if (Boolean.getBoolean("updateBedrockPack")) {
 			Files.writeString(BEDROCK_SCENE, expected, StandardCharsets.UTF_8);
 		}
-		assertEquals(expected, Files.readString(BEDROCK_SCENE, StandardCharsets.UTF_8),
+		// Line endings aside: a Windows checkout (core.autocrlf) has the file with CRLF.
+		assertEquals(expected, Files.readString(BEDROCK_SCENE, StandardCharsets.UTF_8).replace("\r\n", "\n"),
 				"the Bedrock pack is out of date; run the tests with -PupdateBedrockPack");
 	}
 

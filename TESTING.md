@@ -156,6 +156,7 @@ Don't move between the commands: the shots must be taken from where `bv/scene` p
 | F7 | Cycle debug views: albedo, normal, material, light, shadow test, cascades, local exposure, bloom, water map, off |
 | F8 | Deferred lighting on and off, for comparison with vanilla |
 | F6 | Temporal anti-aliasing (Bedrock's TAAU) on and off |
+| `/bv quality [tier performance\|quality]` | Show or pick one of Bedrock's own graphics presets (tiers 1 to 5); it sets the shadow cascades and TAAU as Bedrock does. Default tier 3 Performance, the reference captures' preset. Kept in `run\config\bedrockvisuals\quality.json` |
 | F9 or `/bv capture` | The full test capture above (scene and every spot); F9 again cancels it |
 | `/bv flicker` | The flicker test alone (far terrain and the water's reflections), where you stand and as things are (about 30 seconds) |
 | `/bv capture <name>` | One section alone (`flicker`, `scene`, `times`, `debug`, `horizon`, `underwater`, `rain`, `spots`) or one spot by name |
