@@ -35,7 +35,7 @@ public final class BloomPass {
 	static final float INTENSITY = 0.02f;
 	/** BloomParams.y in GPU captures: 0, so Bedrock blooms the whole image, not only bright parts. */
 	static final float THRESHOLD = 0f;
-	/** TUNE: dual-filter levels below the half-resolution image (the engine's count isn't in the shaders). */
+	/** Dual-filter levels below the half-resolution image: five, as in GPU captures (960 down to 30x16 at 1080p). */
 	private static final int LEVELS = 5;
 	static final GpuFormat HDR_FORMAT = GpuFormat.RGBA16_FLOAT;
 

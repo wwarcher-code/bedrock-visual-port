@@ -126,10 +126,15 @@ Verified in the Bloom material's four passes:
   level below only, with no mixing with the same-level downsample.
 - **BloomBlend.** One more upsample, added to the HDR scene as `scene + BloomParams.x × bloom`.
 
-`BloomParams.x` is the configuration's `intensity`, 0.02. The threshold factor `BloomParams.y` and the
-number of levels are runtime values. The renderer uses a threshold of exposed luminance 1 and 5 levels below
-half resolution (TUNE), blooming the lighting pass's new HDR output. It adds the difference bloom makes after
-exposure and tone mapping to the main image.
+`BloomParams.x` is the configuration's `intensity`, 0.02. GPU capture 1 settles the rest:
+- `BloomParams.y` is 0, and the thresholded downsample never runs. The first pass is a plain DFDownSample of
+  the full-resolution scene (event 40845, 1920×1080 in).
+- Six downsamples run, to 960, 480, 240, 120, 60 and 30×16. Then five upsamples run back to 480, and
+  BloomBlend reads the 960 level.
+
+The renderer does the same: no threshold, and five levels below the half-resolution image. It blooms the
+lighting pass's new HDR output, and adds the difference bloom makes after exposure and tone mapping to the
+main image.
 
 ## Reflections (`DeferredIndirectSpecular`)
 
@@ -315,9 +320,14 @@ in-scattered light:
 
 The air values come from each biome fog's `volumetric` block: `max_density`, `zero_density_height` and
 `max_density_height`, then the `media_coefficients` scattering and absorption, and `henyey_greenstein_g`.
-Plains and the default have none, and the compiled-in default wasn't found. Many biomes set
-`max_density` 0 explicitly, so the default isn't 0. The renderer uses the most common explicit values
-(0.05, scattering 0.04, g 0.6) as a TUNE default.
+Plains and the default have none. The engine's default is in the plains test-scene capture (Runtime values from GPU captures):
+`AirAlbedoExtinction` (1, 1, 1, 0.001), `HeightFogScaleBias` (-1, 558.38) and g 0.75, which the renderer uses
+(SkyAtmosphere).
+
+How the engine folds `max_density` and the coefficients together for biomes that do set them wasn't captured.
+Capture 1 doesn't settle it: it was taken over a river, and the river's fog has no volumetric block, but its
+air reads (…, 0.00155539), (-1, 335.41) and g 0.666692. So the engine blends something there, probably the
+fogs of the biomes around the camera. The renderer uses `max_density × mean(s + a)` (TUNE).
 
 The renderer ray-marches the same model per pixel: 48 steps with interleaved-gradient jitter, through its
 shadow map and cloud shadows.
@@ -708,8 +718,19 @@ against 0.1 clamped, the same as without TAA).
 
 ## Still to analyse
 
-`NdLFloor`, the SSR ray march itself, volumetric fog and local
-exposure; the built-in caustics texture; and every *runtime* value, from the game executable.
+These have since been verified:
+- `NdLFloor` 0.04 (Shadow sampling).
+- The SSR ray march (Reflections).
+- Volumetric fog (PopulateVolume).
+- Local exposure.
+- Bloom's levels and threshold (Bloom).
+- The caustics texture, which is `renderer/caustics.png`.
+
+What's left:
+- **TAAU's runtime values.** No capture has upscaling on (Temporal anti-aliasing).
+- **The air medium's folding for biomes with volumetric settings**, and what the engine blends over a river
+  (Volumetric fog).
+- **The cloud levels' `grid_size`.**
 
 ## Runtime values from pixdump exports (Bedrock 1.26.60, five captures)
 
