@@ -120,6 +120,18 @@ public final class Quality {
 		return FALLBACK_REFLECTIONS;
 	}
 
+	/** Bedrock's PC high volumetric fog (8-pixel tiles, 48 slices, the grid captured), without the install. */
+	private static final QualitySettings.VolumetricFog FALLBACK_FOG = new QualitySettings.VolumetricFog(8, 8, 48,
+			0.025f, 250, 0.5f);
+
+	/** The froxel grid of the chosen preset's volumetric fog level. */
+	static QualitySettings.VolumetricFog volumetricFog() {
+		if (settings != null && preset != null) {
+			return settings.volumetricFog(preset.volumetricFog()).orElse(FALLBACK_FOG);
+		}
+		return FALLBACK_FOG;
+	}
+
 	public static String status() {
 		if (!loaded) {
 			return "not loaded";

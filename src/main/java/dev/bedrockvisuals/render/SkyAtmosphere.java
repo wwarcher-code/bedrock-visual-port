@@ -26,7 +26,7 @@ import org.joml.Vector4f;
 public record SkyAtmosphere(Vector3f zenith, Vector3f horizon, Vector4f blendStops, Vector4f scattering,
 		Vector4f sun, Vector4f moon, Vector4f fog, Vector4f volumeAir, Vector4f volumeHeight) {
 	/** std140 size of the AtmosphereData block (lighting/sky.glsl): ten vec4s, the last written by LightingPass. */
-	static final int DATA_SIZE = 10 * 16;
+	static final int DATA_SIZE = 11 * 16;
 
 	/**
 	 * Bedrock's air medium in plains, which has no volumetric fog settings (the engine's default), from a GPU

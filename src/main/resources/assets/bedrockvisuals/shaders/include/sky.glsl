@@ -18,6 +18,8 @@ layout(std140) uniform AtmosphereData {
     vec4 VolumeHeight;          // density = saturate(x × (y relative to camera) + y); z: phase g; w: on
     vec4 SkyProbeParams;        // x: 1 when the sky probe (SkyProbe.java) is there to read; y: its last mip;
                                 // z: 1 when the quality preset has screen-space reflections (ssr_enabled)
+    vec4 FroxelGrid;            // the volumetric fog's grid (FroxelVolume.java): cells across, down, slices,
+                                // slices across the atlas
 };
 
 #include <bedrockvisuals:octahedral.glsl>

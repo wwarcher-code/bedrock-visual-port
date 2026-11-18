@@ -208,6 +208,8 @@ public final class LightingPass {
 			SkyAtmosphere.write(atmosphereBuilder, light.atmosphere());
 			// x: 1 when the sky probe is there to read (SkyProbe, drawn below before the pass opens).
 			atmosphereBuilder.putVec4(SkyProbe.ready() ? 1 : 0, SkyProbe.mips() - 1, Quality.reflections().ssr() ? 1 : 0, 0);
+			// The fog grid for this frame (FroxelGrid), from the preset's fog level and the screen.
+			FroxelVolume.writeGrid(atmosphereBuilder, gbuffer.width(), gbuffer.height());
 			encoder.writeToBuffer(atmosphere.slice(),
 					SkyAtmosphere.cameraRelative(atmosphereBuilder.get()));
 		}

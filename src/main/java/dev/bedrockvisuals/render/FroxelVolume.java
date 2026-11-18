@@ -22,17 +22,23 @@ import net.minecraft.resources.Identifier;
 import org.joml.Vector4f;
 
 /**
- * Bedrock's volumetric fog on its coarse grid: 240 x 135 froxels by 48 depth slices (VolumeDimensions,
+ * Bedrock's volumetric fog on its coarse grid: the screen in tiles by depth slices, as the quality preset's fog
+ * level sets them (240 x 135 froxels by 48 slices in GPU captures, high at 1080p; VolumeDimensions,
  * VolumeNearFar in GPU captures), filled once a frame before the lighting pass (lighting/volume.fsh) and read
  * there at each pixel's depth (froxels.glsl). It replaces the lighting pass's per-pixel march: the same medium,
  * on Bedrock's grid, so the water's and the air's scattered light blend across the picture as Bedrock's do.
- * The 48 slices sit side by side in a 2D texture, 8 across and 6 down.
+ * The slices sit side by side in a 2D texture, 8 across.
  */
 public final class FroxelVolume {
-	private static final int CELLS_X = 240;
-	private static final int CELLS_Y = 135;
-	private static final int WIDTH = CELLS_X * 8;
-	private static final int HEIGHT = CELLS_Y * 6;
+	/** Slices side by side across the atlas. */
+	private static final int TILES_X = 8;
+	/**
+	 * The grid: the screen in tiles of the quality preset's fog level (Bedrock's volumetric_fog_configuration.pc.json:
+	 * 64, 16, 8 and 8 pixels, with 32, 64, 48 and 96 slices), computed each frame (writeGrid).
+	 */
+	private static int cellsX = 240;
+	private static int cellsY = 135;
+	private static int slices = 48;
 
 	private static final BindGroupLayout LAYOUT = BindGroupLayout.builder()
 			.withUniform("ShadowMap3", UniformType.COMBINED_IMAGE_SAMPLER)
@@ -112,14 +118,48 @@ public final class FroxelVolume {
 		if (scatter != null) {
 			return;
 		}
+		int width = cellsX * TILES_X;
+		int height = cellsY * ((slices + TILES_X - 1) / TILES_X);
 		GpuDevice device = RenderSystem.getDevice();
 		int usage = GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING;
 		scatter = device.createTexture(() -> "Bedrock Visuals froxel scattering", usage, BloomPass.HDR_FORMAT,
-				WIDTH, HEIGHT, 1, 1);
+				width, height, 1, 1);
 		transmittance = device.createTexture(() -> "Bedrock Visuals froxel transmittance", usage,
-				BloomPass.HDR_FORMAT, WIDTH, HEIGHT, 1, 1);
+				BloomPass.HDR_FORMAT, width, height, 1, 1);
 		scatterView = device.createTextureView(scatter);
 		transmittanceView = device.createTextureView(transmittance);
+	}
+
+	/**
+	 * Takes this frame's grid (the preset's tile size over the screen, and its slices) and writes it for the
+	 * shaders (AtmosphereData's FroxelGrid: cells across and down, slices, slices across the atlas). A new grid
+	 * makes the volume's textures again before it's filled.
+	 */
+	static void writeGrid(com.mojang.blaze3d.buffers.Std140Builder builder, int screenWidth, int screenHeight) {
+		dev.bedrockvisuals.bedrock.QualitySettings.VolumetricFog fog = Quality.volumetricFog();
+		int x = Math.clamp((screenWidth + Math.max(fog.tileWidth(), 1) - 1) / Math.max(fog.tileWidth(), 1), 1, 1024);
+		int y = Math.clamp((screenHeight + Math.max(fog.tileHeight(), 1) - 1) / Math.max(fog.tileHeight(), 1), 1, 1024);
+		int s = Math.clamp(fog.depthSlices(), 4, 128);
+		if (x != cellsX || y != cellsY || s != slices) {
+			cellsX = x;
+			cellsY = y;
+			slices = s;
+			close();
+		}
+		builder.putVec4(cellsX, cellsY, slices, TILES_X);
+	}
+
+	private static void close() {
+		if (scatter != null) {
+			scatterView.close();
+			transmittanceView.close();
+			scatter.close();
+			transmittance.close();
+			scatter = null;
+			transmittance = null;
+			scatterView = null;
+			transmittanceView = null;
+		}
 	}
 
 	/** Whether this frame's grid is there to read (else the lighting pass leaves the fog out). */
@@ -136,6 +176,6 @@ public final class FroxelVolume {
 	}
 
 	public static String status() {
-		return failed ? "FAILED (see log)" : drawn ? "on, " + CELLS_X + "x" + CELLS_Y + "x48 froxels" : "not drawn yet";
+		return failed ? "FAILED (see log)" : drawn ? "on, " + cellsX + "x" + cellsY + "x" + slices + " froxels" : "not drawn yet";
 	}
 }

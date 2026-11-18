@@ -1,17 +1,19 @@
-// Bedrock's volumetric fog grid (froxels), as its PopulateVolume and VolumeScattering lay it out: 240 x 135 cells
-// across the screen and 48 slices in depth (VolumeDimensions in GPU captures), from 0.025 to 250 blocks of view
+// Bedrock's volumetric fog grid (froxels), as its PopulateVolume and VolumeScattering lay it out: the screen in
+// tiles (240 x 135 cells and 48 slices in depth in GPU captures, VolumeDimensions), from 0.025 to 250 blocks of view
 // depth (VolumeNearFar), the slices spread as f = (2^(5.77078 s) - 1) x 0.01865736 = (e^(4s) - 1) / (e^4 - 1).
-// Here the 48 slices lie side by side in one 2D texture, 8 across and 6 down (FroxelVolume.java): each texel
+// Here the slices lie side by side in one 2D texture, 8 across (FroxelVolume.java): each texel
 // holds the light scattered towards the camera from the camera to that slice's centre (rgb) and the
 // transmittance over the same stretch (in the other texture).
 
 #ifndef BEDROCKVISUALS_FROXELS
 #define BEDROCKVISUALS_FROXELS
 
-const ivec2 FROXEL_CELLS = ivec2(240, 135);
-const int FROXEL_SLICES = 48;
-const int FROXEL_TILES_X = 8;
-const vec2 FROXEL_ATLAS = vec2(240.0 * 8.0, 135.0 * 6.0);
+// The grid follows the quality preset's fog level and the screen (AtmosphereData's FroxelGrid, sky.glsl, which
+// every includer declares first): 240 x 135 x 48 is high at 1920 x 1080.
+#define FROXEL_CELLS ivec2(FroxelGrid.xy)
+#define FROXEL_SLICES int(FroxelGrid.z)
+#define FROXEL_TILES_X int(FroxelGrid.w)
+#define FROXEL_ATLAS (FroxelGrid.xy * vec2(FroxelGrid.w, ceil(FroxelGrid.z / FroxelGrid.w)))
 const float FROXEL_NEAR = 0.025;
 const float FROXEL_FAR = 250.0;
 
