@@ -54,6 +54,14 @@ public interface DistantTerrainSource {
 	}
 
 	/**
+	 * {@link #topSolidY} and that block's colour, packed as {@code (y << 32) | rgb} (rgb 0xRRGGBB in sRGB, 0 when
+	 * unknown). Called from the same background thread, for the far terrain the reflection probe sees.
+	 */
+	default long topSolid(int x, int z) {
+		return (long) topSolidY(x, z) << 32;
+	}
+
+	/**
 	 * Lets go of whatever the source keeps for {@link #topSolidY} (Distant Horizons: its data cache, which holds
 	 * terrain data checked out of its pools). Called by the same background thread after each tile it reads.
 	 */

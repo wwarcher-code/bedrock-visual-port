@@ -16,7 +16,8 @@ import net.minecraft.world.phys.Vec3;
 import org.lwjgl.system.MemoryUtil;
 
 /**
- * The far terrain's heights, for its shadows. The shadow cascades reach 128 blocks; past them nothing cast a
+ * The far terrain's heights, for its shadows, and its colours, for the reflection probe (sky/probe_base.fsh
+ * marches the map where the scene probe, which holds Sodium's chunks only, saw sky). The shadow cascades reach 128 blocks; past them nothing cast a
  * shadow, so Distant Horizons' hills and mountains neither shaded themselves nor the near terrain (a low sun
  * behind a far ridge). A worker thread asks the distant terrain source for the top of the highest solid block
  * every {@link #CELL} blocks, nearest first, over {@link #SIZE}² cells around the camera, and the render thread
@@ -33,6 +34,8 @@ public final class DistantHeights {
 	private static final int RECENTER = 32;
 
 	private static final short[] heights = new short[SIZE * SIZE];
+	/** Per cell: the top block's colour, 0xRRGGBB in sRGB (0 unknown). */
+	private static final int[] colours = new int[SIZE * SIZE];
 	/** One bit per row: written by the worker since the last upload. */
 	private static final AtomicLongArray dirtyRows = new AtomicLongArray(SIZE / 64);
 	private static volatile int centerX;
@@ -40,10 +43,14 @@ public final class DistantHeights {
 	private static volatile int minY;
 	private static volatile boolean running;
 	private static volatile boolean any;
+	/** The highest value in the map since it was last cleared (heights above the floor; 0 none). */
+	private static volatile int highest;
 	private static volatile boolean failed;
 	private static Thread worker;
 	private static GpuTexture texture;
 	private static GpuTextureView view;
+	private static GpuTexture colourTexture;
+	private static GpuTextureView colourView;
 	private static int nextUploadRow;
 	private static Object lastLevel;
 
@@ -66,6 +73,8 @@ public final class DistantHeights {
 			lastLevel = minecraft.level;
 			generation++;
 			java.util.Arrays.fill(heights, (short) 0);
+			java.util.Arrays.fill(colours, 0);
+			highest = 0;
 			for (int i = 0; i < dirtyRows.length(); i++) {
 				dirtyRows.set(i, -1L);
 			}
@@ -160,7 +169,9 @@ public final class DistantHeights {
 
 	/** Reads one cell; whether the source had data for it. */
 	private static boolean sample(DistantTerrainSource source, int cellX, int cellZ) {
-		int top = source.topSolidY(cellX * CELL + CELL / 2, cellZ * CELL + CELL / 2);
+		long packed = source.topSolid(cellX * CELL + CELL / 2, cellZ * CELL + CELL / 2);
+		int top = (int) (packed >> 32);
+		int colour = (int) packed & 0xFFFFFF;
 		int value = top == DistantTerrainSource.NO_HEIGHT ? 0 : Math.max(1, Math.min(65535, top - minY));
 		int tx = Math.floorMod(cellX, SIZE);
 		int tz = Math.floorMod(cellZ, SIZE);
@@ -172,6 +183,13 @@ public final class DistantHeights {
 			if (value != 0) {
 				any = true;
 			}
+			if (value > highest) {
+				highest = value;
+			}
+		}
+		if (colours[index] != colour) {
+			colours[index] = colour;
+			dirtyRows.getAndUpdate(tz >> 6, bits -> bits | (1L << (tz & 63)));
 		}
 		return value != 0;
 	}
@@ -188,8 +206,18 @@ public final class DistantHeights {
 				MemoryUtil.memFree(empty);
 			}
 			view = device.createTextureView(texture);
+			colourTexture = device.createTexture(() -> "Bedrock Visuals distant colours",
+					GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA8_UNORM, SIZE, SIZE, 1, 1);
+			ByteBuffer none = MemoryUtil.memCalloc(SIZE * SIZE * 4);
+			try {
+				device.createCommandEncoder().writeToTexture(colourTexture, none, 0, 0, 0, 0, SIZE, SIZE);
+			} finally {
+				MemoryUtil.memFree(none);
+			}
+			colourView = device.createTextureView(colourTexture);
 		}
 		ByteBuffer row = MemoryUtil.memAlloc(SIZE * 2);
+		ByteBuffer colourRow = MemoryUtil.memAlloc(SIZE * 4);
 		try {
 			int uploaded = 0;
 			for (int i = 0; i < SIZE && uploaded < ROWS_PER_FRAME; i++) {
@@ -205,11 +233,19 @@ public final class DistantHeights {
 				}
 				row.flip();
 				device.createCommandEncoder().writeToTexture(texture, row, 0, 0, 0, r, SIZE, 1);
+				colourRow.clear();
+				for (int x = 0; x < SIZE; x++) {
+					int c = colours[r * SIZE + x];
+					colourRow.put((byte) (c >> 16)).put((byte) (c >> 8)).put((byte) c).put((byte) (c != 0 ? 255 : 0));
+				}
+				colourRow.flip();
+				device.createCommandEncoder().writeToTexture(colourTexture, colourRow, 0, 0, 0, r, SIZE, 1);
 				uploaded++;
 				nextUploadRow = (r + 1) % SIZE;
 			}
 		} finally {
 			MemoryUtil.memFree(row);
+			MemoryUtil.memFree(colourRow);
 		}
 	}
 
@@ -258,6 +294,17 @@ public final class DistantHeights {
 	/** The map, or null before there is one. */
 	static GpuTextureView view() {
 		return view;
+	}
+
+	/** The top of the highest terrain in the map, in blocks above the camera (negative when below it). */
+	static float highestAboveCamera() {
+		Vec3 camera = Minecraft.getInstance().gameRenderer.mainCamera().position();
+		return (float) (highest - (camera.y - minY));
+	}
+
+	/** The cells' colours (rgb sRGB, alpha 1 where known), or null before there is a map. */
+	static GpuTextureView colourView() {
+		return colourView;
 	}
 
 	/**

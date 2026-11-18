@@ -149,6 +149,16 @@ exposure and tone mapping to the main image.
   the SSR march (40577). So SSR never sees clouds, and the water's cloud reflections come from the probe. The
   renderer traces the whole cloud layer into the probe's base (far_clouds.glsl, from the camera out), in front
   of its sky. That adds about 0.01 ms of GPU time on average.
+- **The probe holds Distant Horizons' terrain too:** Bedrock's probe holds all the terrain it draws, but the
+  scene probe only captures Sodium's chunks. Where the scene probe saw sky, the probe's base pass marches the far
+  terrain's height map (DistantHeights: one cell per 8 blocks, 8 km across). It starts from 0.75 of the render
+  distance and runs out to DH's range. Each cell also keeps its top block's colour, read from DH's data:
+  - the block's map colour;
+  - for grass and leaves, the biome's tint times the texture's average (0.58 and 0.5 in sRGB).
+
+  Hits are lit like the scene probe's terrain (sun, sky light 15, no shadows) and fogged the same way. Rays
+  climbing above the map's highest terrain stop early. Once the map has filled, that costs about 0.015 ms of
+  GPU time on average.
 - **Open sky is the probe's, not SSR's (verified in `SSRRayMarch`, DXIL):**
   - The linear march has no sky test. The ray is clipped to the screen and to depth 1, and a sky pixel
     linearises to the far plane (`CameraData` (-0.025, -2496.6, aspect, 1)). So a ray that reaches the far

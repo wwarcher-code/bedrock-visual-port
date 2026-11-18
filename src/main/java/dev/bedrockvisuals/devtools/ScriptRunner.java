@@ -69,6 +69,11 @@ public final class ScriptRunner {
 		if (minecraft.player == null) {
 			return;
 		}
+		// A scripted run keeps playing when the window loses focus: the pause menu Minecraft opens then covered
+		// its screenshots. (The option itself is left alone, as options.txt would keep it.)
+		if (minecraft.gui.screen() instanceof net.minecraft.client.gui.screens.PauseScreen) {
+			minecraft.gui.setScreen(null);
+		}
 		if (moveSpeed != 0) {
 			double yaw = Math.toRadians(minecraft.player.getYRot());
 			double perTick = moveSpeed / 20.0;

@@ -109,28 +109,78 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 
 	@Override
 	public int topSolidY(int x, int z) {
+		return (int) (topSolid(x, z) >> 32);
+	}
+
+	@Override
+	public long topSolid(int x, int z) {
 		var level = DhApi.Delayed.worldProxy.getSinglePlayerLevel();
 		if (level == null) {
-			return NO_HEIGHT;
+			return (long) NO_HEIGHT << 32;
 		}
 		if (heightCache == null) {
 			heightCache = DhApi.Delayed.terrainRepo.createSoftCache();
 		}
 		var result = DhApi.Delayed.terrainRepo.getColumnDataAtBlockPos(level, x, z, heightCache);
 		if (result == null || !result.success || result.payload == null) {
-			return NO_HEIGHT;
+			return (long) NO_HEIGHT << 32;
 		}
 		int top = NO_HEIGHT;
+		com.seibel.distanthorizons.api.objects.data.DhApiTerrainDataPoint topPoint = null;
 		for (var point : result.payload) {
 			if (point == null || point.blockStateWrapper == null) {
 				continue;
 			}
 			var block = point.blockStateWrapper;
-			if (!block.isAir() && !block.isLiquid()) {
-				top = Math.max(top, point.topYBlockPos);
+			if (!block.isAir() && !block.isLiquid() && point.topYBlockPos > top) {
+				top = point.topYBlockPos;
+				topPoint = point;
 			}
 		}
-		return top;
+		return ((long) top << 32) | (topPoint == null ? 0 : colourOf(topPoint, x, z) & 0xFFFFFFL);
+	}
+
+	/**
+	 * A data point's colour from far away: its block's map colour, with grass and leaves taking the biome's grass
+	 * and foliage colours (map colours aren't tinted) times their grey textures' average (grass_block_top 0.58 in
+	 * sRGB; oak_leaves the same over the two thirds of it that's leaf, 0.5 with the gaps); 0 when the block
+	 * can't be read.
+	 */
+	private static int colourOf(com.seibel.distanthorizons.api.objects.data.DhApiTerrainDataPoint point, int x, int z) {
+		try {
+			if (!(point.blockStateWrapper.getWrappedMcObject() instanceof net.minecraft.world.level.block.state.BlockState state)) {
+				return 0;
+			}
+			var map = state.getMapColor(net.minecraft.world.level.EmptyBlockGetter.INSTANCE,
+					net.minecraft.core.BlockPos.ZERO);
+			if (map == null || map == net.minecraft.world.level.material.MapColor.NONE) {
+				return 0;
+			}
+			net.minecraft.world.level.biome.Biome biome = null;
+			Object wrapped = point.biomeWrapper == null ? null : point.biomeWrapper.getWrappedMcObject();
+			if (wrapped instanceof net.minecraft.core.Holder<?> holder
+					&& holder.value() instanceof net.minecraft.world.level.biome.Biome b) {
+				biome = b;
+			} else if (wrapped instanceof net.minecraft.world.level.biome.Biome b) {
+				biome = b;
+			}
+			if (biome != null && map == net.minecraft.world.level.material.MapColor.GRASS) {
+				return scaled(biome.getGrassColor(x, z), 0.58f);
+			}
+			if (biome != null && map == net.minecraft.world.level.material.MapColor.PLANT) {
+				return scaled(biome.getFoliageColor(), 0.5f);
+			}
+			return map.col & 0xFFFFFF;
+		} catch (RuntimeException e) {
+			return 0;
+		}
+	}
+
+	private static int scaled(int rgb, float factor) {
+		int r = Math.round(((rgb >> 16) & 0xFF) * factor);
+		int g = Math.round(((rgb >> 8) & 0xFF) * factor);
+		int b = Math.round((rgb & 0xFF) * factor);
+		return Math.max(1, (r << 16) | (g << 8) | b);
 	}
 
 	@Override

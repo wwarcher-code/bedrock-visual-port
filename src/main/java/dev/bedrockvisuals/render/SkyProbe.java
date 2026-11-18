@@ -62,6 +62,10 @@ public final class SkyProbe {
 			.withUniform("CloudShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("CloudCoverage", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("BrdfLut", UniformType.COMBINED_IMAGE_SAMPLER)
+			// Distant Horizons' terrain where the scene probe saw sky (DistantHeights).
+			.withUniform("DistantHeightMap", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("DistantColourMap", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("ProbeDistant", UniformType.UNIFORM_BUFFER)
 			.build();
 	/**
 	 * TUNE: how long a new scene capture takes to fade in over the last. Bedrock blends its last two probes
@@ -72,6 +76,7 @@ public final class SkyProbe {
 	private static GpuTexture previousBase;
 	private static GpuTextureView previousBaseView;
 	private static GpuBuffer blendData;
+	private static GpuBuffer distantData;
 	/** When the fade to the newest capture began; 0 when none is under way. */
 	private static long blendStart;
 	private static final BindGroupLayout FILTER_LAYOUT = BindGroupLayout.builder()
@@ -147,6 +152,15 @@ public final class SkyProbe {
 		try (MemoryStack stack = MemoryStack.stackPush()) {
 			encoder.writeToBuffer(blendData.slice(), Std140Builder.onStack(stack, 16)
 					.putVec4(blend, fading ? 1 : 0, 0, 0).get());
+			// The far terrain's march: from inside the edge of Sodium's chunks (the scene probe holds nearer
+			// terrain) out to as far as Distant Horizons draws, or the map's half span.
+			Std140Builder distant = Std140Builder.onStack(stack, 32);
+			DistantHeights.write(distant);
+			float near = net.minecraft.client.Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f * 0.75f;
+			int reach = dev.bedrockvisuals.lod.DistantTerrain.source().map(s -> s.renderDistanceBlocks()).orElse(0);
+			float far = Math.min(reach > 0 ? reach : Float.MAX_VALUE, DistantHeights.SIZE * DistantHeights.CELL / 2f);
+			distant.putVec4(Math.max(near, 32f), far, DistantHeights.highestAboveCamera(), 0);
+			encoder.writeToBuffer(distantData.slice(), distant.get());
 		}
 		boolean now = !drawn || SettingsBlend.snapping() || newScene || fading;
 		boolean due = now || ++frame % INTERVAL == 0;
@@ -164,6 +178,9 @@ public final class SkyProbe {
 				GpuTextureView cells = CloudShadows.viewOrEmpty();
 				GpuTextureView coverage = CloudShadows.coverageOrEmpty();
 				GpuTextureView brdf = BrdfLut.view() != null ? BrdfLut.view() : cells;
+				// Without a map yet the shader skips the march (DistantMapOrigin.w 0).
+				GpuTextureView heights = DistantHeights.view() != null ? DistantHeights.view() : cells;
+				GpuTextureView colours = DistantHeights.colourView() != null ? DistantHeights.colourView() : cells;
 				draw(encoder, baseView, "base", pass -> {
 					pass.setPipeline(RenderSystem.getCompiledPipeline(BASE));
 					SceneProbe.bindFaces(pass);
@@ -177,6 +194,11 @@ public final class SkyProbe {
 					pass.setUniform("CloudCoverage", coverage,
 							RenderSystem.getSamplerCache().getRepeat(FilterMode.LINEAR, true));
 					pass.setUniform("BrdfLut", brdf, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
+					pass.setUniform("DistantHeightMap", heights,
+							RenderSystem.getSamplerCache().getRepeat(FilterMode.NEAREST));
+					pass.setUniform("DistantColourMap", colours,
+							RenderSystem.getSamplerCache().getRepeat(FilterMode.NEAREST));
+					pass.setUniform("ProbeDistant", distantData);
 				});
 				mipsPending = true;
 			}
@@ -232,6 +254,10 @@ public final class SkyProbe {
 		if (blendData == null) {
 			blendData = device.createBuffer(() -> "Bedrock Visuals sky probe blend", GpuBuffer.USAGE_UNIFORM
 					| GpuBuffer.USAGE_COPY_DST, 16);
+		}
+		if (distantData == null) {
+			distantData = device.createBuffer(() -> "Bedrock Visuals sky probe far terrain", GpuBuffer.USAGE_UNIFORM
+					| GpuBuffer.USAGE_COPY_DST, 32);
 		}
 		blendStart = 0;
 		probe = device.createTexture(() -> "Bedrock Visuals sky probe", usage, BloomPass.HDR_FORMAT, size, size, 1, mips);
