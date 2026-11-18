@@ -136,7 +136,7 @@ public final class AutoExposure {
 		lastWeight = weight;
 		lastSky = sky;
 		lastCount = i;
-		long now = System.nanoTime();
+		long now = RenderClock.nanos();
 		float seconds = lastMeasurement == 0 ? 0 : (now - lastMeasurement) / 1e9f;
 		lastMeasurement = now;
 		float targetLog = (float) (Math.log(target) / Math.log(2));

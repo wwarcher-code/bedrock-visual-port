@@ -46,7 +46,7 @@ public final class BiomeMix {
 	 */
 	static List<Share> update(boolean snap) {
 		String current = playerBiome();
-		long now = System.nanoTime();
+		long now = RenderClock.nanos();
 		double seconds = lastNanos == 0 ? 0 : Math.min((now - lastNanos) / 1e9, 1.0);
 		lastNanos = now;
 		Object level = Minecraft.getInstance().level;

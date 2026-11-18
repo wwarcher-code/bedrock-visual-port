@@ -134,7 +134,7 @@ public final class SkyProbe {
 		}
 		// A new capture fades in over the last one (BLEND_NANOS): the base as it stands is kept, and until the fade
 		// ends the probe is drawn every frame, mixing towards the new. A jump in time or a teleport switches at once.
-		long nowNanos = System.nanoTime();
+		long nowNanos = RenderClock.nanos();
 		if (newScene && drawn && !SettingsBlend.snapping()) {
 			encoder.copyTextureToTexture(base, previousBase, 0, 0, 0, 0, 0, size, size);
 			blendStart = nowNanos;
@@ -162,7 +162,11 @@ public final class SkyProbe {
 			distant.putVec4(Math.max(near, 32f), far, DistantHeights.highestAboveCamera(), 0);
 			encoder.writeToBuffer(distantData.slice(), distant.get());
 		}
-		boolean now = !drawn || SettingsBlend.snapping() || newScene || fading;
+		if (OfflineRender.laterSubframe() && !newScene) {
+			return; // drawn on the offline frame's first sub-frame
+		}
+		// Offline, every frame's probe is drawn whole (OfflineRender).
+		boolean now = !drawn || SettingsBlend.snapping() || newScene || fading || OfflineRender.active();
 		boolean due = now || ++frame % INTERVAL == 0;
 		// The base and the mips filtered from it are drawn two frames apart, so each frame of the round carries
 		// at most half the work (all at once, the GPU's frame time rose by some 0.5 ms every fourth frame). When

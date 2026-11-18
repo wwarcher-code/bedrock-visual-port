@@ -46,11 +46,11 @@ public final class Underwater {
 	private static boolean loaded;
 
 	private static boolean submerged;
-	/** When the camera last went under water, System.nanoTime(). */
+	/** When the camera last went under water, RenderClock.nanos(). */
 	private static long submergedSince;
 	/** Height of the water's surface above the camera, blocks; large when the water is very deep. */
 	private static float surfaceAbove;
-	private static final long START = System.nanoTime();
+	private static final long START = RenderClock.nanos();
 
 	private Underwater() {
 	}
@@ -63,7 +63,7 @@ public final class Underwater {
 		boolean wasSubmerged = submerged;
 		submerged = level != null && camera.getFluidInCamera() == FogType.WATER;
 		if (submerged && !wasSubmerged) {
-			submergedSince = System.nanoTime();
+			submergedSince = RenderClock.nanos();
 		}
 		if (!submerged) {
 			return;
@@ -85,7 +85,7 @@ public final class Underwater {
 
 	/** How long the camera has been under water, seconds (for the water fog's transition). */
 	static float secondsSubmerged() {
-		return submerged ? (System.nanoTime() - submergedSince) / 1e9f : 0f;
+		return submerged ? (RenderClock.nanos() - submergedSince) / 1e9f : 0f;
 	}
 
 	static boolean submerged() {
@@ -110,7 +110,7 @@ public final class Underwater {
 		// column map says is under water otherwise.
 		boolean causticsOn = view != null && caustics != null && caustics.enabled();
 		float frameLength = caustics == null || caustics.frameLength() <= 0 ? 0.09f : caustics.frameLength();
-		float seconds = (System.nanoTime() - START) / 1e9f;
+		float seconds = (RenderClock.nanos() - START) / 1e9f;
 		float frame = (float) Math.floor(seconds / frameLength) % frames;
 		builder.putVec4(submerged ? 1 : 0, causticsOn ? frame : -1, caustics == null ? 0.5f : caustics.scale(),
 				caustics == null ? 1 : caustics.power());

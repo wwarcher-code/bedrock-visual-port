@@ -117,7 +117,7 @@ public final class WaterPass {
 			TARGET_ABSORPTION[i] = absorption;
 			TARGET_SCATTERING[i] = scattering;
 		}
-		long now = System.nanoTime();
+		long now = RenderClock.nanos();
 		float seconds = lastEase == 0 ? 10f : (now - lastEase) / 1e9f;
 		lastEase = now;
 		float t = 1f - (float) Math.exp(-seconds * 3f);
@@ -170,7 +170,7 @@ public final class WaterPass {
 				.map(pack -> pack.water(Underwater.currentBiomeWater()))
 				.map(WaterSettings::waves).orElse(null);
 		if (frozenFrame < 0) {
-			waveSeconds = (waveSeconds + Minecraft.getInstance().getDeltaTracker().getGameTimeDeltaTicks() / 20.0)
+			waveSeconds = (waveSeconds + RenderClock.frameDeltaTicks() / 20.0)
 					% WAVE_PERIOD;
 		}
 		if (waves == null || !waves.enabled() || waves.octaves() <= 0) {
@@ -226,7 +226,7 @@ public final class WaterPass {
 				// Surface map animation: Bedrock's flipbook advances a frame every 2 ticks, like Java's water;
 				// x is the frame, with its fraction.
 				int frames = WaterSurfaceMaps.frames();
-				rippleTicks = (rippleTicks + Minecraft.getInstance().getDeltaTracker().getGameTimeDeltaTicks())
+				rippleTicks = (rippleTicks + RenderClock.frameDeltaTicks())
 						% (2.0 * Math.max(frames, 1));
 				// w: from how far out (blocks) the water's side faces at the edge of the loaded chunks are dropped,
 				// while Distant Horizons' terrain is lit here (0: never).

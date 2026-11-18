@@ -80,6 +80,7 @@ final class DiagnosticsReport {
 		line("water " + WaterPass.status() + "; " + Underwater.status() + "; columns " + WaterColumns.status());
 		line("bloom " + BloomPass.status());
 		line("temporal anti-aliasing " + dev.bedrockvisuals.render.TemporalAA.status());
+		line("offline export " + dev.bedrockvisuals.render.OfflineRender.status());
 		line("quality " + dev.bedrockvisuals.render.Quality.status());
 		line("local exposure " + LocalExposure.status());
 		line("weather " + Weather.status());

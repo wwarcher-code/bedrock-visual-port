@@ -27,7 +27,7 @@ final class SettingsBlend {
 
 	/** Whether this frame takes new values at once (the time of day jumped or the camera was teleported). */
 	static boolean snapping() {
-		return System.nanoTime() < snapUntilNanos;
+		return RenderClock.nanos() < snapUntilNanos;
 	}
 
 	/** Whether the camera was teleported since the last frame (BiomeMix starts over then). */
@@ -54,7 +54,7 @@ final class SettingsBlend {
 		lastY = y;
 		lastZ = z;
 		if (jumped) {
-			snapUntilNanos = System.nanoTime() + 100_000_000L;
+			snapUntilNanos = RenderClock.nanos() + 100_000_000L;
 		}
 	}
 
@@ -75,7 +75,7 @@ final class SettingsBlend {
 		ByteBuffer floats = data.duplicate().order(ByteOrder.nativeOrder());
 		int start = floats.position();
 		int count = (floats.limit() - start) / 4;
-		long now = System.nanoTime();
+		long now = RenderClock.nanos();
 		snap |= now < snapUntilNanos;
 		if (current == null || current.length != count) {
 			current = new float[count];

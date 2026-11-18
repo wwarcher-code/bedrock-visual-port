@@ -284,6 +284,10 @@ public final class ShadowPass {
 			// camera-relative). A new light direction redraws every map.
 			boolean due = DRAWN_DIRECTION[c] == null || !DRAWN_DIRECTION[c].equals(towardsLight)
 					|| (frame + OFFSET[c]) % FREQUENCY[c] == 0;
+			if (OfflineRender.active()) {
+				// An offline frame draws every cascade, once: its later sub-frames see the same level.
+				due = !OfflineRender.laterSubframe() || DRAWN_DIRECTION[c] == null;
+			}
 			if (!due) {
 				VIEW_PROJECTION[c].set(DRAWN_MATRIX[c]).translate((float) (camera.x - DRAWN_CAMERA[c][0]),
 						(float) (camera.y - DRAWN_CAMERA[c][1]), (float) (camera.z - DRAWN_CAMERA[c][2]));

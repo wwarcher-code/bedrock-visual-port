@@ -155,6 +155,20 @@ public final class TemporalAA {
 	public static void beginFrame(CameraRenderState camera) {
 		active = false;
 		RenderTarget main = Minecraft.getInstance().gameRenderer.mainRenderTarget();
+		if (OfflineRender.accumulating()) {
+			// An offline frame's sub-frames (OfflineRender): each drawn at its own jitter and averaged, in place
+			// of TAA's history. resolve only puts the projection back.
+			historyValid = false;
+			if (camera != null && camera.projectionMatrix != null && main != null) {
+				jitterX = OfflineRender.jitterX();
+				jitterY = OfflineRender.jitterY();
+				originalProjection = camera.projectionMatrix;
+				camera.projectionMatrix = new Matrix4f().translation(2f * jitterX / main.width,
+						2f * jitterY / main.height, 0).mul(originalProjection);
+				jitteredCamera = camera;
+			}
+			return;
+		}
 		if (!enabled || failed || camera == null || camera.projectionMatrix == null || main == null
 				|| !DeferredRenderer.isEnabled() || GBufferDebugView.view() != GBufferDebugView.View.OFF
 				|| FlawlessFrames.isExporting()) {
@@ -290,7 +304,7 @@ public final class TemporalAA {
 		}
 	}
 
-	private static float halton(int index, int base) {
+	static float halton(int index, int base) {
 		float result = 0;
 		float f = 1;
 		while (index > 0) {

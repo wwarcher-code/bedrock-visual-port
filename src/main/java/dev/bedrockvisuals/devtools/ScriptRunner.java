@@ -149,6 +149,15 @@ public final class ScriptRunner {
 			}
 			case "lighting" -> DeferredRenderer.setEnabled(argument.equals("on"));
 			case "taa" -> dev.bedrockvisuals.render.TemporalAA.setEnabled(argument.equals("on"));
+			case "offline" -> {
+				if (argument.equals("on") || argument.equals("off")) {
+					dev.bedrockvisuals.render.OfflineRender.setForced(argument.equals("on"));
+				} else if (argument.equals("last") || argument.equals("average")) {
+					dev.bedrockvisuals.render.OfflineRender.setLastOnly(argument.equals("last"));
+				} else {
+					dev.bedrockvisuals.render.OfflineRender.setSamples(Integer.parseInt(argument));
+				}
+			}
 			case "taatune" -> {
 				String[] v = argument.split("\\s+");
 				dev.bedrockvisuals.render.TemporalAA.tune(Float.parseFloat(v[0]), Float.parseFloat(v[1]),

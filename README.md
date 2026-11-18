@@ -198,6 +198,19 @@ Flashback captures frames through Mojang's rendering API rather than OpenGL, so 
 spike 1c confirms that. It renders exports into their own target at the export resolution, so 4K exports
 don't depend on the window size.
 
+While an export runs, the renderer switches to its offline preset (`render/OfflineRender.java`):
+- **Sub-frame accumulation.** Each output frame is the average of 8 sub-frames (`/bv offline samples <n>`).
+  Minecraft extracts the level once, and the renderer draws it that many times with sub-pixel jitter. The
+  hand and the HUD go on top of the average. TAA is off; the accumulation does the anti-aliasing.
+- **Complete frames.** The shadow cascades and the reflection probe, staggered over frames while playing, are
+  drawn whole on every output frame.
+- **The replay's clock.** The renderer's easings and animations (exposure, the probe's fade, biome blends,
+  caustics, the water's ripples) run on the replay's timeline (`render/RenderClock.java`), so they move at the
+  right speed in the video whatever the export's frame rate and however long each frame takes.
+
+Flashback steps the replay one frame of the export's frame rate per output frame, and its own SSAA option
+still works on top. `/bv offline on` tries the preset without an export.
+
 ## Distant Horizons
 
 Level 1 uses DH's public API only, no mixins. Before DH composites its LODs onto Minecraft's frame, the

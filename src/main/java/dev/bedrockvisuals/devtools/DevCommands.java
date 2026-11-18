@@ -152,6 +152,27 @@ public final class DevCommands {
 												: "Bedrock has no preset \"" + tier + " " + preset + "\" (/bv quality lists them).");
 										return ok ? 1 : 0;
 									}))))
+						.then(ClientCommands.literal("offline").executes(c -> {
+								feedback(c.getSource(), "Offline export preset: " + dev.bedrockvisuals.render.OfflineRender.status()
+										+ ". /bv offline on|off tries it without an export; /bv offline samples <n> sets the"
+										+ " sub-frames a frame.");
+								return 1;
+							}).then(ClientCommands.literal("on").executes(c -> {
+								dev.bedrockvisuals.render.OfflineRender.setForced(true);
+								feedback(c.getSource(), "Offline export preset: " + dev.bedrockvisuals.render.OfflineRender.status());
+								return 1;
+							})).then(ClientCommands.literal("off").executes(c -> {
+								dev.bedrockvisuals.render.OfflineRender.setForced(false);
+								feedback(c.getSource(), "Offline export preset: " + dev.bedrockvisuals.render.OfflineRender.status());
+								return 1;
+							})).then(ClientCommands.literal("samples").then(ClientCommands.argument("count",
+									com.mojang.brigadier.arguments.IntegerArgumentType.integer(1,
+											dev.bedrockvisuals.render.OfflineRender.MAX_SAMPLES)).executes(c -> {
+								dev.bedrockvisuals.render.OfflineRender.setSamples(
+										com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(c, "count"));
+								feedback(c.getSource(), "Offline export preset: " + dev.bedrockvisuals.render.OfflineRender.status());
+								return 1;
+							}))))
 							.then(ClientCommands.literal("status").executes(c -> {
 							DiagnosticsReport report = new DiagnosticsReport("Bedrock Visuals status");
 							report.lightingAt("now");
