@@ -21,7 +21,8 @@ layout(std140) uniform ProbeFaces {
     vec4 ProbeFacesParams;      // x: 1 when faces have been captured; yzw: the camera's move since (blocks)
 };
 
-const float PROBE_SIZE = 512.0;
+// The probe's size follows the quality preset's reflections (SkyProbe: 512 at ultra, 128 below).
+#define PROBE_SIZE SkyProbeParams.w
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;

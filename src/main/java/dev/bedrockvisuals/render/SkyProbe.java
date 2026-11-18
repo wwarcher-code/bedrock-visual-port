@@ -217,6 +217,11 @@ public final class SkyProbe {
 		baseView = null;
 	}
 
+	/** The probe's texels across (the base pass's octahedral map is this size). */
+	static int size() {
+		return size;
+	}
+
 	/** The probe's mip count (the shaders read mip (count - 1) × (1 - (1 - r)²)). */
 	static int mips() {
 		return mips;

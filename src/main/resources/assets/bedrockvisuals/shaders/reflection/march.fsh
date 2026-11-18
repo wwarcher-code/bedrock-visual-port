@@ -214,5 +214,23 @@ void main() {
         }
         previous = p;
     }
+    // No terrain on the ray. Where the mirror direction itself (the sky, at infinity) is on the screen with
+    // nothing drawn there, the reflection is that sky pixel: a hit on it, as it's drawn this frame. Left as a miss,
+    // the ray fell to the reflection probe over all of the open sea, and its captured scene (the shore and hills
+    // seen from where it was last captured) jumped to a new one at every capture, every five seconds. The probe
+    // stays for what the screen doesn't show: mirror directions off its edges.
+    vec4 skyClip = ViewProjection * vec4(mirror * 4096.0, 1.0);
+    if (skyClip.w > 0.0) {
+        vec2 skyUv = skyClip.xy / skyClip.w * 0.5 + 0.5;
+        if (all(greaterThanEqual(skyUv, vec2(0.0))) && all(lessThanEqual(skyUv, vec2(1.0)))
+                && texture(Depth, skyUv).r <= 0.0 && distantDistanceAt(skyUv) < 0.0) {
+            // Faded towards the screen's edges over a wider margin than terrain hits: the probe's sky beside it
+            // lacks the clouds and haze the drawn sky has, and over a narrow fade the step showed as a frame.
+            vec2 edge = min(skyUv, 1.0 - skyUv);
+            float fade = smoothstep(0.0, 0.3, edge.y) * smoothstep(0.0, 0.15, edge.x);
+            marchOut = vec4(skyUv, t, fade);
+            return;
+        }
+    }
     marchOut = vec4(0.0, 0.0, t, -1.0);
 }
