@@ -144,6 +144,19 @@ exposure and tone mapping to the main image.
   cascades, so Bedrock renders the terrain around the camera into the probe and lights it. It is regenerated per
   `reflection_probe_regen_configuration`. The renderer does the same (SceneProbe: six 256² faces, lit by
   probe/light.fsh, behind which the probe's base pass puts the sky).
+- **The probe holds the clouds too:** in GPU capture 1, three `CloudsForwardPBR` draws (events 32244 to 32252)
+  come right before the probe's `SkyProbeDeferredShading` (32367), and the main view's clouds (40703) come after
+  the SSR march (40577). So SSR never sees clouds, and the water's cloud reflections come from the probe. The
+  renderer traces the whole cloud layer into the probe's base (far_clouds.glsl, from the camera out), in front
+  of its sky. That adds about 0.01 ms of GPU time on average.
+- **Open sky is the probe's, not SSR's (verified in `SSRRayMarch`, DXIL):**
+  - The linear march has no sky test. The ray is clipped to the screen and to depth 1, and a sky pixel
+    linearises to the far plane (`CameraData` (-0.025, -2496.6, aspect, 1)). So a ray that reaches the far
+    plane on screen does count as a hit.
+  - But the hit sits at the end of the clipped ray, and the confidence is
+    `min((1 - |x|^(3·aspect)) (1 - |y|^3), 1 - smoothstep(0.75, 1, i/N), roughness fade, saturate(1 - N·ray))`
+    (`SSRFadingParamsAndThickness` (3, 3, 0.75, 0.025)). The `i/N` fade takes such a hit to 0.
+  - So water under open sky reflects the probe, as the renderer's march does.
 - **Block light** adds an indirect specular term (`BlockLightIndirectSpecularIntensity`).
 - **Texel snapping:** with `QuantizationParameters.w` on, the reflection's start point is snapped to the texel
   centre like the lighting, so each texel reflects one value. Together with per-texel roughness and normals,

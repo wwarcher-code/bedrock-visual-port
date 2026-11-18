@@ -58,6 +58,10 @@ public final class SkyProbe {
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("PreviousBase", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("ProbeBlend", UniformType.UNIFORM_BUFFER)
+			// The clouds, traced into the probe in front of its sky (far_clouds.glsl).
+			.withUniform("CloudShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("CloudCoverage", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("BrdfLut", UniformType.COMBINED_IMAGE_SAMPLER)
 			.build();
 	/**
 	 * TUNE: how long a new scene capture takes to fade in over the last. Bedrock blends its last two probes
@@ -156,6 +160,10 @@ public final class SkyProbe {
 		try {
 			create();
 			if (due) {
+				// Resolved before the pass opens: a placeholder may need creating and uploading.
+				GpuTextureView cells = CloudShadows.viewOrEmpty();
+				GpuTextureView coverage = CloudShadows.coverageOrEmpty();
+				GpuTextureView brdf = BrdfLut.view() != null ? BrdfLut.view() : cells;
 				draw(encoder, baseView, "base", pass -> {
 					pass.setPipeline(RenderSystem.getCompiledPipeline(BASE));
 					SceneProbe.bindFaces(pass);
@@ -165,6 +173,10 @@ public final class SkyProbe {
 					pass.setUniform("PreviousBase", previousBaseView,
 							RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
 					pass.setUniform("ProbeBlend", blendData);
+					pass.setUniform("CloudShadowMap", cells, RenderSystem.getSamplerCache().getRepeat(FilterMode.NEAREST));
+					pass.setUniform("CloudCoverage", coverage,
+							RenderSystem.getSamplerCache().getRepeat(FilterMode.LINEAR, true));
+					pass.setUniform("BrdfLut", brdf, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
 				});
 				mipsPending = true;
 			}
