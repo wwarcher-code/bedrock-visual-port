@@ -78,8 +78,8 @@ The log shows `[gbuffer] first terrain pass drawn into <width>x<height> G-buffer
 pass fails, it logs `[gbuffer] terrain pass failed` with the error and switches itself off; the game keeps
 running.
 
-Known limits for now: translucent terrain (water, glass), entities and Distant Horizons terrain aren't in the
-G-buffer yet. Albedo has Minecraft's per-face shading divided out using the overworld's values, so Nether
+Translucent terrain (water, glass) isn't in the G-buffer: water is shaded in its own pass (below). Entities and
+Distant Horizons' terrain are lit by the lighting pass too (entities with their own shader variant, drawn before the water). Albedo has Minecraft's per-face shading divided out using the overworld's values, so Nether
 block tops and bottoms are slightly off.
 
 ## Deferred lighting (step 3)
@@ -120,13 +120,12 @@ and falls back to vanilla terrain.
 ## Shadows (step 5)
 
 Before the G-buffer pass, Sodium's solid and cutout terrain is drawn a third time, from the sun (the moon
-at night), into a 4096x4096 depth map covering 96 blocks around the camera (a texel finer than the 1/16-block grid). The lighting pass tests each
-pixel against it with 3x3 filtering; beyond the map, and near its edge, it fades back to the sky-light
-approximation. Cut-out blocks such as leaves cast shadows of their actual shape.
+at night), into Bedrock's four shadow cascades (to about 21, 43, 64 and 128 blocks, with Bedrock's own biases and PCF widths). The lighting
+pass tests each pixel's snapped texel centre against them; past the last cascade, Distant Horizons' heights cast
+the far terrain's shadows. Cut-out blocks such as leaves cast shadows of their actual shape.
 
-Sodium hands every pass the chunks the camera can see, so for now terrain behind the camera or hidden
-from it casts no shadows into view; sky light still darkens caves, whose roofs may be missing from the
-map. The log shows `[shadows] first shadow map drawn` once the pass runs; if it fails it logs
+Shadow casters outside the camera's view (behind it or above it) are kept for the shadow pass on every Sodium
+culling path (ViewportMixin). The log shows `[shadows] first shadow map drawn` once the pass runs; if it fails it logs
 `[shadows] shadow pass failed` and the lighting carries on without shadows.
 
 ## Water
@@ -148,8 +147,8 @@ Each water texel also takes its tilt and roughness from Bedrock's `water_still_g
 (32 frames, animated every 2 ticks like Java's water), and screen-space reflections only apply to texels
 smoother than roughness 0.3, gone by 0.4, as in Bedrock: the reflections break up on the texel grid.
 
-Not yet: waves, caustics, refraction, reflections of entities and of things off screen, shadows on the
-water, and the underwater view.
+Since then: Bedrock's surface waves, caustics, the underwater view and its fog, entities under the surface, and
+reflections of a scene probe where the screen-space ray finds nothing on screen (TESTING.md lists what to look at).
 
 ## Texel quantization
 
