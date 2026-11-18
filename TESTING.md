@@ -155,6 +155,7 @@ Don't move between the commands: the shots must be taken from where `bv/scene` p
 | --- | --- |
 | F7 | Cycle debug views: albedo, normal, material, light, shadow test, cascades, local exposure, bloom, water map, off |
 | F8 | Deferred lighting on and off, for comparison with vanilla |
+| F6 | Temporal anti-aliasing (Bedrock's TAAU) on and off |
 | F9 or `/bv capture` | The full test capture above (scene and every spot); F9 again cancels it |
 | `/bv flicker` | The flicker test alone (far terrain and the water's reflections), where you stand and as things are (about 30 seconds) |
 | `/bv capture <name>` | One section alone (`flicker`, `scene`, `times`, `debug`, `horizon`, `underwater`, `rain`, `spots`) or one spot by name |

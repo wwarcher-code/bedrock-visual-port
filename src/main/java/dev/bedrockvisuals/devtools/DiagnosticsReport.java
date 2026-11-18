@@ -79,6 +79,7 @@ final class DiagnosticsReport {
 				+ dev.bedrockvisuals.render.EntityShadows.status());
 		line("water " + WaterPass.status() + "; " + Underwater.status() + "; columns " + WaterColumns.status());
 		line("bloom " + BloomPass.status());
+		line("temporal anti-aliasing " + dev.bedrockvisuals.render.TemporalAA.status());
 		line("local exposure " + LocalExposure.status());
 		line("weather " + Weather.status());
 		dev.bedrockvisuals.lod.DistantTerrain.source().ifPresent(source -> line("distant terrain " + source.name()

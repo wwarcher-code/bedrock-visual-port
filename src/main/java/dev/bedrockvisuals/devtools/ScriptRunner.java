@@ -143,6 +143,13 @@ public final class ScriptRunner {
 				}
 			}
 			case "lighting" -> DeferredRenderer.setEnabled(argument.equals("on"));
+			case "taa" -> dev.bedrockvisuals.render.TemporalAA.setEnabled(argument.equals("on"));
+			case "taatune" -> {
+				String[] v = argument.split("\\s+");
+				dev.bedrockvisuals.render.TemporalAA.tune(Float.parseFloat(v[0]), Float.parseFloat(v[1]),
+						Float.parseFloat(v[2]));
+			}
+			case "taadebug" -> dev.bedrockvisuals.render.TemporalAA.setDebugMode(Integer.parseInt(argument));
 			case "reload" -> minecraft.reloadResourcePacks();
 			case "clouds" -> minecraft.options.cloudStatus().set(net.minecraft.client.CloudStatus.valueOf(
 					argument.toUpperCase(Locale.ROOT)));

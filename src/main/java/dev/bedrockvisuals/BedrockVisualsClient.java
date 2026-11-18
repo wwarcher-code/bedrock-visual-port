@@ -27,6 +27,7 @@ public class BedrockVisualsClient implements ClientModInitializer {
 		FlawlessFrames.register();
 		GBufferDebugView.register();
 		DeferredRenderer.register();
+		dev.bedrockvisuals.render.TemporalAA.register();
 		TestCapture.register();
 		DevCommands.register();
 		dev.bedrockvisuals.devtools.ScriptRunner.register();

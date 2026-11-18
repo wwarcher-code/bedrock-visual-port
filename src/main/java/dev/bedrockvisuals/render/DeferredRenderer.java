@@ -250,6 +250,11 @@ public final class DeferredRenderer {
 		return ownsDistantComposite;
 	}
 
+	/** Whether this frame's terrain or sky was drawn by the lighting pass (until the next frame's main pass). */
+	public static boolean litThisFrame() {
+		return replacedTerrain || replacedSky;
+	}
+
 	public static boolean isEnabled() {
 		return enabled;
 	}

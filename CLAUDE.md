@@ -17,4 +17,5 @@
   `screenshot <file>` (the game's picture as PNG), `frametimes <seconds> <file>` (per-frame CPU times of the
   mod's work, GPU times from timestamp queries, heap; CSV plus a `.summary.txt` with average, p99, worst 1% and
   max: devtools/FrameTimes.java), `vsync on|off`, `maxfps <n>` (260 unlimited), `move <blocks per second>`
-  (flies on along the view; 0 stops), `wait <seconds>`, `quit`. Keep outputs under `run\perf\` (ignored by git).
+  (flies on along the view; 0 stops), `wait <seconds>`, `quit`, `taa on|off`, `taadebug <0-3>` (TemporalAA's
+  debug outputs), `taatune <width at rest> <width in motion> <clip 1|0>`. Keep outputs under `run\perf\` (ignored by git).

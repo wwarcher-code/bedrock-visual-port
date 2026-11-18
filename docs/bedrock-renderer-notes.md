@@ -634,6 +634,39 @@ The renderer now uses these terms directly, in Bedrock's units divided by 100:
 That replaces the earlier fitted sky fill, ground bounce and scales. One factor remains fitted: the exposure
 key of 1.46.
 
+## Temporal anti-aliasing (verified in the Upscaling material's TAAU pass)
+
+Vibrant Visuals' temporal AA is the `TAAU` pass of `Upscaling`, a full-screen pass that reads the final colour,
+the G-buffer's motion vectors (target 2, zw) and a history texture, and writes the display-resolution image.
+`FSR1` (a compute EASU/RCAS pair) is the other upscaler. In all five 1.26.60 captures (pixdump exports) neither
+ran: with Bedrock's upscaling option off there is no temporal AA at all.
+
+Per display pixel:
+
+- The render-space position is the display pixel's centre times the render/display ratio, minus the jitter
+  and 0.5; the nearest render pixel supplies this frame's colour and motion vector.
+- Over its 3x3 neighbourhood: the sum and the sum of squares of the colour (mean and standard deviation), and,
+  when `TAAUpscalingParameters.w` is set, the longest motion vector of the nine.
+- The motion in render pixels (motion × `RenderResolution`), its length clamped to one and passed through a
+  smoothstep, picks the box's width: `mix(TAAUpscalingParameters.y, .x, s)` standard deviations either side of
+  the mean (y at rest, x in motion).
+- The history is read at the display pixel minus the motion (scaled to display pixels), clamped to the screen,
+  with a 9-tap Catmull-Rom filter (the middle taps merged into bilinear reads), negatives clamped away.
+- With `TAAUpscalingParameters.z` set, a history outside the box is moved along the line towards this frame's
+  colour to where it enters the box (slab test per channel, `ResolutionRatiosAndFPEpsilon.z` the parallel
+  epsilon; a miss falls back to a clamp); otherwise it's clamped to the box. A history inside is kept.
+- The blend towards this frame's colour is 0.1 × max(s, clamp(1 − ratio × d², 0.05, 1)), d the render sample's
+  offset from its pixel; 1 (this frame alone) when `SubPixelJitterAndValidHistory.z` says there is no history.
+  The output's alpha is 0.
+- Quirk: the centre's motion vector is read with its y negated, a dilated neighbour's without.
+
+Runtime values still unknown (no capture with TAAU on): the two box widths, the clip switch, the dilation
+switch, the epsilon and the jitter sequence. The renderer (TemporalAA) runs the pass at the window's resolution
+after the level and before the hand, rebuilding motion from depth and the camera (it has no motion vectors), with
+estimates: widths 1.25 at rest and 0.75 in motion, dilation on, Halton (2, 3) over 8 phases, and the clamp, not
+the clip. Clipped, the still picture flickered on Minecraft's pixel textures (mean frame-to-frame difference 3.3,
+against 0.1 clamped, the same as without TAA).
+
 ## Still to analyse
 
 `NdLFloor`, the SSR ray march itself, volumetric fog and local
