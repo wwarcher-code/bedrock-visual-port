@@ -96,3 +96,32 @@ would need:
 
 Their capture lessons carry over to either path: section BLASes built once, render-thread-only object
 lifetimes under frame budgets, off-frustum entities for shadows and reflections, and the view-model split.
+
+## Progress
+
+**Phase 1, ray queries on Minecraft's device (done, 2026-11-18).**
+- `mixin/renderpearl/VulkanFeatureSetsMixin` adds an optional feature set, which renderpearl enables at device
+  creation where the GPU has it:
+  - extensions `VK_KHR_acceleration_structure`, `VK_KHR_ray_query` and `VK_KHR_deferred_host_operations`;
+  - features `accelerationStructure`, `rayQuery` and the 1.2 `bufferDeviceAddress`.
+- `raytrace/RayQuery` reports whether the device came up with it. `RayQuerySmokeTest` proves it once a world
+  is loaded:
+  - it builds a one-triangle bottom level and a top level, all in raw Vulkan through LWJGL;
+  - it casts four rays from a compute shader compiled with the game's shaderc (GLSL `GL_EXT_ray_query`);
+  - it reads the results back. On the RTX 3080 Ti: hits [1, 0, 0, 1] at t = 1, about 0.3 s, once.
+- The status report has a `ray queries` line, and ScriptRunner's `raytest` line runs the test again.
+
+**Pitfalls met:**
+- renderpearl's VMA isn't created with buffer device addresses, so the ray tracing allocates its own memory
+  (`VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT`).
+- These LWJGL setters don't fill in their counts:
+  - `VkWriteDescriptorSet.pBufferInfo` leaves `descriptorCount`, and the buffer is then silently unbound;
+  - `VkWriteDescriptorSetAccelerationStructureKHR.pAccelerationStructures` leaves
+    `accelerationStructureCount`;
+  - `VkAccelerationStructureBuildGeometryInfoKHR.pGeometries` leaves `geometryCount`.
+
+  Set them explicitly. Without the Vulkan SDK's validation layers, the only symptom was a dispatch that wrote
+  nothing.
+
+**Next: phase 2.** Acceleration structures for the world: Sodium's sections built once and rebuilt when they
+change, and entities each frame.

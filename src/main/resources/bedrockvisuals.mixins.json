@@ -14,6 +14,9 @@
 		"minecraft.PreparedRenderTypeMixin",
 		"minecraft.QuadParticleFeatureRendererMixin",
 		"minecraft.SkyRendererMixin",
+		"renderpearl.FrontendGpuDeviceAccessor",
+		"renderpearl.VulkanDeviceAccessor",
+		"renderpearl.VulkanFeatureSetsMixin",
 		"sodium.DefaultChunkRendererMixin",
 		"sodium.ViewportMixin"
 	],

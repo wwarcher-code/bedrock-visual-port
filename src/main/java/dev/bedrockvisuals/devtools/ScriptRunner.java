@@ -149,6 +149,7 @@ public final class ScriptRunner {
 			}
 			case "lighting" -> DeferredRenderer.setEnabled(argument.equals("on"));
 			case "taa" -> dev.bedrockvisuals.render.TemporalAA.setEnabled(argument.equals("on"));
+			case "raytest" -> dev.bedrockvisuals.raytrace.RayQuerySmokeTest.rerun();
 			case "offline" -> {
 				if (argument.equals("on") || argument.equals("off")) {
 					dev.bedrockvisuals.render.OfflineRender.setForced(argument.equals("on"));

@@ -81,6 +81,7 @@ final class DiagnosticsReport {
 		line("bloom " + BloomPass.status());
 		line("temporal anti-aliasing " + dev.bedrockvisuals.render.TemporalAA.status());
 		line("offline export " + dev.bedrockvisuals.render.OfflineRender.status());
+		line("ray queries " + dev.bedrockvisuals.raytrace.RayQuery.status());
 		line("quality " + dev.bedrockvisuals.render.Quality.status());
 		line("local exposure " + LocalExposure.status());
 		line("weather " + Weather.status());

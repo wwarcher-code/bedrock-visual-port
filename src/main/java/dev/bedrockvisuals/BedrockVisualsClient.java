@@ -28,6 +28,12 @@ public class BedrockVisualsClient implements ClientModInitializer {
 		GBufferDebugView.register();
 		DeferredRenderer.register();
 		dev.bedrockvisuals.render.TemporalAA.register();
+		// Hardware ray queries (raytrace/RayQuery): proved once in a world, between frames.
+		net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.register(client -> {
+			if (client.level != null) {
+				dev.bedrockvisuals.raytrace.RayQuerySmokeTest.runOnce();
+			}
+		});
 		dev.bedrockvisuals.render.Quality.load(FabricLoader.getInstance().getConfigDir());
 		TestCapture.register();
 		DevCommands.register();
