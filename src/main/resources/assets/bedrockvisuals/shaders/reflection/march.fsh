@@ -7,11 +7,18 @@
 // normal is marched against Java's depth and DH's. Out: the hit's screen position (xy), the distance along the
 // view to the reflecting point (z, for the resolve's reprojection), and the hit's confidence (w); w -1 for a
 // miss (a gap, SSRFillGaps), -2 where no water is seen from above.
+//
+// The confidence is Bedrock's (SSRRayMarch, from its DXIL; SSRFadingParamsAndThickness (3, 3, 0.75, 0.025)):
+// the least of the screen-edge fade (1 - |x|^(3 aspect)) (1 - |y|^3) at the hit, in normalised device
+// coordinates; 1 - smoothstep(0.75, 1, f), f how far along its path on screen the hit lies, the path running
+// from the start to where the ray leaves the screen or reaches the far plane (CameraData.y, 2496.6 blocks);
+// and saturate(1 - N.ray) with the hit's normal, so back faces fade out.
 
 uniform sampler2D Depth;
 uniform sampler2D DistantDepth;
 uniform sampler2D WaterColumnMap;
 uniform sampler2D u_WaterNormal;
+uniform sampler2D Normal; // the G-buffer's normals (world space, rgb * 2 - 1)
 
 #include <bedrockvisuals:common.glsl>
 #define WATER_COLUMNS WaterColumnMap
@@ -42,6 +49,46 @@ layout(location = 0) out vec4 marchOut;
 
 const int STEPS = 64;
 const int REFINE = 6;
+const vec3 FADING = vec3(3.0, 3.0, 0.75); // SSRFadingParamsAndThickness.xyz
+const float FAR_PLANE = 2496.6;            // CameraData.y
+
+// The screen position of camera-relative point p.
+vec2 screenOf(vec3 p, out float w) {
+    vec4 clip = ViewProjection * vec4(p, 1.0);
+    w = clip.w;
+    return clip.xy / clip.w * 0.5 + 0.5;
+}
+
+// Bedrock's confidence in a hit at hitUv on the ray from start along dir (see above).
+float hitConfidence(vec3 start, vec3 dir, vec2 hitUv, vec3 hitNormal, bool hasNormal) {
+    vec2 size = vec2(textureSize(Depth, 0));
+    vec2 ndc = abs(hitUv * 2.0 - 1.0);
+    float edge = (1.0 - pow(ndc.x, FADING.x * size.x / size.y)) * (1.0 - pow(ndc.y, FADING.y));
+    // The ray's path on screen: clipped at the far plane, and short of the camera's plane if it turns back.
+    float w0;
+    vec2 uv0 = screenOf(start, w0);
+    float dw = (ViewProjection * vec4(dir, 0.0)).w;
+    float reach = FAR_PLANE;
+    if (dw < 0.0) {
+        reach = min(reach, 0.99 * (w0 - 0.05) / -dw);
+    }
+    float w1;
+    vec2 uv1 = screenOf(start + dir * reach, w1);
+    vec2 path = uv1 - uv0;
+    // Where the path leaves the screen, as a share of it.
+    float leave = 1.0;
+    for (int axis = 0; axis < 2; axis++) {
+        if (abs(path[axis]) > 1e-6) {
+            float bound = path[axis] > 0.0 ? 1.0 : 0.0;
+            leave = min(leave, max((bound - uv0[axis]) / path[axis], 0.0));
+        }
+    }
+    float length2 = dot(path, path) * leave * leave;
+    float along = length2 > 1e-12 ? dot(hitUv - uv0, path) * leave / length2 : 0.0;
+    float travel = 1.0 - smoothstep(FADING.z, 1.0, clamp(along, 0.0, 1.0));
+    float facing = hasNormal ? clamp(1.0 - dot(hitNormal, dir), 0.0, 1.0) : 1.0;
+    return clamp(min(min(edge, travel), facing), 0.0, 1.0);
+}
 
 vec3 viewRay(vec2 uv) {
     vec4 near = InverseViewProjection * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
@@ -206,10 +253,10 @@ void main() {
         float backScene;
         vec2 hitUv;
         if (sceneAt(back, backScene, hitUv) && length(back) - backScene < max(length(back - front) * 4.0, 1.0)) {
-            // Faded out towards the screen's edges, where the scene probe takes over.
-            vec2 edge = min(hitUv, 1.0 - hitUv);
-            float fade = smoothstep(0.0, 0.08, edge.y) * smoothstep(0.0, 0.05, edge.x);
-            marchOut = vec4(hitUv, t, fade);
+            // Java's terrain has the G-buffer's normal there; Distant Horizons' (no Java depth) none.
+            bool hasNormal = texture(Depth, hitUv).r > 0.0;
+            vec3 hitNormal = hasNormal ? normalize(texture(Normal, hitUv).rgb * 2.0 - 1.0) : vec3(0.0);
+            marchOut = vec4(hitUv, t, hitConfidence(start, mirror, hitUv, hitNormal, hasNormal));
             return;
         }
         previous = p;

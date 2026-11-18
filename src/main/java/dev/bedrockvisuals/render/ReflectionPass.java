@@ -41,6 +41,7 @@ public final class ReflectionPass {
 			.withUniform("DistantDepth", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("WaterColumnMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("u_WaterNormal", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("Normal", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("DistantData", UniformType.UNIFORM_BUFFER)
@@ -123,6 +124,7 @@ public final class ReflectionPass {
 				pass.setUniform("DistantDepth", distant, nearest);
 				pass.setUniform("WaterColumnMap", WaterColumns.view() != null ? WaterColumns.view() : gbuffer.depthView(), nearest);
 				pass.setUniform("u_WaterNormal", WaterSurfaceMaps.normal(), nearest);
+				pass.setUniform("Normal", gbuffer.view(GBuffer.Target.NORMAL), nearest);
 				pass.setUniform("LightingData", LightingPass.lightingData());
 				pass.setUniform("GradingData", LightingPass.gradingData());
 				pass.setUniform("DistantData", LightingPass.distantData());

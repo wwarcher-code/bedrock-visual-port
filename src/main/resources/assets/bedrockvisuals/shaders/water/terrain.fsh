@@ -665,13 +665,13 @@ vec3 waterColor(WaterSurface s, float albedo) {
     float farHit = 0.0;
     vec3 reflection;
     if (resolved.w > -1.5) {
-        // The resolve holds the share of recent frames whose ray hit the screen (ripples flip rays between hit
-        // and miss) with their reflection premultiplied by it. Mixed by that share as it is, the scene probe's
-        // terrain, seen from where it was captured, showed through every reflection as a ghost; a pixel whose
-        // rays mostly hit takes the screen's reflection whole, and the probe only fills where they mostly miss.
+        // The resolve holds the hits' confidence (Bedrock's fades, averaged over recent frames: ripples flip rays
+        // between hit and miss) with their reflection premultiplied by it, and Bedrock mixes the probe and the
+        // screen's reflection by it as it is (SSR.a x SSRParameters.y, 1). (Sharpened, as it was while the scene
+        // probe captured nothing, it squeezed Bedrock's wide fades into a thin band at the screen's edges.)
         float confidence = clamp(resolved.w, 0.0, 1.0);
         vec3 hitColor = confidence > 1e-3 ? resolved.rgb / confidence : vec3(0.0);
-        float hitWeight = smoothstep(0.1, 0.45, confidence);
+        float hitWeight = confidence;
         traced = vec4(hitColor * hitWeight, hitWeight);
         nearHit = hitWeight;
         reflection = mix(skyReflection, hitColor, hitWeight * ssrWeight);

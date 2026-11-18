@@ -167,6 +167,10 @@ exposure and tone mapping to the main image.
     `min((1 - |x|^(3·aspect)) (1 - |y|^3), 1 - smoothstep(0.75, 1, i/N), roughness fade, saturate(1 - N·ray))`
     (`SSRFadingParamsAndThickness` (3, 3, 0.75, 0.025)). The `i/N` fade takes such a hit to 0.
   - So water under open sky reflects the probe, as the renderer's march does.
+  - The renderer's march gives its hits this same confidence (reflection/march.fsh). Its path on screen is
+    measured to where the ray leaves the screen or reaches the 2496.6-block far plane. It reads the G-buffer's
+    normal for the facing term, and Distant Horizons' hits have none. The water mixes the probe and the
+    screen's reflection by the resolved confidence as it is, as Bedrock's `SSRParameters.y` 1 does.
 - **Block light** adds an indirect specular term (`BlockLightIndirectSpecularIntensity`).
 - **Texel snapping:** with `QuantizationParameters.w` on, the reflection's start point is snapped to the texel
   centre like the lighting, so each texel reflects one value. Together with per-texel roughness and normals,
