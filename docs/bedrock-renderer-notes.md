@@ -171,6 +171,18 @@ exposure and tone mapping to the main image.
     measured to where the ray leaves the screen or reaches the 2496.6-block far plane. It reads the G-buffer's
     normal for the facing term, and Distant Horizons' hits have none. The water mixes the probe and the
     screen's reflection by the resolved confidence as it is, as Bedrock's `SSRParameters.y` 1 does.
+  - The quality preset's `ssr` block sets the march (`SSRRayMarchingParams` (800, 1, 0.2, 40) is ultra's):
+    - `linear_search_step_count` (200/300/400/800) is how many pixels of its SSR target a ray is followed along
+      its path on screen. Each step covers `ray_step_length` 1 along the major axis.
+    - `binary_search_step_count` (10/15/20/40) is the refinement's iterations.
+    - `ssr_scale` (0.5 for low and medium, else 1) is the SSR target's share of the screen's resolution.
+
+    The renderer keeps its own march, in world-space steps that grow with the distance. It stops a ray where its
+    path on screen passes the step count (counted in the screen's pixels: steps / `ssr_scale`) and refines that
+    many times. The travel fade measures against that same reach. The reflections are marched at `ssr_scale`.
+    `thickness` isn't used: the renderer's hit test checks the refined crossing instead.
+  - The cloud levels' `grid_size` (1 to 4, with `cloud_mesh_size` 64) isn't used. Its meaning isn't in the
+    files, and the clouds' reach already follows `cloud_render_distance_scale`.
 - **Block light** adds an indirect specular term (`BlockLightIndirectSpecularIntensity`).
 - **Texel snapping:** with `QuantizationParameters.w` on, the reflection's start point is snapped to the texel
   centre like the lighting, so each texel reflects one value. Together with per-texel roughness and normals,

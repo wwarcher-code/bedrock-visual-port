@@ -44,12 +44,24 @@ layout(std140) uniform WaterData {
 };
 #include <bedrockvisuals:water_waves.glsl>
 
+// The quality preset's march (reflection_configuration.pc.json "ssr", ReflectionPass): x the linear search's
+// steps (Bedrock's are a pixel each, ray_step_length 1: how far along its path on screen a ray is followed),
+// y the binary search's, z fading_distance, w ssr_scale (the march target's share of the screen's resolution).
+layout(std140) uniform MarchData {
+    vec4 MarchParams;
+};
+
+// The linear search's reach in the screen's pixels (its steps are the march target's).
+float stepBudget() {
+    return MarchParams.x / max(MarchParams.w, 0.25);
+}
+
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 marchOut;
 
 const int STEPS = 64;
-const int REFINE = 6;
-const vec3 FADING = vec3(3.0, 3.0, 0.75); // SSRFadingParamsAndThickness.xyz
+const int MAX_REFINE = 40;
+const vec2 FADING = vec2(3.0, 3.0); // SSRFadingParamsAndThickness.xy
 const float FAR_PLANE = 2496.6;            // CameraData.y
 
 // The screen position of camera-relative point p.
@@ -75,8 +87,9 @@ float hitConfidence(vec3 start, vec3 dir, vec2 hitUv, vec3 hitNormal, bool hasNo
     float w1;
     vec2 uv1 = screenOf(start + dir * reach, w1);
     vec2 path = uv1 - uv0;
-    // Where the path leaves the screen, as a share of it.
-    float leave = 1.0;
+    // Where the path leaves the screen, or the linear search runs out of steps, as a share of it.
+    vec2 pathPixels = abs(path * size);
+    float leave = min(1.0, stepBudget() / max(max(pathPixels.x, pathPixels.y), 1e-3));
     for (int axis = 0; axis < 2; axis++) {
         if (abs(path[axis]) > 1e-6) {
             float bound = path[axis] > 0.0 ? 1.0 : 0.0;
@@ -85,7 +98,10 @@ float hitConfidence(vec3 start, vec3 dir, vec2 hitUv, vec3 hitNormal, bool hasNo
     }
     float length2 = dot(path, path) * leave * leave;
     float along = length2 > 1e-12 ? dot(hitUv - uv0, path) * leave / length2 : 0.0;
-    float travel = 1.0 - smoothstep(FADING.z, 1.0, clamp(along, 0.0, 1.0));
+    if (along > 1.0) {
+        return 0.0; // past the linear search's last step
+    }
+    float travel = 1.0 - smoothstep(MarchParams.z, 1.0, clamp(along, 0.0, 1.0));
     float facing = hasNormal ? clamp(1.0 - dot(hitNormal, dir), 0.0, 1.0) : 1.0;
     return clamp(min(min(edge, travel), facing), 0.0, 1.0);
 }
@@ -224,6 +240,9 @@ void main() {
     float travelled = 0.0;
     vec3 start = origin + vec3(0.0, 0.02, 0.0);
     vec3 previous = start;
+    float startW;
+    vec2 startUv = screenOf(start, startW);
+    vec2 screenSize = vec2(textureSize(Depth, 0));
     for (int i = 0; i < STEPS; i++) {
         travelled += stepLength;
         stepLength *= 1.15;
@@ -234,13 +253,21 @@ void main() {
         if (uv.x < 0.0) {
             break; // off the screen: the scene probe's
         }
+        vec2 travelled = abs((uv - startUv) * screenSize);
+        if (max(travelled.x, travelled.y) > stepBudget()) {
+            break; // past the linear search's last step: a miss, as Bedrock's
+        }
         if (!there || length(p) <= here) {
             previous = p;
             continue;
         }
         vec3 front = previous;
         vec3 back = p;
-        for (int j = 0; j < REFINE; j++) {
+        int refine = int(clamp(MarchParams.y, 1.0, float(MAX_REFINE)));
+        for (int j = 0; j < MAX_REFINE; j++) {
+            if (j >= refine) {
+                break;
+            }
             vec3 middle = (front + back) * 0.5;
             float middleScene;
             vec2 middleUv;

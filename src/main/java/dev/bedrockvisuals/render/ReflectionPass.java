@@ -17,6 +17,7 @@ import com.mojang.renderpearl.api.textures.GpuSampler;
 import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
 import dev.bedrockvisuals.BedrockVisualsClient;
+import dev.bedrockvisuals.bedrock.QualitySettings;
 import java.util.Optional;
 import java.util.function.Consumer;
 import net.minecraft.resources.Identifier;
@@ -46,6 +47,7 @@ public final class ReflectionPass {
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
 			.withUniform("DistantData", UniformType.UNIFORM_BUFFER)
 			.withUniform("WaterData", UniformType.UNIFORM_BUFFER)
+			.withUniform("MarchData", UniformType.UNIFORM_BUFFER)
 			.build();
 	private static final BindGroupLayout FILL_LAYOUT = BindGroupLayout.builder()
 			.withUniform("March", UniformType.COMBINED_IMAGE_SAMPLER)
@@ -69,6 +71,8 @@ public final class ReflectionPass {
 	private static final GpuTexture[] resolved = new GpuTexture[2];
 	private static final GpuTextureView[] resolvedViews = new GpuTextureView[2];
 	private static GpuBuffer data;
+	/** The preset's march (reflection_configuration.pc.json "ssr"), for reflection/march.fsh. */
+	private static GpuBuffer marchData;
 	/** Bound in place of the reflections when there are none: 1 texel marked "no water" (alpha -2). */
 	private static GpuTexture placeholder;
 	private static GpuTextureView placeholderView;
@@ -108,7 +112,10 @@ public final class ReflectionPass {
 			return;
 		}
 		try {
-			create(gbuffer.width(), gbuffer.height());
+			// ssr_scale: the reflections are marched at that share of the screen's resolution (0.5 below high).
+			QualitySettings.Reflections preset = Quality.reflections();
+			float scale = Math.clamp(preset.ssrScale(), 0.25f, 1f);
+			create(Math.max(1, Math.round(gbuffer.width() * scale)), Math.max(1, Math.round(gbuffer.height() * scale)));
 			CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
 			GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
 			GpuSampler linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
@@ -116,6 +123,11 @@ public final class ReflectionPass {
 				encoder.writeToBuffer(data.slice(), Std140Builder.onStack(stack, 32)
 						.putVec4(TEMPORAL[0], TEMPORAL[1], TEMPORAL[2], TEMPORAL[3])
 						.putVec4(historyValid && !SettingsBlend.snapping() ? 1 : 0, 0, 0, 0).get());
+				// x: the linear search's steps (pixels along the ray's path on screen, at ray_step_length each),
+				// y: the binary search's, z: fading_distance, w: ssr_scale (Bedrock's steps are its march target's
+				// pixels).
+				encoder.writeToBuffer(marchData.slice(), Std140Builder.onStack(stack, 16)
+						.putVec4(preset.linearSteps() * 1f, preset.binarySteps(), preset.fadingDistance(), scale).get());
 			}
 			GpuTextureView distant = LightingPass.distantDepth() != null ? LightingPass.distantDepth() : gbuffer.depthView();
 			draw(encoder, marchView, "march", pass -> {
@@ -129,6 +141,7 @@ public final class ReflectionPass {
 				pass.setUniform("GradingData", LightingPass.gradingData());
 				pass.setUniform("DistantData", LightingPass.distantData());
 				pass.setUniform("WaterData", WaterPass.data());
+				pass.setUniform("MarchData", marchData);
 			});
 			draw(encoder, filledView, "fill", pass -> {
 				pass.setPipeline(RenderSystem.getCompiledPipeline(FILL));
@@ -186,6 +199,8 @@ public final class ReflectionPass {
 		}
 		if (data == null) {
 			data = device.createBuffer(() -> "Bedrock Visuals reflection data", GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, 32);
+			marchData = device.createBuffer(() -> "Bedrock Visuals reflection march data",
+					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, 16);
 		}
 		historyValid = false;
 	}
