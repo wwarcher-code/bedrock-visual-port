@@ -27,7 +27,9 @@ class QualitySettingsTest {
 				           "normal_offset_strength": 0.5, "moon_shadows": false}}"""), BedrockJson.parse("""
 				{"high": {"ibl": {"num_samples": 32, "dimension": 256}, "ssr_enabled": false,
 				          "ssr": {"linear_search_step_count": 100, "ssr_scale": 0.5}}}"""), BedrockJson.parse("""
-				{"medium": {"tile_width": 16, "tile_height": 12, "depth_slices": 40, "far_plane": 200}}"""));
+				{"medium": {"tile_width": 16, "tile_height": 12, "depth_slices": 40, "far_plane": 200}}"""), BedrockJson.parse("""
+				{"low": {"cloud_lighting_parameters": {"cloud_lighting_enabled": false}, "grid_size": 1,
+				         "cloud_render_distance_scale": 2.0}}"""));
 	}
 
 	@Test
@@ -73,6 +75,10 @@ class QualitySettingsTest {
 		assertEquals(12, medium.tileHeight());
 		assertEquals(40, medium.depthSlices());
 		assertEquals(200, medium.farPlane(), EPSILON);
+		QualitySettings.Clouds low = sample().clouds("low").orElseThrow();
+		assertEquals(2, low.renderDistanceScale(), EPSILON);
+		assertEquals(1, low.gridSize());
+		assertFalse(low.lighting());
 	}
 
 	/** Against the installed game, when there is one: every preset's levels are defined. */
@@ -87,6 +93,7 @@ class QualitySettingsTest {
 			assertTrue(quality.reflections(preset.reflections()).isPresent(), preset.label() + " reflections");
 			assertTrue(quality.volumetricFog(preset.volumetricFog()).isPresent(), preset.label() + " fog");
 			assertFalse(quality.shadows(preset.shadows()).get().cascades().isEmpty(), preset.label() + " cascades");
+			assertTrue(quality.clouds(preset.clouds()).isPresent(), preset.label() + " clouds");
 		}
 	}
 }

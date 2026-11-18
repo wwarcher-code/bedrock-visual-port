@@ -70,12 +70,13 @@ public final class CloudShadows {
 	private static float meshRange;
 
 	/**
-	 * Bedrock's cloud distance (DistanceControl.x, 1152 at 24 chunks in the captures): 3 × the render
-	 * distance. With Distant Horizons (or another far renderer) the terrain reaches further, so the clouds
-	 * reach at least as far as it does.
+	 * Bedrock's cloud distance (DistanceControl.x, 1152 at 24 chunks in the captures): the render distance
+	 * times the quality preset's cloud_render_distance_scale (3; 2 at low). With Distant Horizons (or another
+	 * far renderer) the terrain reaches further, so the clouds reach at least as far as it does.
 	 */
 	static float farDistance() {
-		float bedrock = 3f * net.minecraft.client.Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f;
+		float bedrock = Quality.cloudDistanceScale()
+				* net.minecraft.client.Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f;
 		int distant = dev.bedrockvisuals.lod.DistantTerrain.source().map(s -> s.renderDistanceBlocks()).orElse(0);
 		return Math.max(bedrock, distant);
 	}

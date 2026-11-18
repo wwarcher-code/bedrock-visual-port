@@ -53,17 +53,24 @@ public final class QualitySettings {
 			float shadowPcfScale) {
 	}
 
+	/** A cloud level (shared_config/cloud_configuration.shared.json): how far the clouds reach, and its grid. */
+	public record Clouds(float renderDistanceScale, boolean renderDistanceEnabled, int gridSize, int meshSize,
+			boolean lighting) {
+	}
+
 	private final List<Preset> presets;
 	private final Map<String, Shadows> shadows;
 	private final Map<String, Reflections> reflections;
 	private final Map<String, VolumetricFog> fog;
+	private final Map<String, Clouds> clouds;
 
 	QualitySettings(List<Preset> presets, Map<String, Shadows> shadows, Map<String, Reflections> reflections,
-			Map<String, VolumetricFog> fog) {
+			Map<String, VolumetricFog> fog, Map<String, Clouds> clouds) {
 		this.presets = List.copyOf(presets);
 		this.shadows = Map.copyOf(shadows);
 		this.reflections = Map.copyOf(reflections);
 		this.fog = Map.copyOf(fog);
+		this.clouds = Map.copyOf(clouds);
 	}
 
 	/** Reads the PC platform configuration from the install's data folder; empty when it isn't there. */
@@ -73,8 +80,10 @@ public final class QualitySettings {
 			return Optional.empty();
 		}
 		try {
+			Path shared = dataFolder.resolve("renderer").resolve("shared_config");
 			return Optional.of(parse(read(pc, "platform_configuration.pc.json"), read(pc, "shadow_configuration.pc.json"),
-					read(pc, "reflection_configuration.pc.json"), read(pc, "volumetric_fog_configuration.pc.json")));
+					read(pc, "reflection_configuration.pc.json"), read(pc, "volumetric_fog_configuration.pc.json"),
+					read(shared, "cloud_configuration.shared.json")));
 		} catch (IOException | RuntimeException e) {
 			return Optional.empty();
 		}
@@ -86,7 +95,7 @@ public final class QualitySettings {
 	}
 
 	static QualitySettings parse(JsonObject platform, JsonObject shadowFile, JsonObject reflectionFile,
-			JsonObject fogFile) {
+			JsonObject fogFile, JsonObject cloudFile) {
 		List<Preset> presets = new ArrayList<>();
 		JsonObject root = platform.has("pc") ? platform.getAsJsonObject("pc") : platform;
 		JsonObject tiers = BedrockJson.optionalObject(root, "tiers");
@@ -140,7 +149,18 @@ public final class QualitySettings {
 						BedrockJson.number(f, "shadow_pcf_scale", 1)));
 			}
 		}
-		return new QualitySettings(presets, shadows, reflections, fog);
+		Map<String, Clouds> clouds = new LinkedHashMap<>();
+		for (Map.Entry<String, JsonElement> level : cloudFile.entrySet()) {
+			if (level.getValue().isJsonObject()) {
+				JsonObject c = level.getValue().getAsJsonObject();
+				JsonObject lighting = BedrockJson.optionalObject(c, "cloud_lighting_parameters");
+				clouds.put(level.getKey(), new Clouds(BedrockJson.number(c, "cloud_render_distance_scale", 3),
+						BedrockJson.bool(c, "enable_cloud_render_distance", true), (int) BedrockJson.number(c, "grid_size", 4),
+						(int) BedrockJson.number(c, "cloud_mesh_size", 64),
+						lighting == null || BedrockJson.bool(lighting, "cloud_lighting_enabled", true)));
+			}
+		}
+		return new QualitySettings(presets, shadows, reflections, fog, clouds);
 	}
 
 	private static Shadows shadows(JsonObject level) {
@@ -203,5 +223,9 @@ public final class QualitySettings {
 
 	public Optional<VolumetricFog> volumetricFog(String level) {
 		return Optional.ofNullable(fog.get(level));
+	}
+
+	public Optional<Clouds> clouds(String level) {
+		return Optional.ofNullable(clouds.get(level));
 	}
 }

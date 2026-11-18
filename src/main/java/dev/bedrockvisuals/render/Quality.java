@@ -132,6 +132,17 @@ public final class Quality {
 		return FALLBACK_FOG;
 	}
 
+	/**
+	 * How far the clouds reach, in render distances: the chosen preset's cloud level (Bedrock's
+	 * cloud_render_distance_scale: 2 at low, 3 above, the 3 captured as 1152 blocks at 24 chunks).
+	 */
+	static float cloudDistanceScale() {
+		if (settings != null && preset != null) {
+			return settings.clouds(preset.clouds()).map(QualitySettings.Clouds::renderDistanceScale).orElse(3f);
+		}
+		return 3;
+	}
+
 	public static String status() {
 		if (!loaded) {
 			return "not loaded";
