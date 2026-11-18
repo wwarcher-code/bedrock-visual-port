@@ -655,7 +655,8 @@ vec3 waterColor(WaterSurface s, float albedo) {
         skyReflection = mix(skyReflection, mix(SkyColor.rgb, SkyHorizonColor.rgb, 0.15) * iblFade, s.roughness);
     }
     // Bedrock's SSR is mirror-only: full up to roughness 0.3, gone by 0.4.
-    float ssrWeight = 1.0 - smoothstep(0.3, 0.4, s.roughness);
+    // Off with the preset's SSR (low reflections): the probe alone.
+    float ssrWeight = (1.0 - smoothstep(0.3, 0.4, s.roughness)) * step(0.5, SkyProbeParams.z);
     // Bedrock's reflection passes' result for this pixel (ReflectionPass: the march, the gap fill and the
     // resolve accumulated over frames), premultiplied; where they found no water here, this fragment's own march.
     vec4 resolved = texture(u_Reflections, gl_FragCoord.xy / vec2(textureSize(u_GBufferDepth, 0)));

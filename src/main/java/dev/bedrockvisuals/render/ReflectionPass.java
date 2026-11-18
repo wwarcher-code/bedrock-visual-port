@@ -102,6 +102,10 @@ public final class ReflectionPass {
 				|| WaterPass.data() == null) {
 			return;
 		}
+		if (!Quality.reflections().ssr()) {
+			historyValid = false; // the preset has no screen-space reflections (low): the water takes the probe
+			return;
+		}
 		try {
 			create(gbuffer.width(), gbuffer.height());
 			CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();

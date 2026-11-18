@@ -16,7 +16,8 @@ layout(std140) uniform AtmosphereData {
     vec4 AtmosphereFog;         // distance fog: start, 1 / (end - start) (fractions of z), z: distance in blocks, w: on
     vec4 VolumeAir;             // volumetric fog air medium: albedo rgb, extinction per block at full density
     vec4 VolumeHeight;          // density = saturate(x × (y relative to camera) + y); z: phase g; w: on
-    vec4 SkyProbeParams;        // x: 1 when the sky probe (SkyProbe.java) is there to read
+    vec4 SkyProbeParams;        // x: 1 when the sky probe (SkyProbe.java) is there to read; y: its last mip;
+                                // z: 1 when the quality preset has screen-space reflections (ssr_enabled)
 };
 
 #include <bedrockvisuals:octahedral.glsl>
@@ -70,16 +71,17 @@ vec3 bedrockSkyRadiance(vec3 d, vec3 sunDir, vec3 moonDir) {
 }
 
 // The sky seen along d, in this renderer's units (before exposure), as a reflection of the given roughness
-// sees it: Bedrock's pre-convolved sky probe at mip (IBLParameters.y - 1) × (1 - (1 - r)²) of 9
-// (DeferredIndirectSpecular with ConvolutionType 1, as captured), here an octahedral map with the same 10 mips
-// (SkyProbe.java). Where a shader has no probe bound, or before the first, a ring of 8 directions around d,
+// sees it: Bedrock's pre-convolved sky probe at mip (IBLParameters.y - 1) × (1 - (1 - r)²)
+// (DeferredIndirectSpecular with ConvolutionType 1, as captured; IBLParameters.y the probe's mip count, 10 for
+// the 512-texel probe of ultra reflections, 8 for the 128 of the others), here an octahedral map with the same
+// mips (SkyProbe.java). Where a shader has no probe bound, or before the first, a ring of 8 directions around d,
 // up to 60° out at the roughest mip, stands in for the convolution.
 vec3 bedrockSkyReflection(vec3 d, float roughness, vec3 sunDir, vec3 moonDir) {
     float smoothness = clamp(1.0 - roughness, 0.0, 1.0);
     float mip = 1.0 - smoothness * smoothness;
 #ifdef SKY_PROBE
     if (SkyProbeParams.x > 0.5) {
-        return textureLod(SKY_PROBE, octahedralEncode(d), mip * 9.0).rgb;
+        return textureLod(SKY_PROBE, octahedralEncode(d), mip * SkyProbeParams.y).rgb;
     }
 #endif
     vec3 sky = bedrockSkyRadiance(d, sunDir, moonDir);

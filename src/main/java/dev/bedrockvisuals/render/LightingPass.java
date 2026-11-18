@@ -207,7 +207,7 @@ public final class LightingPass {
 			Std140Builder atmosphereBuilder = Std140Builder.onStack(stack, SkyAtmosphere.DATA_SIZE);
 			SkyAtmosphere.write(atmosphereBuilder, light.atmosphere());
 			// x: 1 when the sky probe is there to read (SkyProbe, drawn below before the pass opens).
-			atmosphereBuilder.putVec4(SkyProbe.ready() ? 1 : 0, 0, 0, 0);
+			atmosphereBuilder.putVec4(SkyProbe.ready() ? 1 : 0, SkyProbe.mips() - 1, Quality.reflections().ssr() ? 1 : 0, 0);
 			encoder.writeToBuffer(atmosphere.slice(),
 					SkyAtmosphere.cameraRelative(atmosphereBuilder.get()));
 		}

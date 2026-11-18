@@ -15,7 +15,8 @@ import java.util.Optional;
 /**
  * The quality dial: one of Bedrock's own graphics presets (QualitySettings, read from the install), chosen with
  * {@code /bv quality <tier> <performance|quality>} and kept in {@code config\bedrockvisuals\quality.json}. The
- * preset sets the shadow cascades (ShadowPass) and whether Bedrock's temporal anti-aliasing runs (TemporalAA;
+ * preset sets the shadow cascades (ShadowPass), the sky probe and screen-space reflections (SkyProbe,
+ * ReflectionPass, the shaders' SkyProbeParams.z) and whether Bedrock's temporal anti-aliasing runs (TemporalAA;
  * F6 still switches it for the session). The default is tier 3 Performance, the preset the reference captures
  * were taken with (ultra shadows, bilinear upscaling, so no TAAU). Without the install, the ultra shadows
  * captured from it stand in.
@@ -105,6 +106,18 @@ public final class Quality {
 			return settings.shadows(preset.shadows()).orElse(FALLBACK_SHADOWS);
 		}
 		return FALLBACK_SHADOWS;
+	}
+
+	/** Bedrock's PC ultra reflections, for when the install's files can't be read. */
+	private static final QualitySettings.Reflections FALLBACK_REFLECTIONS = new QualitySettings.Reflections(64, 512,
+			true, 800, 40, 0.025f, 0.75f, 0.4f, 0.3f, 1);
+
+	/** The sky probe and screen-space reflections of the chosen preset's reflection level. */
+	static QualitySettings.Reflections reflections() {
+		if (settings != null && preset != null) {
+			return settings.reflections(preset.reflections()).orElse(FALLBACK_REFLECTIONS);
+		}
+		return FALLBACK_REFLECTIONS;
 	}
 
 	public static String status() {

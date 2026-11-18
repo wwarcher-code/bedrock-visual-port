@@ -1241,7 +1241,8 @@ void main() {
     if (dot(reflected, LUMA) < dot(blockSpecular, LUMA)) {
         reflected = blockSpecular;
     }
-    float ssrWeight = 1.0 - smoothstep(0.3, 0.4, roughness);
+    // Off with the preset's SSR (low reflections): the probe alone.
+    float ssrWeight = (1.0 - smoothstep(0.3, 0.4, roughness)) * step(0.5, SkyProbeParams.z);
     if (ssrWeight > 0.0) {
         vec4 traced = terrainReflection(position + n * 0.02, mirror);
         reflected = mix(reflected, traced.rgb, traced.a * ssrWeight);

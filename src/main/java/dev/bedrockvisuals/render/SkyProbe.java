@@ -16,6 +16,7 @@ import com.mojang.renderpearl.api.textures.FilterMode;
 import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
 import dev.bedrockvisuals.BedrockVisualsClient;
+import dev.bedrockvisuals.bedrock.QualitySettings;
 import java.util.Optional;
 import java.util.function.Consumer;
 import net.minecraft.resources.Identifier;
@@ -24,16 +25,22 @@ import org.lwjgl.system.MemoryStack;
 
 /**
  * Bedrock's sky reflection probe: the sky (its radiance function, as SkyProbeDeferredShading lights the probe)
- * convolved per roughness into 10 mips, which reflections sample at mip 9 × (1 - (1 - r)²) (ConvolutionType 1,
+ * convolved per roughness into mips (10 at 512 texels), which reflections sample at mip (count - 1) × (1 - (1 - r)²) (ConvolutionType 1,
  * IBLParameters.y 10 in GPU captures). Bedrock keeps a cube; this keeps an octahedral map of the same 512 texels
  * and mips. Bedrock regenerates its probe now and then (reflection_probe_regen_configuration: every 600 frames,
  * 100 ticks, 500 blocks moved or a change in light) and blends the last two; the sky alone is cheap, so this
  * redraws it every few frames, and at once when the time jumps or the camera teleports.
  */
 public final class SkyProbe {
-	static final int SIZE = 512;
-	static final int MIPS = 10;
-	private static final int SAMPLES = 96;
+	/** The most mips the probe can have (512 texels). */
+	private static final int MAX_MIPS = 10;
+	/**
+	 * The probe's texels across, mips and filter samples: the quality preset's reflection level (Bedrock's
+	 * reflection_configuration.pc.json ibl: 512 texels and 64 samples at ultra, 128 below, 64 down to 16 samples).
+	 */
+	private static int size = 512;
+	private static int mips = MAX_MIPS;
+	private static int samples = 64;
 	/** Frames between redraws. */
 	private static final int INTERVAL = 4;
 
@@ -61,8 +68,8 @@ public final class SkyProbe {
 	private static GpuTextureView baseView;
 	private static GpuTexture probe;
 	private static GpuTextureView probeView;
-	private static final GpuTextureView[] mipViews = new GpuTextureView[MIPS];
-	private static final GpuBuffer[] mipData = new GpuBuffer[MIPS];
+	private static final GpuTextureView[] mipViews = new GpuTextureView[MAX_MIPS];
+	private static final GpuBuffer[] mipData = new GpuBuffer[MAX_MIPS];
 	private static int frame;
 	private static boolean drawn;
 	private static boolean failed;
@@ -96,6 +103,13 @@ public final class SkyProbe {
 		// The scene probe's faces, when it captured terrain this frame (they are lit with this frame's data).
 		SceneProbe.ensure();
 		boolean newScene = SceneProbe.lightFaces(encoder, lightingData, atmosphereData);
+		try {
+			create(); // first, so a new preset's probe is drawn whole this frame
+		} catch (RuntimeException e) {
+			failed = true;
+			BedrockVisualsClient.LOGGER.error("[sky] sky probe failed; reflections use the sky directly until restart", e);
+			return;
+		}
 		boolean now = !drawn || SettingsBlend.snapping() || newScene;
 		boolean due = now || ++frame % INTERVAL == 0;
 		// The base and the mips filtered from it are drawn two frames apart, so each frame of the round carries
@@ -121,7 +135,7 @@ public final class SkyProbe {
 				return;
 			}
 			mipsPending = false;
-			for (int m = 0; m < MIPS; m++) {
+			for (int m = 0; m < mips; m++) {
 				int mip = m;
 				draw(encoder, mipViews[m], "mip " + m, pass -> {
 					pass.setPipeline(RenderSystem.getCompiledPipeline(FILTER));
@@ -148,28 +162,64 @@ public final class SkyProbe {
 	}
 
 	private static void create() {
-		if (probe != null) {
+		QualitySettings.Reflections reflections = Quality.reflections();
+		int wanted = Integer.highestOneBit(Math.clamp(reflections.iblDimension(), 16, 512));
+		if (probe != null && wanted == size && reflections.iblSamples() == samples) {
 			return;
 		}
+		close();
+		size = wanted;
+		mips = Integer.numberOfTrailingZeros(size) + 1;
+		samples = Math.max(1, reflections.iblSamples());
+		drawn = false;
 		GpuDevice device = RenderSystem.getDevice();
 		int usage = GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING;
-		base = device.createTexture(() -> "Bedrock Visuals sky probe base", usage, BloomPass.HDR_FORMAT, SIZE, SIZE, 1, 1);
+		base = device.createTexture(() -> "Bedrock Visuals sky probe base", usage, BloomPass.HDR_FORMAT, size, size, 1, 1);
 		baseView = device.createTextureView(base);
-		probe = device.createTexture(() -> "Bedrock Visuals sky probe", usage, BloomPass.HDR_FORMAT, SIZE, SIZE, 1, MIPS);
+		probe = device.createTexture(() -> "Bedrock Visuals sky probe", usage, BloomPass.HDR_FORMAT, size, size, 1, mips);
 		probeView = device.createTextureView(probe);
 		CommandEncoder encoder = device.createCommandEncoder();
-		for (int m = 0; m < MIPS; m++) {
+		for (int m = 0; m < mips; m++) {
 			mipViews[m] = device.createTextureView(probe, m, 1);
 			int mip = m;
 			mipData[m] = device.createBuffer(() -> "Bedrock Visuals sky probe mip " + mip,
 					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, 16);
-			// Mip m holds the roughness that samples it: 9 × (1 - (1 - r)²) = m.
-			float roughness = (float) (1 - Math.sqrt(1 - m / 9.0));
+			// Mip m holds the roughness that samples it: (mips - 1) × (1 - (1 - r)²) = m.
+			float roughness = (float) (1 - Math.sqrt(1 - m / (double) (mips - 1)));
 			try (MemoryStack stack = MemoryStack.stackPush()) {
 				encoder.writeToBuffer(mipData[m].slice(),
-						Std140Builder.onStack(stack, 16).putVec4(roughness, Math.max(1, SIZE >> m), SAMPLES, 0).get());
+						Std140Builder.onStack(stack, 16).putVec4(roughness, Math.max(1, size >> m), samples, 0).get());
 			}
 		}
+	}
+
+	private static void close() {
+		if (probe == null) {
+			return;
+		}
+		for (int m = 0; m < MAX_MIPS; m++) {
+			if (mipViews[m] != null) {
+				mipViews[m].close();
+				mipViews[m] = null;
+			}
+			if (mipData[m] != null) {
+				mipData[m].close();
+				mipData[m] = null;
+			}
+		}
+		probeView.close();
+		probe.close();
+		baseView.close();
+		base.close();
+		probe = null;
+		probeView = null;
+		base = null;
+		baseView = null;
+	}
+
+	/** The probe's mip count (the shaders read mip (count - 1) × (1 - (1 - r)²)). */
+	static int mips() {
+		return mips;
 	}
 
 	/** Whether there is a probe to read (the shaders fall back to the sky directly otherwise). */
@@ -183,6 +233,6 @@ public final class SkyProbe {
 	}
 
 	public static String status() {
-		return failed ? "FAILED (see log)" : drawn ? "on, " + SIZE + " texels, " + MIPS + " mips" : "not drawn yet";
+		return failed ? "FAILED (see log)" : drawn ? "on, " + size + " texels, " + mips + " mips, " + samples + " samples" : "not drawn yet";
 	}
 }
