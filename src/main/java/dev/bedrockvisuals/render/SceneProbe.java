@@ -170,9 +170,12 @@ public final class SceneProbe {
 			// the backend), so Sodium's face culling and the lighting's reconstruction hold as they do for the
 			// main view.
 			Matrix4f projection = new Matrix4f().setPerspective((float) (Math.PI / 2), 1f, far, NEAR, true);
-			if (mainProjection.m11() < 0) {
-				projection = new Matrix4f().scaling(1, -1, 1).mul(projection);
-			}
+			// The faces' y is flipped, always: unflipped, their triangles wind the other way from what the copied
+			// Sodium pipelines cull, and every face came out empty (reflections then had no scene to fall back on at
+			// the screen's edges). The flip was keyed on the main projection's m11 being negative, as it was on the
+			// software renderer this was written on; on the developer's Vulkan driver m11 is positive and the faces
+			// still need it (checked both ways: unflipped no terrain draws a fragment, flipped the faces fill).
+			projection = new Matrix4f().scaling(1, -1, 1).mul(projection);
 			CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
 			// One face a frame: all six in one frame drew every section six times over at once, a hitch every
 			// ten seconds or so. The camera moves a fraction of a block over the six frames, which the probe's
@@ -217,6 +220,8 @@ public final class SceneProbe {
 			BedrockVisualsClient.LOGGER.error("[sky] scene probe capture failed; reflections fall back to the sky alone", e);
 		} finally {
 			if (done) {
+				lastCaptureDraws = captureDraws;
+				captureDraws = 0;
 				nextFace = 0;
 				wantAll = false;
 				scheduleCull();
@@ -336,8 +341,16 @@ public final class SceneProbe {
 		}
 	}
 
+	/** Sodium's terrain draws into the faces during the last capture (DefaultChunkRendererMixin). */
+	private static int captureDraws;
+	private static int lastCaptureDraws;
+
+	public static void countTerrainDraw() {
+		captureDraws++;
+	}
+
 	public static String status() {
 		return failed ? "FAILED (see log)" : facesLit ? "terrain captured " + (frame - capturedFrame) + " frames ago, "
-				+ FACE_SIZE + " texels a face" : "no capture yet";
+				+ FACE_SIZE + " texels a face, " + lastCaptureDraws + " terrain draws" : "no capture yet";
 	}
 }

@@ -16,6 +16,12 @@ uniform sampler2D ProbeFace5;
 #include <bedrockvisuals:common.glsl>
 #include <bedrockvisuals:sky.glsl>
 
+uniform sampler2D PreviousBase; // the base before the newest capture, faded out over a second (SkyProbe)
+
+layout(std140) uniform ProbeBlend {
+    vec4 ProbeBlendParams; // x: the new capture's share, y: 1 while fading
+};
+
 layout(std140) uniform ProbeFaces {
     mat4 FaceViewProjection[6]; // camera-relative world space to each face's clip space, at the capture
     vec4 ProbeFacesParams;      // x: 1 when faces have been captured; yzw: the camera's move since (blocks)
@@ -54,4 +60,8 @@ void main() {
     vec3 sky = bedrockSkyRadiance(d, normalize(SunDirection.xyz), normalize(MoonDirection.xyz)) * AtmosphereHorizon.w;
     vec4 scene = ProbeFacesParams.x > 0.5 ? captured(d) : vec4(0.0);
     fragColor = vec4(scene.rgb + sky * (1.0 - scene.a), 1.0);
+    if (ProbeBlendParams.y > 0.5) {
+        vec3 previous = texelFetch(PreviousBase, ivec2(gl_FragCoord.xy), 0).rgb;
+        fragColor.rgb = mix(previous, fragColor.rgb, ProbeBlendParams.x);
+    }
 }

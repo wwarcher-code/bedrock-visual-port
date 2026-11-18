@@ -48,6 +48,9 @@ abstract class DefaultChunkRendererMixin {
 		if (ShadowPass.isActive()) {
 			ShadowPass.countTerrainDraw();
 		}
+		if (SceneProbe.isActive()) {
+			SceneProbe.countTerrainDraw();
+		}
 		bedrockvisuals$water = false;
 		if (pass.isTranslucent() && !GBufferPass.isActive() && !ShadowPass.isActive() && !SceneProbe.isActive()
 				&& WaterPass.isActive()) {

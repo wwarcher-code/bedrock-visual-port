@@ -56,7 +56,20 @@ public final class SkyProbe {
 			.withUniform("AtmosphereData", UniformType.UNIFORM_BUFFER)
 			// Declared by common.glsl, which the shader includes; every declared block must be bound.
 			.withUniform("GradingData", UniformType.UNIFORM_BUFFER)
+			.withUniform("PreviousBase", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("ProbeBlend", UniformType.UNIFORM_BUFFER)
 			.build();
+	/**
+	 * TUNE: how long a new scene capture takes to fade in over the last. Bedrock blends its last two probes
+	 * (reflection_probe_regen_configuration); switched at once, reflections that fall to the probe jumped at every
+	 * capture. Its blend's length isn't in the files.
+	 */
+	private static final long BLEND_NANOS = 1_000_000_000L;
+	private static GpuTexture previousBase;
+	private static GpuTextureView previousBaseView;
+	private static GpuBuffer blendData;
+	/** When the fade to the newest capture began; 0 when none is under way. */
+	private static long blendStart;
 	private static final BindGroupLayout FILTER_LAYOUT = BindGroupLayout.builder()
 			.withUniform("ProbeBase", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("ProbeData", UniformType.UNIFORM_BUFFER)
@@ -110,7 +123,28 @@ public final class SkyProbe {
 			BedrockVisualsClient.LOGGER.error("[sky] sky probe failed; reflections use the sky directly until restart", e);
 			return;
 		}
-		boolean now = !drawn || SettingsBlend.snapping() || newScene;
+		// A new capture fades in over the last one (BLEND_NANOS): the base as it stands is kept, and until the fade
+		// ends the probe is drawn every frame, mixing towards the new. A jump in time or a teleport switches at once.
+		long nowNanos = System.nanoTime();
+		if (newScene && drawn && !SettingsBlend.snapping()) {
+			encoder.copyTextureToTexture(base, previousBase, 0, 0, 0, 0, 0, size, size);
+			blendStart = nowNanos;
+		} else if (SettingsBlend.snapping()) {
+			blendStart = 0;
+		}
+		float blend = 1;
+		if (blendStart != 0) {
+			blend = Math.clamp((nowNanos - blendStart) / (float) BLEND_NANOS, 0f, 1f);
+		}
+		boolean fading = blendStart != 0;
+		if (fading && blend >= 1) {
+			blendStart = 0; // this frame draws the last step, the new capture alone
+		}
+		try (MemoryStack stack = MemoryStack.stackPush()) {
+			encoder.writeToBuffer(blendData.slice(), Std140Builder.onStack(stack, 16)
+					.putVec4(blend, fading ? 1 : 0, 0, 0).get());
+		}
+		boolean now = !drawn || SettingsBlend.snapping() || newScene || fading;
 		boolean due = now || ++frame % INTERVAL == 0;
 		// The base and the mips filtered from it are drawn two frames apart, so each frame of the round carries
 		// at most half the work (all at once, the GPU's frame time rose by some 0.5 ms every fourth frame). When
@@ -128,6 +162,9 @@ public final class SkyProbe {
 					pass.setUniform("LightingData", lightingData);
 					pass.setUniform("AtmosphereData", atmosphereData);
 					pass.setUniform("GradingData", LightingPass.gradingData());
+					pass.setUniform("PreviousBase", previousBaseView,
+							RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+					pass.setUniform("ProbeBlend", blendData);
 				});
 				mipsPending = true;
 			}
@@ -174,8 +211,17 @@ public final class SkyProbe {
 		drawn = false;
 		GpuDevice device = RenderSystem.getDevice();
 		int usage = GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING;
-		base = device.createTexture(() -> "Bedrock Visuals sky probe base", usage, BloomPass.HDR_FORMAT, size, size, 1, 1);
+		base = device.createTexture(() -> "Bedrock Visuals sky probe base", usage | GpuTexture.USAGE_COPY_SRC,
+				BloomPass.HDR_FORMAT, size, size, 1, 1);
 		baseView = device.createTextureView(base);
+		previousBase = device.createTexture(() -> "Bedrock Visuals sky probe previous base",
+				GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, BloomPass.HDR_FORMAT, size, size, 1, 1);
+		previousBaseView = device.createTextureView(previousBase);
+		if (blendData == null) {
+			blendData = device.createBuffer(() -> "Bedrock Visuals sky probe blend", GpuBuffer.USAGE_UNIFORM
+					| GpuBuffer.USAGE_COPY_DST, 16);
+		}
+		blendStart = 0;
 		probe = device.createTexture(() -> "Bedrock Visuals sky probe", usage, BloomPass.HDR_FORMAT, size, size, 1, mips);
 		probeView = device.createTextureView(probe);
 		CommandEncoder encoder = device.createCommandEncoder();
@@ -211,6 +257,10 @@ public final class SkyProbe {
 		probe.close();
 		baseView.close();
 		base.close();
+		previousBaseView.close();
+		previousBase.close();
+		previousBase = null;
+		previousBaseView = null;
 		probe = null;
 		probeView = null;
 		base = null;
