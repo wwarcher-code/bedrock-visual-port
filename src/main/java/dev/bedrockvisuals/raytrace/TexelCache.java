@@ -70,7 +70,7 @@ final class TexelCache {
 			const uint EVICT = 600u;
 			// An entry unseen this many frames may be taken by a new texel with nowhere else to go (the shader's
 			// push constants' size.z is the frame number).
-			const uint STEAL = 120u;
+			const uint STEAL = 30u;
 
 			uint texelHash(uint x) {
 			    x ^= x >> 16u; x *= 0x7feb352du; x ^= x >> 15u; x *= 0x846ca68bu; x ^= x >> 16u;

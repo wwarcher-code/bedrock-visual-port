@@ -165,20 +165,46 @@ public final class SectionGeometry {
 	}
 
 	/**
-	 * Records the builds of the oldest waiting sections, within this frame's budget, into {@code commands}. Their
+	 * Records the builds of the oldest waiting sections (the nearest, when more wait than a frame builds), within
+	 * this frame's budget, into {@code commands}. Their
 	 * staging and scratch memory is freed once the submission is done. Returns whether anything was built.
 	 */
 	static boolean recordBuilds(RtDevice rt, VkCommandBuffer commands, List<Runnable> afterRecord) {
 		List<Long> keys = new ArrayList<>();
 		List<Pending> batch = new ArrayList<>();
 		int vertices = 0;
-		for (Iterator<Map.Entry<Long, Pending>> it = PENDING.entrySet().iterator(); it.hasNext()
-				&& batch.size() < MAX_SECTIONS_PER_FRAME && vertices < MAX_VERTICES_PER_FRAME;) {
-			Map.Entry<Long, Pending> entry = it.next();
-			keys.add(entry.getKey());
-			batch.add(entry.getValue());
-			vertices += entry.getValue().vertices();
-			it.remove();
+		if (PENDING.size() > MAX_SECTIONS_PER_FRAME) {
+			// More waiting than a frame builds (arriving somewhere, hundreds of sections loading): the nearest
+			// first, so the light where the player is comes first, not at the end of the whole area's queue.
+			net.minecraft.world.phys.Vec3 camera = RtScene.cameraPosition();
+			long[] order = new long[PENDING.size()];
+			double[] distance = new double[order.length];
+			Integer[] index = new Integer[order.length];
+			int i = 0;
+			for (Map.Entry<Long, Pending> entry : PENDING.entrySet()) {
+				Pending pending = entry.getValue();
+				order[i] = entry.getKey();
+				distance[i] = camera.distanceToSqr(pending.originX() + 8, pending.originY() + 8, pending.originZ() + 8);
+				index[i] = i;
+				i++;
+			}
+			java.util.Arrays.sort(index, java.util.Comparator.comparingDouble(k -> distance[k]));
+			for (int k = 0; k < index.length && batch.size() < MAX_SECTIONS_PER_FRAME
+					&& vertices < MAX_VERTICES_PER_FRAME; k++) {
+				Pending pending = PENDING.remove(order[index[k]]);
+				keys.add(order[index[k]]);
+				batch.add(pending);
+				vertices += pending.vertices();
+			}
+		} else {
+			for (Iterator<Map.Entry<Long, Pending>> it = PENDING.entrySet().iterator(); it.hasNext()
+					&& batch.size() < MAX_SECTIONS_PER_FRAME && vertices < MAX_VERTICES_PER_FRAME;) {
+				Map.Entry<Long, Pending> entry = it.next();
+				keys.add(entry.getKey());
+				batch.add(entry.getValue());
+				vertices += entry.getValue().vertices();
+				it.remove();
+			}
 		}
 		if (batch.isEmpty()) {
 			return false;

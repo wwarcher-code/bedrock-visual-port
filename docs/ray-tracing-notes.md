@@ -405,7 +405,11 @@ many seconds and lit up one by one. Two causes:
   chunk within 1.5 s (`ChunkChanges.editedNear`); unloads don't wipe either.
 - **A full table.** Entries were only freed after 600 frames unseen, so after travelling at 1080p new texels
   could find no free slot among their 8 probes. A new texel now takes over the probed entry unseen longest,
-  if unseen for more than 120 frames.
+  if unseen for more than 30 frames (120 still left 2% of the room without light for half a second).
+- Sections waiting for their ray-tracing structures, when more wait than a frame builds (96), are built nearest
+  the camera first.
+- After a teleport at 1080p the room is fully lit in the first frame Minecraft draws it whole (0.9 s; the
+  chunks take 0.8-0.9 s to show with ray tracing off too).
 - At 1080p (`-PwindowSize=1920x1080`), flying 1,200 blocks out and back: before, the room was still speckled
   8 s after returning; after, nearly clean at 1 s and clean by 8 s.
 - Also fixed: with ray tracing saved on, the game crashed at startup (the device was asked for before it
