@@ -1120,7 +1120,19 @@ void main() {
     if (RtEmissiveParams.x > 0.5 && distant < 0.0) {
         // Alpha 1: the point is on a light that stands in for block light (lava), which keeps Bedrock's.
         vec4 traced = texture(RtEmissiveMap, vec2(texCoord.x * 0.5, texCoord.y));
-        blockRadiance = max(traced.rgb, blockRadiance * max(RtEmissiveParams.y, traced.a));
+        // The same for any face of a block that gives off Java light while barely glowing in Bedrock's maps:
+        // more block light inside the block behind it than in front. The trace's own test only knows the
+        // strongest 48 lights of each cell, which a lavafall or a lava pool outnumbers.
+        float standIn = traced.a;
+        if (emissive < 0.1) {
+            vec2 behind = lightVolumeAt(position - n * 0.3);
+            vec2 front = lightVolumeAt(position + n * 0.3);
+            standIn = behind.y > 0.0 && front.x >= 0.0 && behind.y > front.y + 0.01 ? 1.0 : standIn;
+        }
+        // A face standing in for its own glow keeps Bedrock's light alone: the traced light on it is mostly its
+        // neighbouring faces' (each lava face is a light, a few hundredths of a block from the next), which
+        // added to its own glow burnt lava to a flat red.
+        blockRadiance = standIn > 0.5 ? blockRadiance : max(traced.rgb, blockRadiance * RtEmissiveParams.y);
     }
     vec3 indirect = max(blockRadiance + SkyColor.rgb * skyCurve, AmbientColor.rgb);
     // Ray-traced bounce light (RtEmissive.java): the sun, moon and emitted light off other surfaces, over

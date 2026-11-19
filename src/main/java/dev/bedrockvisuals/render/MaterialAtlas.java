@@ -142,6 +142,15 @@ public final class MaterialAtlas {
 		return sum / 255f / ((x1 - x0) * (y1 - y0));
 	}
 
+	/** One texel's emissive (0 to 1) in the block atlas's pixels; 0 outside it or before it is built. */
+	public static float emissiveAt(int x, int y) {
+		byte[] channel = emissive;
+		if (channel == null || x < 0 || y < 0 || x >= emissiveWidth || y >= emissiveHeight) {
+			return 0;
+		}
+		return (channel[y * emissiveWidth + x] & 0xFF) / 255f;
+	}
+
 	/** The emissive channel's size in texels (0 before it is built). */
 	public static int emissiveWidth() {
 		return emissiveWidth;

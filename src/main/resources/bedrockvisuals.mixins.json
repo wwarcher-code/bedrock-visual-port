@@ -16,6 +16,7 @@
 		"minecraft.QuadParticleFeatureRendererMixin",
 		"minecraft.RenderTypeGroupMixin",
 		"minecraft.SkyRendererMixin",
+		"minecraft.SpriteContentsAccessor",
 		"minecraft.StagedDrawMixin",
 		"renderpearl.FrontendGpuDeviceAccessor",
 		"renderpearl.VulkanCommandEncoderAccessor",

@@ -424,3 +424,16 @@ light; entity textures' own emissive texels (eyes) aren't lights; the carried li
 
 **Still to do for the bounce:** sky light bounced as well, in place of Bedrock's ambient term, as an option;
 entity textures for their bounce colour; glossy (specular) bounce.
+
+**Lava, and carried light colours (2026-11-19).**
+- Lava barely glows in Bedrock's maps; its faces keep Bedrock's block light (the stand-in). The trace's test for
+  them only knew each cell's 48 strongest lights, which a lavafall or a pool outnumbers, so most lava faces
+  were lit like stone: dark. The lighting pass now also counts any face with weak emissive and more block
+  light in the block behind than in front (the light volume) as one, and gives it Bedrock's light alone:
+  adding the traced light from the next lava faces, hundredths of a block away, burnt it to flat red.
+- A carried glowing block's light colour is the mean of its model's texels weighed by their emissive in
+  Bedrock's maps (EmitterColors): torch 1.0 0.74 0.33, lantern 1.0 0.53 0.15, soul torch 0.38 0.97 1.0.
+  Blocks that barely glow (lava) weigh all their texels alike.
+
+**Later, outside ray tracing:** take a look at vertical (falling) water. The player asked for this on
+2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.

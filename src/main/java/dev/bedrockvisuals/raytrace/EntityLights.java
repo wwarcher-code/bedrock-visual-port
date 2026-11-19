@@ -40,8 +40,9 @@ import net.minecraft.world.phys.Vec3;
  * <p>Each frame, the entities near the camera that give off light: a glowing block or a lava bucket held in
  * either hand (at the hand) or lying on the ground, a falling glowing block, anything on fire, blazes, magma
  * cubes, glow squids, allays, fireballs, spectral arrows and experience orbs. Each is a small sphere of light,
- * its strength its light level (as the block would give off placed) and its colour the packs' light colour for
- * the block (BlockLightColors) or a fitting one. The camera's own entity counts in first person too: the light in
+ * its strength its light level (as the block would give off placed) and its colour the mean of the block's
+ * glowing texels (EmitterColors; fire's for burning things and blazes, lava's for a lava bucket and magma cubes),
+ * or a fitting one for the entities that aren't blocks. The camera's own entity counts in first person too: the light in
  * the player's hand comes from where the hand is drawn.
  *
  * <p>The ray-traced light (RtEmissive) takes their light, unshadowed, straight from these positions every frame,
@@ -227,7 +228,15 @@ public final class EntityLights {
 		FOUND.add(new Light(x, y, z, radius, level / 15f, color));
 	}
 
+	/**
+	 * A block's light colour: the mean of its glowing texels (EmitterColors), else the packs' light colour for it,
+	 * else the fallback.
+	 */
 	private static float[] colorOf(Block block, float[] fallback) {
+		float[] texels = EmitterColors.of(block);
+		if (texels != null) {
+			return texels;
+		}
 		float[] declared = BlockLightColors.colorOf(block);
 		return declared != null ? declared : fallback;
 	}
