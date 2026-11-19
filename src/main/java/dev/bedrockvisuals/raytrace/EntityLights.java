@@ -261,6 +261,30 @@ public final class EntityLights {
 		return count;
 	}
 
+	/**
+	 * This frame's lights for the entity shader (RtEntityData, render/LightingPass): per light its position
+	 * relative to the camera and radius, then colour times strength and reach, as {@link #write}'s; at most
+	 * {@code max}. Returns how many.
+	 */
+	public static int writeCameraRelative(float[] out, int max, double cameraX, double cameraY, double cameraZ) {
+		int count = Math.min(Math.min(FOUND.size(), MAX), max);
+		for (int i = 0; i < count; i++) {
+			Light light = FOUND.get(i);
+			float strength = INTENSITY * light.level();
+			float brightest = strength * Math.max(light.color()[0], Math.max(light.color()[1], light.color()[2]));
+			int o = i * 8;
+			out[o] = (float) (light.x() - cameraX);
+			out[o + 1] = (float) (light.y() - cameraY);
+			out[o + 2] = (float) (light.z() - cameraZ);
+			out[o + 3] = light.radius();
+			out[o + 4] = light.color()[0] * strength;
+			out[o + 5] = light.color()[1] * strength;
+			out[o + 6] = light.color()[2] * strength;
+			out[o + 7] = (float) Math.min(Math.sqrt(brightest / CUTOFF), 32);
+		}
+		return count;
+	}
+
 	static String status() {
 		return String.format(Locale.ROOT, "%d entity lights", lastCount);
 	}

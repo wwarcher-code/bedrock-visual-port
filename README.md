@@ -245,6 +245,9 @@ from the cache, averaged over a couple of frames. A held torch lights the floor 
 Entities' shadows over the glowing blocks' light are followed the same way, so a mob walking past a lantern
 leaves no trailing shadow.
 
+Mobs, players and other entities are lit by the traced light too, from a grid of light probes around the
+camera (`raytrace/EntityProbes.java`), and by the lights entities carry.
+
 **Settings.** Everything above has a page in Sodium's video settings (Video Settings, then Bedrock Visuals
 in the list on the left): Quality (Bedrock's preset, temporal anti-aliasing), Ray Tracing (shadows, block
 light, its strength and minimum, light from entities, bounce, rays per pixel) and Exports (sub-frames, rays

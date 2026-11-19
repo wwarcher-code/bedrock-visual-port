@@ -31,6 +31,61 @@ layout(std140) uniform DistantData {
     vec4 DistantHeightOrigin;
     vec4 FroxelParams;
 };
+// The ray-traced light for entities (raytrace/EntityProbes, render/LightingPass's RtEntityData): probes of the
+// light from emissive texels, one a block around the camera, as ambient cubes, and the lights entities carry.
+uniform sampler2D RtProbeMap;
+layout(std140) uniform RtEntityData {
+    vec4 RtProbeCorner;  // xyz: the probe grid's lowest corner relative to the camera; w: 1 when on this frame
+    vec4 RtEntityParams; // x: the share of Bedrock's block light kept under it; y: lights carried; z: the gain
+    vec4 RtCarried[64];  // per light: position relative to the camera and radius; colour x strength, reach
+};
+const ivec3 RT_PROBES = ivec3(48, 24, 48); // EntityProbes.X, Y, Z
+
+// One probe's light on a surface facing n (its ambient cube), or alpha 0 for a probe inside a solid block.
+vec4 rtProbe(ivec3 cell, vec3 n) {
+    ivec2 at = ivec2(cell.x * 6, cell.z + cell.y * RT_PROBES.z);
+    vec4 x = texelFetch(RtProbeMap, at + ivec2(n.x >= 0.0 ? 0 : 1, 0), 0);
+    vec4 y = texelFetch(RtProbeMap, at + ivec2(n.y >= 0.0 ? 2 : 3, 0), 0);
+    vec4 z = texelFetch(RtProbeMap, at + ivec2(n.z >= 0.0 ? 4 : 5, 0), 0);
+    return vec4(x.rgb * n.x * n.x + y.rgb * n.y * n.y + z.rgb * n.z * n.z, x.a);
+}
+
+// The traced light at the camera-relative point p on a surface facing n: the eight probes around it, blended
+// by distance, leaving out those in solid blocks; then the lights entities carry, unshadowed. Negative outside
+// the grid (Bedrock's block light then).
+vec3 rtEntityLight(vec3 p, vec3 n) {
+    vec3 q = p + n * 0.3 - RtProbeCorner.xyz - 0.5; // probe centres at whole numbers
+    ivec3 base = ivec3(floor(q));
+    if (any(lessThan(base, ivec3(0))) || any(greaterThanEqual(base + 1, RT_PROBES))) {
+        return vec3(-1.0);
+    }
+    vec3 f = q - vec3(base);
+    vec3 sum = vec3(0.0);
+    float weight = 0.0;
+    for (int i = 0; i < 8; i++) {
+        ivec3 corner = ivec3(i & 1, (i >> 1) & 1, (i >> 2) & 1);
+        vec3 w3 = mix(1.0 - f, f, vec3(corner));
+        float w = w3.x * w3.y * w3.z;
+        vec4 probe = rtProbe(base + corner, n);
+        sum += probe.rgb * w * probe.a;
+        weight += w * probe.a;
+    }
+    vec3 light = weight > 1e-3 ? sum / weight : vec3(0.0);
+    int carried = int(RtEntityParams.y);
+    for (int i = 0; i < carried; i++) {
+        vec4 at = RtCarried[i * 2];
+        vec4 strength = RtCarried[i * 2 + 1];
+        vec3 toLight = at.xyz - p;
+        float d2 = dot(toLight, toLight);
+        if (d2 < strength.w * strength.w) {
+            float fade = 1.0 - d2 / (strength.w * strength.w);
+            float cosine = max(dot(n, toLight) * inversesqrt(max(d2, 1e-6)), 0.0);
+            light += strength.rgb * cosine * fade * fade / max(d2, 0.0625) * RtEntityParams.z / 3.14159265;
+        }
+    }
+    return light;
+}
+
 uniform sampler2D FroxelScatter;      // Bedrock's fog grid (FroxelVolume): in-scattered light to each slice
 uniform sampler2D FroxelTransmittance; // and the transmittance
 #include <bedrockvisuals:froxels.glsl>
@@ -182,7 +237,16 @@ vec3 bvLit(vec3 albedo, vec3 n, vec3 v) {
             + moonLight() * moonVisibility * max(dot(n, moonDir), 0.0));
     float cameraSky = sqrt(VolumeCamera.x) * 15.0 / 16.0;
     float skyCurve = skyLight * mix(pow(skyLight, 4.0), skyLight * skyLight, cameraSky);
-    vec3 indirect = max(BlockLightColor.rgb * blockLightColor(blockLight) + SkyColor.rgb * skyCurve, AmbientColor.rgb);
+    vec3 blockTerm = BlockLightColor.rgb * blockLightColor(blockLight);
+    // The ray-traced light, when on: in place of Bedrock's block light, as for the terrain (deferred.fsh), or
+    // over the given share of it.
+    if (RtProbeCorner.w > 0.5) {
+        vec3 traced = rtEntityLight(bvPosition, n);
+        if (traced.x >= 0.0) {
+            blockTerm = max(traced, blockTerm * RtEntityParams.x);
+        }
+    }
+    vec3 indirect = max(blockTerm + SkyColor.rgb * skyCurve, AmbientColor.rgb);
     return color + albedo * indirect;
     #endif
 }

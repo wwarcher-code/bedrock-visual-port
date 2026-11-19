@@ -37,6 +37,8 @@ public final class EntityPass {
 			.withUniform("DistantData", UniformType.UNIFORM_BUFFER)
 			.withUniform("FroxelScatter", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("FroxelTransmittance", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("RtProbeMap", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("RtEntityData", UniformType.UNIFORM_BUFFER)
 			).build();
 	private static final Identifier ENTITY_SHADER = Identifier.withDefaultNamespace("core/entity");
 	private static final Identifier SHADER = Identifier.fromNamespaceAndPath("bedrockvisuals", "entity/entity");
@@ -58,7 +60,7 @@ public final class EntityPass {
 	public static boolean appliesTo(RenderPipeline pipeline) {
 		return !failed && inLevelPass && DeferredRenderer.replacesSky() && LightingPass.lightingData() != null
 				&& LightingPass.atmosphereData() != null && LightingPass.gradingData() != null
-				&& LightingPass.distantData() != null
+				&& LightingPass.distantData() != null && LightingPass.rtEntityData() != null
 				&& ENTITY_SHADER.equals(pipeline.getShaders().get(ShaderType.FRAGMENT));
 	}
 
@@ -99,6 +101,11 @@ public final class EntityPass {
 				linear);
 		pass.setUniform("FroxelTransmittance", FroxelVolume.transmittanceView() != null
 				? FroxelVolume.transmittanceView() : fallback, linear);
+		// The ray-traced light (raytrace/EntityProbes), when on this frame (RtEntityData says so).
+		pass.setUniform("RtEntityData", LightingPass.rtEntityData());
+		var probes = dev.bedrockvisuals.raytrace.EntityProbes.active() ? dev.bedrockvisuals.raytrace.EntityProbes.view()
+				: null;
+		pass.setUniform("RtProbeMap", probes != null ? probes : fallback, nearest);
 		LocalExposure.bind(pass);
 	}
 

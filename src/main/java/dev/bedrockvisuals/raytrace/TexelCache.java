@@ -322,7 +322,8 @@ final class TexelCache {
 	/** The cache's buffer, made (and zeroed) on first use. */
 	static RtBuffer buffer(RtDevice rt) {
 		if (buffer == null) {
-			buffer = rt.deviceBuffer((long) ENTRIES * ENTRY_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+			// The entities' light probes (EntityProbes) after the entries.
+			buffer = rt.deviceBuffer((long) ENTRIES * ENTRY_SIZE + EntityProbes.BYTES, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
 					| VK_BUFFER_USAGE_TRANSFER_DST_BIT);
 			long serial = rt.submit(commands -> vkCmdFillBuffer(commands, buffer.buffer(), 0, VK_WHOLE_SIZE, 0));
 			rt.waitFor(serial);

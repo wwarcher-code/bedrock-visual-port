@@ -300,7 +300,8 @@ public final class LightVolume {
 		view = device.createTextureView(texture);
 	}
 
-	static GpuTextureView view() {
+	/** The volume's texture (also read by raytrace/EntityProbes for solid blocks), or null before it is made. */
+	public static GpuTextureView view() {
 		return view;
 	}
 

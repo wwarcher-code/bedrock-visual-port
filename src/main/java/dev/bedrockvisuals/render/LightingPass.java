@@ -113,6 +113,20 @@ public final class LightingPass {
 	private static boolean froxelTried;
 	/** RtShadowData (lighting/deferred.fsh): the ray-traced shadows' and emissive light's flags. */
 	private static GpuBuffer rtShadowData;
+	/**
+	 * RtEntityData (entity/entity.fsh): the entities' ray-traced light. A vec4 of the probe grid's corner relative
+	 * to the camera (raytrace/EntityProbes) and whether it is on; a vec4 of the share of Bedrock's block light kept
+	 * under it, how many lights entities carry, and the light's gain; then those lights (EntityLights), two vec4s
+	 * each, relative to the camera.
+	 */
+	private static GpuBuffer rtEntityData;
+	static final int ENTITY_LIGHTS = 32;
+	private static final float[] CARRIED = new float[ENTITY_LIGHTS * 8];
+
+	/** The entities' ray-traced light data, written each frame before the entities are drawn. */
+	static GpuBuffer rtEntityData() {
+		return rtEntityData;
+	}
 
 	private LightingPass() {
 	}
@@ -148,6 +162,29 @@ public final class LightingPass {
 					.putVec4(traced ? 1 : 0, dev.bedrockvisuals.raytrace.RtShadows.comparing() ? 1 : 0, 0, 0)
 					.putVec4(emissive ? 1 : 0, dev.bedrockvisuals.raytrace.RtEmissive.floorShare(),
 							dev.bedrockvisuals.raytrace.RtEmissive.bounceActive() ? 1 : 0, 0).get());
+		}
+		if (rtEntityData == null) {
+			rtEntityData = RenderSystem.getDevice().createBuffer(() -> "Bedrock Visuals entities' ray-traced light data",
+					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, 32 + ENTITY_LIGHTS * 32);
+		}
+		try (MemoryStack stack = MemoryStack.stackPush()) {
+			boolean probes = dev.bedrockvisuals.raytrace.EntityProbes.active();
+			int carried = probes && dev.bedrockvisuals.raytrace.RtEmissive.entityLights()
+					? dev.bedrockvisuals.raytrace.EntityLights.writeCameraRelative(CARRIED, ENTITY_LIGHTS,
+							dev.bedrockvisuals.raytrace.EntityProbes.cameraX(),
+							dev.bedrockvisuals.raytrace.EntityProbes.cameraY(),
+							dev.bedrockvisuals.raytrace.EntityProbes.cameraZ()) : 0;
+			Std140Builder builder = Std140Builder.onStack(stack, 32 + ENTITY_LIGHTS * 32)
+					.putVec4(dev.bedrockvisuals.raytrace.EntityProbes.cornerRelativeX(),
+							dev.bedrockvisuals.raytrace.EntityProbes.cornerRelativeY(),
+							dev.bedrockvisuals.raytrace.EntityProbes.cornerRelativeZ(), probes ? 1 : 0)
+					.putVec4(dev.bedrockvisuals.raytrace.RtEmissive.floorShare(), carried,
+							dev.bedrockvisuals.raytrace.RtEmissive.gain(), 0);
+			for (int i = 0; i < ENTITY_LIGHTS * 2; i++) {
+				int o = i * 4;
+				builder.putVec4(CARRIED[o], CARRIED[o + 1], CARRIED[o + 2], CARRIED[o + 3]);
+			}
+			encoder.writeToBuffer(rtEntityData.slice(), builder.get());
 		}
 		Matrix4f inverseViewProjection = new Matrix4f(projection).mul(modelView).invert();
 		try (MemoryStack stack = MemoryStack.stackPush()) {

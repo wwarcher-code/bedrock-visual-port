@@ -47,7 +47,7 @@ public final class RtEmissive {
 	}
 
 	/** Bindings, push constants and functions every stage shares. */
-	private static final String COMMON = """
+	static final String COMMON = """
 			layout(set = 0, binding = 0) uniform accelerationStructureEXT scene;
 			struct InstanceInfo { uvec2 vertices; uint kind; uint stride; uint firstVertex[3]; uint passes; };
 			layout(set = 0, binding = 1, std430) readonly buffer Instances { InstanceInfo instances[]; };
@@ -69,11 +69,12 @@ public final class RtEmissive {
 			    ivec4 changeCount;  // x: how many places the world changed since the last frame (TexelCache)
 			    ivec4 changes[32]; // per change: the lowest and the highest world block it reaches
 			    ivec4 entityCount;  // x: how many lights entities carry this frame (EntityLights); y: 1 if the scene
-			                        // has entities at all (their shadows over the emitted light are traced apart)
+			                        // has entities at all (their shadows over the emitted light are traced apart);
+			                        // z: 1 if the light volume is there (EntityProbes' solid blocks)
 			    vec4 entityLights[64]; // per light: its position (relative to the scene's origin) and radius; its
 			                           // colour times its strength, and its reach
 			};
-			layout(set = 0, binding = 10, std430) writeonly buffer Output { uvec2 pixels[]; };
+			layout(set = 0, binding = OUTPUT_BINDING, std430) writeonly buffer Output { uvec2 pixels[]; };
 			layout(buffer_reference, scalar, buffer_reference_align = 4) readonly buffer Words { uint w[]; };
 			layout(push_constant) uniform Params {
 			    mat4 inverseViewProjection; // clip space to camera-relative world space (the lighting pass's)
@@ -229,6 +230,7 @@ public final class RtEmissive {
 			#extension GL_EXT_buffer_reference_uvec2 : require
 			#extension GL_EXT_scalar_block_layout : require
 			layout(local_size_x = 8, local_size_y = 8) in;
+			#define OUTPUT_BINDING 10
 			""";
 
 	/** Stage 1, a thread a pixel: samples of the light at the pixel's texel, added to its cache entry. */
@@ -499,6 +501,7 @@ public final class RtEmissive {
 			#extension GL_EXT_buffer_reference_uvec2 : require
 			#extension GL_EXT_scalar_block_layout : require
 			layout(local_size_x = 64) in;
+			#define OUTPUT_BINDING 10
 			""" + COMMON + """
 			void main() {
 			    blendTexel(gl_GlobalInvocationID.x, size.z, float(originBlock.w));
@@ -810,6 +813,7 @@ public final class RtEmissive {
 	public static void trace(GpuTextureView depth, GpuTextureView normal, GpuTextureView atlas, Matrix4fc projection,
 			Matrix4fc modelView, Vector3fc towardsLight, Vector3fc lightColor) {
 		tracedThisFrame = false;
+		EntityProbes.skip();
 		if ((mode == Mode.OFF && !bounce) || failed) {
 			return;
 		}
@@ -861,16 +865,24 @@ public final class RtEmissive {
 				carried = EntityLights.write(EntityLights.collect(frame.cameraX(), frame.cameraY(), frame.cameraZ()),
 						frameData, ENTITY_LIGHTS_AT + 16, frame.originX(), frame.originY(), frame.originZ());
 			}
-			frameData.putInt(ENTITY_LIGHTS_AT, carried).putInt(ENTITY_LIGHTS_AT + 4, EntityGeometry.quads() > 0 ? 1 : 0);
+			com.mojang.renderpearl.api.textures.GpuTextureView lightVolume = dev.bedrockvisuals.render.LightVolume.view();
+			frameData.putInt(ENTITY_LIGHTS_AT, carried).putInt(ENTITY_LIGHTS_AT + 4, EntityGeometry.quads() > 0 ? 1 : 0)
+					.putInt(ENTITY_LIGHTS_AT + 8, lightVolume != null ? 1 : 0);
 
-			PASS.dispatch(rt, w * 2, h, List.of(new FrameCompute.Structure(frame.tlas()),
+			List<FrameCompute.Binding> bindings = List.of(new FrameCompute.Structure(frame.tlas()),
 					new FrameCompute.Buffer(frame.instances().buffer()), new FrameCompute.Image(depth),
 					new FrameCompute.Image(normal), new FrameCompute.Image(atlas), new FrameCompute.Image(materials),
 					new FrameCompute.Buffer(grid.lights().buffer()), new FrameCompute.Buffer(grid.cells().buffer()),
-					new FrameCompute.Buffer(TexelCache.buffer(rt).buffer()), new FrameCompute.Buffer(params.buffer())),
-					constants, new int[][] {{(w + 7) / 8, (h + 7) / 8, 1}, {TexelCache.ENTRIES / 64, 1, 1},
-							{(w + 7) / 8, (h + 7) / 8, 1}});
+					new FrameCompute.Buffer(TexelCache.buffer(rt).buffer()), new FrameCompute.Buffer(params.buffer()));
+			PASS.dispatch(rt, w * 2, h, bindings, constants, new int[][] {{(w + 7) / 8, (h + 7) / 8, 1},
+					{TexelCache.ENTRIES / 64, 1, 1}, {(w + 7) / 8, (h + 7) / 8, 1}});
 			tracedThisFrame = true;
+			// The entities' light (EntityProbes), with the emitted light.
+			if (mode != Mode.OFF) {
+				EntityProbes.dispatch(rt, bindings, constants, lightVolume, materials, frame);
+			} else {
+				EntityProbes.skip();
+			}
 		} catch (RuntimeException e) {
 			failed = true;
 			failure = e.getMessage();

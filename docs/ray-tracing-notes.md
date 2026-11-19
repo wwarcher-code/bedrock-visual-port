@@ -419,8 +419,8 @@ many seconds and lit up one by one. Two causes:
 - Also fixed: with ray tracing saved on, the game crashed at startup (the device was asked for before it
   existed).
 
-**Still to do for entities:** mobs themselves (lit forward) still take Bedrock's block light, not the traced
-light; entity textures' own emissive texels (eyes) aren't lights; the carried light doesn't bounce.
+**Still to do for entities:** entity textures' own emissive texels (eyes) aren't lights; the carried light
+doesn't bounce; carried light on entities is unshadowed.
 
 **Still to do for the bounce:** sky light bounced as well, in place of Bedrock's ambient term, as an option;
 entity textures for their bounce colour; glossy (specular) bounce.
@@ -447,6 +447,18 @@ stopped at the cell's edge in a straight line. Cells now list 96, and each 8 x 8
 up to half a cell away, at random every frame, so a light dropped from one cell's list fades out over a few
 blocks. The pick among a cell's lights is a binary search over running totals. At 1080p, 1 ray a pixel: 16.8 ms
 a frame before, 17.6 after; at 8 rays a pixel 33 before, 40 after.
+
+**Entities lit by the traced light (2026-11-19).** Entities are lit forward (entity/entity.fsh), off the
+G-buffer and the texel cache, and kept Bedrock's block light while the world around them had the traced light.
+- **Probes** (`EntityProbes`): one a block in a 48 x 24 x 48 grid around the camera, each frame 8 samples of the
+  emitted light from the light grid (shadow rays through the scene), kept as an ambient cube (the light on a
+  surface facing each axis), averaged over up to 24 frames and reset where the world changes. Stored after the
+  texel cache's entries in its buffer, wrapped by world position; output as an atlas the entity shader reads.
+- Probes in solid blocks (the light volume's flag) are left out of the blend, so a mob standing on a floor isn't
+  darkened by the probe inside it.
+- The entity shader blends the eight probes around each point (ambient cube by its normal), adds the lights
+  entities carry (unshadowed), and uses that in place of Bedrock's block light (or over the floor share).
+- At 1080p, 1 ray a pixel: 17.1 ms a frame (17.6 before, within noise).
 
 **Later, outside ray tracing:** take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.
