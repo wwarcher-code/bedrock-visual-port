@@ -59,12 +59,17 @@ public final class AutoExposure {
 	private AutoExposure() {
 	}
 
-	/** While set, the exposure stays at this average luminance (tests that compare frames' brightness). */
+	/**
+	 * While set, the exposure stays at this average luminance, and local exposure at this adapted one (tests that
+	 * compare frames' brightness).
+	 */
 	private static float lockedAverage = Float.NaN;
+	private static float lockedAdapted = Float.NaN;
 
-	/** Holds the exposure where it is now (true) or lets it adapt again (false). */
+	/** Holds the exposure (global and local) where it is now (true) or lets it adapt again (false). */
 	public static void lock(boolean locked) {
 		lockedAverage = locked ? averageLuminance() : Float.NaN;
+		lockedAdapted = locked ? adaptedLuminance() : Float.NaN;
 	}
 
 	/** The exposure this frame's lighting is multiplied by, in this renderer's units. */
@@ -86,6 +91,9 @@ public final class AutoExposure {
 	 * Local exposure reads this; the min/max clamp is for the exposure alone.
 	 */
 	public static float adaptedLuminance() {
+		if (!Float.isNaN(lockedAdapted)) {
+			return lockedAdapted;
+		}
 		return Float.isNaN(adaptedLog) ? 0.18f : (float) Math.pow(2, adaptedLog);
 	}
 

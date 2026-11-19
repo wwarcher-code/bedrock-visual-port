@@ -66,6 +66,8 @@ public final class RtEmissive {
 			    vec4 towardsLight;  // the sun, or the moon at night (the light that casts this frame's shadows)
 			    vec4 lightColor;    // its light, as the lighting pass's sunLight() or moonLight()
 			    vec4 switches;      // x: emissive light on, y: bounce on, z: the bounce's gain, w: the emissive's gain
+			    ivec4 changeCount;  // x: how many places the world changed since the last frame (TexelCache)
+			    ivec4 changes[32]; // per change: the lowest and the highest world block it reaches
 			};
 			layout(set = 0, binding = 10, std430) writeonly buffer Output { uvec2 pixels[]; };
 			layout(buffer_reference, scalar, buffer_reference_align = 4) readonly buffer Words { uint w[]; };
@@ -317,13 +319,16 @@ public final class RtEmissive {
 			    if (nDotL > 0.0 && dot(lightColor.rgb, vec3(1.0)) > 0.0 && !occluded(hit + hitNormal * 0.01, towards, 1024.0)) {
 			        light += albedo / PI * lightColor.rgb * nDotL;
 			    }
-			    // And the light cached at its texel (emitted and bounced): the cache feeding itself.
+			    // And the light cached at its texel (emitted and bounced): the cache feeding itself. Its fast average
+			    // (TexelCache), not the slow one shown: light passed on from surface to surface at the slow average's pace
+			    // took seconds to settle after a change, a second more for every bounce; the receiving texel's own
+			    // average smooths what the fast one adds in noise.
 			    if (terrain) {
 			        int level = texelLevel(length(hit - camera.xyz));
 			        vec3 centre = texelCentre(hit, hitNormal, false, level);
 			        int slot = findTexel(texelKey(centre, hitNormal, false, originBlock.xyz, level), false);
 			        if (slot >= 0) {
-			            light += albedo * (entries[slot].historyA.rgb * switches.x + entries[slot].historyB.rgb);
+			            light += albedo * (entries[slot].fastA.rgb * switches.x + entries[slot].fastB.rgb);
 			        }
 			    }
 			    return light * switches.z;
@@ -345,6 +350,16 @@ public final class RtEmissive {
 			    if (slot < 0) {
 			        return;
 			    }
+			    ivec3 block = ivec3(floor(p)) + originBlock.xyz;
+			    placeTexel(slot, block, level);
+			    // A texel whose history is new (just seen, or wiped by a change near it this frame) takes more samples
+			    // for its first frames, so its light is right and clean at once: 12, then 6, 4, 3 and 2.
+			    bool fresh = changeCount.x > 0 && changedNear(block);
+			    float held = fresh ? 0.0 : entries[slot].historyA.w;
+			    int samples = max(int(grid.w), 1);
+			    if (held < 5.0) {
+			        samples = max(samples, int(12.0 / (held + 1.0)));
+			    }
 			    state = (pixel.y * size.x + pixel.x) * 9781u + size.z * 6271u + 1u;
 			    sequencePixel = pixel.y * size.x + pixel.x;
 
@@ -365,7 +380,6 @@ public final class RtEmissive {
 			        weights[i] = w;
 			        total += w;
 			    }
-			    int samples = max(int(grid.w), 1);
 			    for (int sampleIndex = 0; sampleIndex < samples; sampleIndex++) {
 			        uint stream = uint(sampleIndex) * 2u;
 			        vec3 emitted = emissiveSample(p, g, n, thinSheet, count, indexBase, weights, total, sequence3(stream));
@@ -468,18 +482,20 @@ public final class RtEmissive {
 	private static final float HISTORY_SECONDS = 1.0f;
 	private static final int MIN_HISTORY = 16;
 	private static final int MAX_HISTORY = 96;
+	/** Places the world changed since the last dispatch (TexelCache), at most {@link #MAX_CHANGES}. */
+	private static final int MAX_CHANGES = 16;
 	/**
-	 * After the world changes (a section built again: a block placed or broken), every texel's slow average is
-	 * held to {@link #REACT_HISTORY} frames for {@link #REACT_SECONDS} while playing (the new light can take a few
-	 * frames to reach the scene: Sodium's rebuild, then the light's neighbours' rebuilds; and the bounce settles
-	 * after the light it bounces, since its rays read the cache), or for
-	 * {@link #REACT_SUBFRAMES} dispatches in exports; then it grows back a frame at a time.
+	 * How far a change reaches, in blocks: a block placed or broken changes the light and shadows of the texels
+	 * around it, as far as a light reaches (EmissiveLights' reach is up to 32 blocks; most are under 20).
 	 */
-	private static final double REACT_SECONDS = 0.6;
-	private static final int REACT_SUBFRAMES = 16;
-	private static final int REACT_HISTORY = 8;
-	private static long reactUntil;
-	private static int reactSubframes;
+	private static final int CHANGE_REACH = 24;
+	/**
+	 * Per change: its box (lowest, highest world block) and how many more dispatches it wipes texels for. Two:
+	 * in the first frame after a change the bounce rays still read their neighbours' light from before it, and a
+	 * second wipe drops that frame from the history instead of letting it fade out over the next second.
+	 */
+	private static final java.util.List<int[]> CHANGES = new java.util.ArrayList<>();
+	private static final int CHANGE_DISPATCHES = 2;
 	/**
 	 * In exports, in sub-frames: 64 is 8 output frames at 8 sub-frames each, which is as far back as a change
 	 * too small to set off the history's reaction (TexelCache) can trail.
@@ -493,22 +509,29 @@ public final class RtEmissive {
 	private RtEmissive() {
 	}
 
-	/** The world changed: the cached light follows quickly for the next few frames. */
-	static void react() {
-		reactUntil = System.nanoTime() + (long) (REACT_SECONDS * 1e9);
-		reactSubframes = REACT_SUBFRAMES;
+	/**
+	 * A section of the world (its origin, a multiple of 16) changed: a block placed or broken, its light. The cached
+	 * light of every texel near it starts over from the next frame (TexelCache).
+	 */
+	static void changed(int originX, int originY, int originZ) {
+		int[] box = {originX - CHANGE_REACH, originY - CHANGE_REACH, originZ - CHANGE_REACH, originX + 15 + CHANGE_REACH,
+				originY + 15 + CHANGE_REACH, originZ + 15 + CHANGE_REACH, CHANGE_DISPATCHES};
+		if (CHANGES.size() < MAX_CHANGES) {
+			CHANGES.add(box);
+		} else {
+			// More than fit: the last one grows to hold them.
+			int[] last = CHANGES.getLast();
+			for (int i = 0; i < 3; i++) {
+				last[i] = Math.min(last[i], box[i]);
+				last[i + 3] = Math.max(last[i + 3], box[i + 3]);
+			}
+			last[6] = CHANGE_DISPATCHES;
+		}
 	}
 
 	private static int history(boolean exporting) {
 		if (exporting) {
-			if (reactSubframes > 0) {
-				reactSubframes--;
-				return REACT_HISTORY;
-			}
 			return EXPORT_HISTORY;
-		}
-		if (System.nanoTime() < reactUntil) {
-			return REACT_HISTORY;
 		}
 		return Math.clamp(Math.round(net.minecraft.client.Minecraft.getInstance().getFps() * HISTORY_SECONDS),
 				MIN_HISTORY, MAX_HISTORY);
@@ -617,12 +640,22 @@ public final class RtEmissive {
 					.putInt(124, history(exporting));
 
 			// This frame's light and switches, freed once the frame has run.
-			RtBuffer params = rt.hostBuffer(48, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+			RtBuffer params = rt.hostBuffer(64 + MAX_CHANGES * 32, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 			rt.free(params);
-			params.bytes().putFloat(0, towardsLight.x()).putFloat(4, towardsLight.y()).putFloat(8, towardsLight.z())
+			ByteBuffer frameData = params.bytes();
+			frameData.putFloat(0, towardsLight.x()).putFloat(4, towardsLight.y()).putFloat(8, towardsLight.z())
 					.putFloat(12, 0).putFloat(16, lightColor.x()).putFloat(20, lightColor.y())
 					.putFloat(24, lightColor.z()).putFloat(28, 0).putFloat(32, mode != Mode.OFF ? 1 : 0)
 					.putFloat(36, bounce ? 1 : 0).putFloat(40, bounceGain).putFloat(44, gain);
+			// The places the world changed since the last dispatch: the texels near them start over.
+			frameData.putInt(48, CHANGES.size());
+			for (int i = 0; i < CHANGES.size(); i++) {
+				int[] box = CHANGES.get(i);
+				int at = 64 + i * 32;
+				frameData.putInt(at, box[0]).putInt(at + 4, box[1]).putInt(at + 8, box[2]).putInt(at + 12, 0)
+						.putInt(at + 16, box[3]).putInt(at + 20, box[4]).putInt(at + 24, box[5]).putInt(at + 28, 0);
+			}
+			CHANGES.removeIf(box -> --box[6] <= 0);
 
 			PASS.dispatch(rt, w * 2, h, List.of(new FrameCompute.Structure(frame.tlas()),
 					new FrameCompute.Buffer(frame.instances().buffer()), new FrameCompute.Image(depth),

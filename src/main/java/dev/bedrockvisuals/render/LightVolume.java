@@ -89,12 +89,19 @@ public final class LightVolume {
 		int topLightSection = level.getLightEngine().getMaxLightSection();
 		java.util.Map<net.minecraft.world.level.block.Block, float[]> colors = BlockLightColors.declared();
 		ByteBuffer data = null;
+		// After an edit (a block placed or broken, and the light updates after it), every slice is looked at this
+		// frame, so the change shows at once. Beyond the usual few slices, only parts whose chunk changed are read
+		// again: parts that need reading because the camera moved wait for their turn (while flying, every chunk
+		// loading counted as a change, and reading all its slices at once cost up to 3.4 ms in a frame).
+		boolean urgent = ChunkChanges.takeEdited() && filled >= SIZE_Y;
+		int firstSlice = nextSlice;
 		try {
-			for (int n = 0; n < SLICES_PER_FRAME; n++) {
+			for (int n = 0; n < (urgent ? SIZE_Y : SLICES_PER_FRAME); n++) {
 				// The world y nearest the camera that falls on this slice.
 				int slice = nextSlice;
 				nextSlice = (nextSlice + 1) % SIZE_Y;
-				int visit = ++sliceVisits[slice];
+				boolean extra = n >= SLICES_PER_FRAME;
+				int visit = extra ? sliceVisits[slice] : ++sliceVisits[slice];
 				int y = cameraY - SIZE_Y / 2 + Math.floorMod(slice - (cameraY - SIZE_Y / 2), SIZE_Y);
 				int sectionY = SectionPos.blockToSectionCoord(y);
 				int localY = y & 15;
@@ -118,9 +125,13 @@ public final class LightVolume {
 						long key = ((long) chunkX << 32) ^ (chunkZ & 0xFFFFFFFFL);
 						int range = (fromX & 15) | (toX & 15) << 4 | (fromZ & 15) << 8 | (toZ & 15) << 12;
 						int stamp = ChunkChanges.stamp(chunkX, chunkZ);
-						boolean refresh = (visit + part) % REFRESH_VISITS == 0;
-						if (!refresh && partKey[part] == key && partRange[part] == range && partY[part] == y
-								&& partStamp[part] == stamp && partChunk[part] == chunk) {
+						boolean refresh = !extra && (visit + part) % REFRESH_VISITS == 0;
+						boolean same = partKey[part] == key && partRange[part] == range && partY[part] == y
+								&& partChunk[part] == chunk;
+						if (!refresh && same && partStamp[part] == stamp) {
+							continue;
+						}
+						if (extra && !same) {
 							continue;
 						}
 						partKey[part] = key;
@@ -133,9 +144,12 @@ public final class LightVolume {
 						changed = true;
 					}
 				}
-				SLICE_CAMERA_X[slice] = cameraX;
-				SLICE_CAMERA_Y[slice] = cameraY;
-				SLICE_CAMERA_Z[slice] = cameraZ;
+				if (!extra) {
+					// (An extra visit skips the parts the camera moved over: the slice isn't up to date for it.)
+					SLICE_CAMERA_X[slice] = cameraX;
+					SLICE_CAMERA_Y[slice] = cameraY;
+					SLICE_CAMERA_Z[slice] = cameraZ;
+				}
 				if (changed || filled < SIZE_Y) {
 					// The slice's light colour sources: those of the parts now in it.
 					java.util.List<BlockLightColors.Emitter> sliceEmitters = null;
@@ -162,10 +176,16 @@ public final class LightVolume {
 					RenderSystem.getDevice().createCommandEncoder().writeToTexture(texture, data, 0, 0, tileX, tileY,
 							SIZE_XZ, SIZE_XZ);
 				}
-				if (filled >= SIZE_Y - 1 && nextSlice == 0) {
-					BlockLightColors.rebuild(cameraX, cameraY, cameraZ);
+				if (filled >= SIZE_Y - 1 && nextSlice == 0 && !urgent) {
+					BlockLightColors.rebuild(cameraX, cameraY, cameraZ, false);
 				}
 				filled = Math.min(SIZE_Y, filled + 1);
+			}
+			if (urgent) {
+				// The usual rotation goes on from where it was.
+				nextSlice = (firstSlice + SLICES_PER_FRAME) % SIZE_Y;
+				// The coloured block light, spread from the volume, follows the change too.
+				BlockLightColors.rebuild(cameraX, cameraY, cameraZ, true);
 			}
 		} finally {
 			if (data != null) {

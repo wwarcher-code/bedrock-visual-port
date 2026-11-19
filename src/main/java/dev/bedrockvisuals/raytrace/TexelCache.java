@@ -14,21 +14,27 @@ import static org.lwjgl.vulkan.VK12.*;
  * ambient terms). Both are in the units of Bedrock's indirect light (light arriving over pi: the lighting pass
  * multiplies them by the diffuse colour).
  *
- * <p>A hash table on the GPU of {@link #ENTRIES} entries, 112 bytes each (std430):
+ * <p>A hash table on the GPU of {@link #ENTRIES} entries, 128 bytes each (std430):
  * <pre>
  *   uint key        the texel's check hash (0: empty); claimed with an atomic compare-and-swap
  *   uint lastFrame  the frame its samples last arrived (entries left unseen for EVICT frames are freed)
  *   uint count      this frame's samples so far
- *   uint pad
+ *   uint wiped      the frame its history was last wiped by a change near it
  *   uvec4 sumA      this frame's samples of A, rgb in 1/1024 fixed point (atomic adds)
  *   uvec4 sumB      of B
  *   vec4 historyA   the slow average of A (rgb), shown, and how many frames it holds (w, capped)
  *   vec4 historyB   the slow average of B (rgb), and how much a frame's luminance varies (w: its variance)
  *   vec4 fastA      the fast average of A (rgb), over the last FAST frames, and how many it holds (w)
  *   vec4 fastB      the fast average of B (rgb)
+ *   ivec4 position  the texel's world block (xyz) and level (w), for wiping it when the world changes near it
  * </pre>
- * The slow average hides the noise; the fast one notices real changes (a light placed or broken, a new shadow)
- * and the slow one jumps to it then (see blendTexel).
+ * The slow average hides the noise; the fast one notices changes the world doesn't report (see blendTexel). When
+ * the world reports one (a section built again: a block placed or broken), every texel near it, on screen or not,
+ * has its history wiped and starts over from the next frame's light: the change shows at once, a little noisy for
+ * the first frames.
+ *
+ * <p>The shader including this must declare, before it, {@code changeCount} (x: how many) and {@code changes[]}
+ * (per change, the lowest and the highest world block it reaches, as two ivec4s).
  * A texel is its world texel coordinates (in the face's plane: the texel; across it: the plane's step) at its
  * level, and its face's direction; crossed plants, with no axis-aligned face, by their cell. Level 0 is Bedrock's
  * 1/16-block texel; farther from the camera, where texels are smaller than a pixel, levels 1 to 4 halve the
@@ -39,12 +45,12 @@ import static org.lwjgl.vulkan.VK12.*;
  */
 final class TexelCache {
 	static final int ENTRIES = 1 << 21;
-	static final int ENTRY_SIZE = 112;
+	static final int ENTRY_SIZE = 128;
 
 	/** The GLSL for a shader with the cache at binding {@code CACHE_BINDING} (define it first). */
 	static final String GLSL = """
-			struct TexelEntry { uint key; uint lastFrame; uint count; uint pad; uvec4 sumA; uvec4 sumB;
-			    vec4 historyA; vec4 historyB; vec4 fastA; vec4 fastB; };
+			struct TexelEntry { uint key; uint lastFrame; uint count; uint wiped; uvec4 sumA; uvec4 sumB;
+			    vec4 historyA; vec4 historyB; vec4 fastA; vec4 fastB; ivec4 position; };
 			layout(set = 0, binding = CACHE_BINDING, std430) buffer TexelCache { TexelEntry entries[]; };
 			const uint CACHE_ENTRIES = ENTRIES_HEREu;
 			const uint PROBES = 8u;
@@ -116,6 +122,21 @@ final class TexelCache {
 			    return -1;
 			}
 
+			// Records where a texel is (its world block and level), for blendTexel's test against the changes.
+			void placeTexel(int slot, ivec3 block, int level) {
+			    entries[slot].position = ivec4(block, level);
+			}
+
+			// Whether the world changed near a world block this frame.
+			bool changedNear(ivec3 block) {
+			    for (int i = 0; i < changeCount.x; i++) {
+			        if (all(greaterThanEqual(block, changes[i * 2].xyz)) && all(lessThanEqual(block, changes[i * 2 + 1].xyz))) {
+			            return true;
+			        }
+			    }
+			    return false;
+			}
+
 			void addSample(int slot, vec3 a, vec3 b) {
 			    uvec3 fixedA = uvec3(clamp(a, 0.0, MAX_SAMPLE) * FIXED_POINT + 0.5);
 			    uvec3 fixedB = uvec3(clamp(b, 0.0, MAX_SAMPLE) * FIXED_POINT + 0.5);
@@ -140,11 +161,26 @@ final class TexelCache {
 			// light really changed: the slow average takes the fast one's value and count, and the change shows in a
 			// few frames instead of the whole slow history.
 			const float FAST = 6.0;
+			const uint WIPED_FRAMES = 24u;
+			const float WIPED_HISTORY = 8.0;
 			void blendTexel(uint slot, uint frame, float cap) {
 			    if (slot >= CACHE_ENTRIES || entries[slot].key == 0u) {
 			        return;
 			    }
 			    uint count = entries[slot].count;
+			    if (changeCount.x > 0 && changedNear(entries[slot].position.xyz)) {
+			        // The world changed near it: its history is forgotten, and this frame's light (or, unseen this
+			        // frame, the next it gets) is taken whole.
+			        entries[slot].historyA.w = 0.0;
+			        entries[slot].fastA.w = 0.0;
+			        entries[slot].wiped = frame;
+			    }
+			    // For WIPED_FRAMES after a wipe the slow average holds at most WIPED_HISTORY frames: the light bounced
+			    // from surface to surface takes a few frames to build up again after it, and a plain average from the
+			    // wipe on kept those first, too dark frames for a second or two.
+			    if (frame - entries[slot].wiped < WIPED_FRAMES) {
+			        cap = min(cap, WIPED_HISTORY);
+			    }
 			    if (count > 0u) {
 			        const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 			        vec3 meanA = vec3(entries[slot].sumA.xyz) / FIXED_POINT / float(count);
@@ -190,6 +226,7 @@ final class TexelCache {
 			        entries[slot].historyB = vec4(0.0);
 			        entries[slot].fastA = vec4(0.0);
 			        entries[slot].fastB = vec4(0.0);
+			        entries[slot].position = ivec4(0);
 			        entries[slot].key = 0u;
 			    }
 			}

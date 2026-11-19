@@ -16,6 +16,11 @@ public final class ChunkChanges {
 	static final int WRAP = 64;
 	private static final AtomicIntegerArray STAMPS = new AtomicIntegerArray(WRAP * WRAP);
 	private static final AtomicInteger NEXT = new AtomicInteger();
+	/** Set when anything changed since the light volume last looked (takeChanged). */
+	private static volatile boolean changed;
+	/** Until when (System.nanoTime) changes count as edits: a block placed or broken, and the light updates after. */
+	private static volatile long editsUntil;
+	private static final long EDIT_WINDOW = 300_000_000L;
 
 	private ChunkChanges() {
 	}
@@ -27,6 +32,23 @@ public final class ChunkChanges {
 	/** Something in the chunk column changed. */
 	public static void mark(int chunkX, int chunkZ) {
 		STAMPS.set(index(chunkX, chunkZ), NEXT.incrementAndGet());
+		changed = true;
+	}
+
+	/** A block was placed or broken in the chunk column: its changes, and the light updates after, are edits. */
+	public static void markEdit(int chunkX, int chunkZ) {
+		editsUntil = System.nanoTime() + EDIT_WINDOW;
+		mark(chunkX, chunkZ);
+	}
+
+	/**
+	 * Whether anything changed since the last call, shortly after an edit (chunks loading as the camera moves
+	 * aren't edits).
+	 */
+	static boolean takeEdited() {
+		boolean was = changed && System.nanoTime() < editsUntil;
+		changed = false;
+		return was;
 	}
 
 	/** The chunk column's stamp: different from an earlier one if it changed since. */

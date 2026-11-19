@@ -58,7 +58,7 @@ public final class SectionGeometry {
 
 	/** A section's built structure and its vertices. */
 	record Built(int originX, int originY, int originZ, long structure, long structureAddress, RtBuffer storage,
-			RtBuffer vertices, int[] firstVertex, int passes, int triangles, float[] lights) {
+			RtBuffer vertices, int[] firstVertex, int passes, int triangles, float[] lights, long shape) {
 		/** How many emissive quads {@link #lights} holds (EmissiveLights.FLOATS each). */
 		int lightCount() {
 			return lights.length / EmissiveLights.FLOATS;
@@ -117,6 +117,8 @@ public final class SectionGeometry {
 	private static void remove(long key) {
 		Built built = BUILT.remove(key);
 		if (built != null) {
+			// Gone (unloaded, or emptied by a block broken): the cached light around it follows.
+			RtEmissive.changed(built.originX(), built.originY(), built.originZ());
 			free(built);
 		}
 	}
@@ -224,6 +226,7 @@ public final class SectionGeometry {
 				int[] firstVertex = new int[PASSES];
 				int passes = 0;
 				float[] lights = EmissiveLights.NONE;
+				long shape = 0;
 				EmissiveLights.Emitters emitters = EmissiveLights.emitters(pending.originX(), pending.originY(),
 						pending.originZ());
 				long sectionRawStart = rawAt;
@@ -241,6 +244,7 @@ public final class SectionGeometry {
 					MemoryUtil.memCopy(MemoryUtil.memAddress(data), staging.mapped() + rawAt, data.remaining());
 					rawAt += data.remaining();
 					lights = EmissiveLights.collect(data, lights, emitters);
+					shape = shape * 31 + pass + 1 ^ shapeHash(data);
 					long positionsStart = positionsAt;
 					positionsAt = writePositions(stage, (int) positionsAt, data);
 					int passTriangles = passVertices / 4 * 2;
@@ -277,7 +281,7 @@ public final class SectionGeometry {
 				copy.get(0).srcOffset(sectionRawStart).dstOffset(0).size(sectionRaw);
 				vkCmdCopyBuffer(commands, staging.buffer(), raw.buffer(), copy);
 				results[s] = new Built(pending.originX(), pending.originY(), pending.originZ(), structure,
-						rt.structureAddress(structure), storage, raw, firstVertex, passes, triangles, lights);
+						rt.structureAddress(structure), storage, raw, firstVertex, passes, triangles, lights, shape);
 			}
 		} finally {
 			copy.free();
@@ -300,8 +304,13 @@ public final class SectionGeometry {
 			Built old = BUILT.put((long) keys.get(s), results[s]);
 			if (old != null) {
 				free(old);
-				// A section built again changed (a block placed or broken, its light): the cached light follows.
-				RtEmissive.react();
+				// A section built again with other geometry (a block placed or broken): the cached light follows.
+				// Rebuilt with only its light levels changed (Minecraft's light engine spreading a change over a few
+				// ticks), it changes nothing the rays see: wiping the cached light again for each of those kept
+				// restarting the bounce light for a second or two after a light was removed.
+				if (old.shape() != results[s].shape()) {
+					RtEmissive.changed(old.originX(), old.originY(), old.originZ());
+				}
 			}
 			builtBytes += results[s].storage().size() + results[s].vertices().size();
 			if (results[s].lightCount() > 0 || old != null && old.lightCount() > 0) {
@@ -334,6 +343,24 @@ public final class SectionGeometry {
 			}
 		}
 		return at;
+	}
+
+	/**
+	 * A hash of a pass's vertices without their light levels (the low half of each vertex's last word): what the
+	 * rays see of them, positions, texture coordinates, colours and materials.
+	 */
+	private static long shapeHash(ByteBuffer data) {
+		long hash = 1125899906842597L;
+		int words = data.remaining() / 4;
+		int base = data.position();
+		for (int i = 0; i < words; i++) {
+			int word = data.getInt(base + i * 4);
+			if (i % 5 == 4) {
+				word &= 0xFFFF0000;
+			}
+			hash = (hash ^ word) * 0x100000001b3L;
+		}
+		return hash;
 	}
 
 	/** The two triangles of a quad: (0, 1, 2) and (2, 3, 0). */

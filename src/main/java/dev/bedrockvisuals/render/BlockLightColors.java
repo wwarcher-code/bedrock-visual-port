@@ -90,9 +90,10 @@ public final class BlockLightColors {
 	}
 
 	/** After a full scan of the light volume: spreads the coloured light again, off the render thread. */
-	static void rebuild(int cameraX, int cameraY, int cameraZ) {
+	static void rebuild(int cameraX, int cameraY, int cameraZ, boolean changed) {
 		long now = System.currentTimeMillis();
-		if (pending != null || now - lastRebuild < 1000) {
+		// At most once a second as the camera moves; at once when the world changed (one spread at a time).
+		if (pending != null || (!changed && now - lastRebuild < 1000)) {
 			return;
 		}
 		lastRebuild = now;

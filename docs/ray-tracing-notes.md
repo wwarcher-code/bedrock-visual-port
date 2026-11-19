@@ -342,5 +342,32 @@ Results, still night room:
 Bedrock's own path settles at a similar pace without ray tracing (89% of the frame's change after 1.2 s): its
 fog's light volume refreshes a few slices at a time.
 
+**Near-instant light changes (2026-11-19).** A change now shows in the frame Minecraft draws it in:
+- **Wipes.** Each cache entry keeps its world block and level (entries are now 128 bytes). When a built section
+  is rebuilt with other geometry, every cached texel within 24 blocks of it, on screen or not, has its history
+  wiped for two frames, and its first frames take extra samples (12, then 6, 4, 3 and 2) so they aren't
+  static. For 24 frames after a wipe a texel's average holds at most 8 frames, then the long one resumes.
+  - A section's mesh is hashed without its light levels, so rebuilds that only carry Minecraft's light engine
+    spreading a change don't wipe: the rays don't see those.
+  - The global 0.6 s quick-blend window is gone.
+- **Bounce feeding.** Bounce rays read the fast average of the texels they hit, not the slow one shown. Light
+  passed on surface to surface took a second more to settle for every bounce.
+- **Light volume.** Within 0.3 s of a block edit, every slice of Bedrock's fog light volume is checked each
+  frame, not only the usual 3 of 48; only chunks that changed are read again.
+  - Chunks loading as the camera moves don't count as edits: counting them cost up to 3.4 ms a frame while
+    flying, and now it's 0.9 ms (p99) as before.
+  - The coloured block light is spread again at once after an edit, instead of at most once a second.
+- **Test tool fix.** `exposure lock` now freezes local exposure's adapted level too. It kept adapting
+  before, which showed up as a slow tail in every measurement.
+
+Results:
+- the traced light shows in the same frame as the placed lantern's own block;
+- the log puts the cache wipe 5-17 ms after Sodium's rebuild;
+- a `/setblock` takes 24-110 ms from the command to Sodium's rebuild, through the built-in server;
+- Bedrock's own path settles fully by 0.2 s (it was 1-3 s with the old lock);
+- in the second after a change the frame rises by a level or two out of 255 as the extra noise averages out
+  (noise darkens an average through the tone map). It goes up or down between runs, with or without bounce.
+- the still-scene flicker stays at about 0.5% of pixels changing by more than 8 levels with TAA off.
+
 **Still to do for the bounce:** sky light bounced as well, in place of Bedrock's ambient term, as an option;
 entity textures for their bounce colour; glossy (specular) bounce.

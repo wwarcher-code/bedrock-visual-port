@@ -25,13 +25,15 @@ abstract class LevelExtractorMixin {
 
 	@Inject(method = "blockChanged", at = @At("HEAD"))
 	private void bedrockvisuals$blockUpdated(BlockPos pos, int flags, CallbackInfo ci) {
-		bedrockvisuals$changed(pos.getX() >> 4, pos.getZ() >> 4);
+		WaterColumns.markDirty(pos.getX() >> 4, pos.getZ() >> 4);
+		ChunkChanges.markEdit(pos.getX() >> 4, pos.getZ() >> 4);
 	}
 
 	@Inject(method = "setBlockDirty(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;"
 			+ "Lnet/minecraft/world/level/block/state/BlockState;)V", at = @At("HEAD"))
 	private void bedrockvisuals$blockChanged(BlockPos pos, BlockState oldState, BlockState newState, CallbackInfo ci) {
-		bedrockvisuals$changed(pos.getX() >> 4, pos.getZ() >> 4);
+		WaterColumns.markDirty(pos.getX() >> 4, pos.getZ() >> 4);
+		ChunkChanges.markEdit(pos.getX() >> 4, pos.getZ() >> 4);
 	}
 
 	@Inject(method = "setBlocksDirty", at = @At("HEAD"))
