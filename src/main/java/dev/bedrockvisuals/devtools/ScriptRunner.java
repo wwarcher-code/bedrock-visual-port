@@ -36,6 +36,8 @@ import net.minecraft.client.Screenshot;
  * <li>{@code screenshot <file>} saves the game's picture (as the window shows it) as PNG;</li>
  * <li>{@code frametimes <seconds> <file>} records frame times (FrameTimes) to the file;</li>
  * <li>{@code wait <seconds>} holds the lines after it back for that long;</li>
+ * <li>{@code raytest} runs the ray query smoke test again; {@code rtscene on|off} turns the ray-traced scene on or off;
+ * {@code rtview <file>} saves a picture of the ray-traced scene from the camera (RtDebugView) as PNG;</li>
  * <li>{@code quit} closes the game (saving the world).</li>
  * </ul>
  */
@@ -150,6 +152,8 @@ public final class ScriptRunner {
 			case "lighting" -> DeferredRenderer.setEnabled(argument.equals("on"));
 			case "taa" -> dev.bedrockvisuals.render.TemporalAA.setEnabled(argument.equals("on"));
 			case "raytest" -> dev.bedrockvisuals.raytrace.RayQuerySmokeTest.rerun();
+			case "rtscene" -> dev.bedrockvisuals.raytrace.RtScene.setEnabled(argument.equals("on"));
+			case "rtview" -> dev.bedrockvisuals.raytrace.RtDebugView.request(Path.of(argument));
 			case "offline" -> {
 				if (argument.equals("on") || argument.equals("off")) {
 					dev.bedrockvisuals.render.OfflineRender.setForced(argument.equals("on"));

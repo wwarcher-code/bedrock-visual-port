@@ -110,6 +110,7 @@ lifetimes under frame budgets, off-frustum entities for shadows and reflections,
   - it casts four rays from a compute shader compiled with the game's shaderc (GLSL `GL_EXT_ray_query`);
   - it reads the results back. On the RTX 3080 Ti: hits [1, 0, 0, 1] at t = 1, about 0.3 s, once.
 - The status report has a `ray queries` line, and ScriptRunner's `raytest` line runs the test again.
+  A `ray-traced scene` line follows it.
 
 **Pitfalls met:**
 - renderpearl's VMA isn't created with buffer device addresses, so the ray tracing allocates its own memory
@@ -123,5 +124,44 @@ lifetimes under frame budgets, off-frustum entities for shadows and reflections,
   Set them explicitly. Without the Vulkan SDK's validation layers, the only symptom was a dispatch that wrote
   nothing.
 
-**Next: phase 2.** Acceleration structures for the world: Sodium's sections built once and rebuilt when they
-change, and entities each frame.
+**Phase 2, the world as ray queries see it (done, 2026-11-18).** `raytrace/RtScene`, off unless turned on
+(`rtscene on`, or `rtview`), rebuilt after every render of the level, before the hand:
+- **Memory and submissions (`RtDevice`).** The ray tracing has its own VMA allocator on Minecraft's device,
+  made with buffer device addresses. Its command buffers go to the game's graphics queue on the render thread,
+  each with a fence. Freed memory waits for the next submission to finish.
+- **Terrain (`SectionGeometry`).** One bottom-level structure per Sodium section, built once and kept until
+  the section changes or unloads:
+  - `RenderSectionManagerMixin` copies each pass's vertices out of Sodium's build output before Sodium
+    uploads and frees them, and drops sections Sodium unloads.
+  - Up to three geometries per section: solid (opaque), cutout and translucent (non-opaque, so shaders can
+    alpha-test them later). Each quad is two triangles, (0, 1, 2) and (2, 3, 0), in Sodium's order.
+  - Positions are decoded on the CPU into a staging buffer that the build reads and then drops. Sodium's own
+    vertices (`CompactChunkVertex`, 20 bytes) are copied to the GPU and kept, for shaders to read a hit's
+    texture coordinates, colour and light.
+  - At most 96 sections or 2^20 vertices are built a frame, oldest first.
+- **Entities (`EntityGeometry`).** Captured from Minecraft's own staged draws between the start of the level
+  and the hand, so the hand stays out:
+  - draws for the entity shader in the `ENTITY` format, as quads (entities, block entities, items in the
+    world), not the blob shadows, glints or emissive layers;
+  - their positions are camera-relative, and they are rebuilt into one structure each frame;
+  - `EntityRendererMixin` keeps entities within 48 blocks drawn even out of view while the scene is on.
+- **Top level.** Instances are placed relative to the camera's block. Each instance's custom index points into
+  a table of its vertices' address, kind, stride and its geometries' first vertices and passes.
+- **Checked on the RTX 3080 Ti:**
+  - `rtview <file>` saves a picture of the scene, traced from the camera and lit by the sun with ray-traced
+    shadows. Against the game's own frame, the terrain lines up, and the pig, cow and boat land on the same
+    pixels.
+  - Sections unload after a 1,500-block teleport (about 900 kept at render distance 8, 115 to 170 MB).
+  - The scene costs 0.5 ms of CPU a frame standing still and 0.8 ms flying at 20 blocks a second; frame time
+    is unchanged within noise (4.8 ms either way).
+
+**Pitfall met:** LWJGL's `memAddress(buffer)` already includes the buffer's position. Adding the position again
+wrote past a buffer and crashed the JVM (an access violation in `jbyte_disjoint_arraycopy`).
+
+**Still to do for the scene:**
+- compact the section structures (about half the memory);
+- alpha-test cutout geometry against the block atlas in the shaders;
+- include particles;
+- add Distant Horizons' terrain past the render distance.
+
+**Next: phase 3.** Ray-traced sun and moon shadows, checked against the shadow maps.
