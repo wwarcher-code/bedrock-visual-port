@@ -300,6 +300,8 @@ public final class SectionGeometry {
 			Built old = BUILT.put((long) keys.get(s), results[s]);
 			if (old != null) {
 				free(old);
+				// A section built again changed (a block placed or broken, its light): the cached light follows.
+				RtEmissive.react();
 			}
 			builtBytes += results[s].storage().size() + results[s].vertices().size();
 			if (results[s].lightCount() > 0 || old != null && old.lightCount() > 0) {

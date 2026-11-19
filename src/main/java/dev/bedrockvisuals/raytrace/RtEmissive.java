@@ -462,18 +462,56 @@ public final class RtEmissive {
 	/** Samples a pixel in each of the offline preset's sub-frames. */
 	private static int offlineSamples = 4;
 	/**
-	 * How many frames a texel's history holds at most (TexelCache) while playing: the light averages about the
-	 * last second and a half, and still follows changes.
+	 * How long a texel's slow average reaches back while playing (TexelCache), in seconds: as many frames as the
+	 * game draws in that time, between {@link #MIN_HISTORY} and {@link #MAX_HISTORY}.
 	 */
-	private static final int HISTORY = 96;
-	/** In exports, in sub-frames (the camera and the world hold still within each frame's sub-frames). */
-	private static final int EXPORT_HISTORY = 256;
+	private static final float HISTORY_SECONDS = 1.0f;
+	private static final int MIN_HISTORY = 16;
+	private static final int MAX_HISTORY = 96;
+	/**
+	 * After the world changes (a section built again: a block placed or broken), every texel's slow average is
+	 * held to {@link #REACT_HISTORY} frames for {@link #REACT_SECONDS} while playing (the new light can take a few
+	 * frames to reach the scene: Sodium's rebuild, then the light's neighbours' rebuilds; and the bounce settles
+	 * after the light it bounces, since its rays read the cache), or for
+	 * {@link #REACT_SUBFRAMES} dispatches in exports; then it grows back a frame at a time.
+	 */
+	private static final double REACT_SECONDS = 0.6;
+	private static final int REACT_SUBFRAMES = 16;
+	private static final int REACT_HISTORY = 8;
+	private static long reactUntil;
+	private static int reactSubframes;
+	/**
+	 * In exports, in sub-frames: 64 is 8 output frames at 8 sub-frames each, which is as far back as a change
+	 * too small to set off the history's reaction (TexelCache) can trail.
+	 */
+	private static final int EXPORT_HISTORY = 64;
 	private static boolean failed;
 	private static String failure = "";
 	private static boolean tracedThisFrame;
 	private static long frameNumber;
 
 	private RtEmissive() {
+	}
+
+	/** The world changed: the cached light follows quickly for the next few frames. */
+	static void react() {
+		reactUntil = System.nanoTime() + (long) (REACT_SECONDS * 1e9);
+		reactSubframes = REACT_SUBFRAMES;
+	}
+
+	private static int history(boolean exporting) {
+		if (exporting) {
+			if (reactSubframes > 0) {
+				reactSubframes--;
+				return REACT_HISTORY;
+			}
+			return EXPORT_HISTORY;
+		}
+		if (System.nanoTime() < reactUntil) {
+			return REACT_HISTORY;
+		}
+		return Math.clamp(Math.round(net.minecraft.client.Minecraft.getInstance().getFps() * HISTORY_SECONDS),
+				MIN_HISTORY, MAX_HISTORY);
 	}
 
 	public static Mode mode() {
@@ -576,7 +614,7 @@ public final class RtEmissive {
 					.putFloat(88, frame.originZ() - grid.minZ()).putFloat(92, exporting ? offlineSamples : samples);
 			constants.putInt(96, w).putInt(100, h).putInt(104, (int) frameNumber++).putInt(108, 0);
 			constants.putInt(112, frame.originX()).putInt(116, frame.originY()).putInt(120, frame.originZ())
-					.putInt(124, exporting ? EXPORT_HISTORY : HISTORY);
+					.putInt(124, history(exporting));
 
 			// This frame's light and switches, freed once the frame has run.
 			RtBuffer params = rt.hostBuffer(48, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);

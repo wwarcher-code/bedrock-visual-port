@@ -253,8 +253,8 @@ from the start (`raytrace/TexelCache`):
 - **Accumulate.** Every pixel adds its samples to its texel's entry, so a texel gathers its pixels' samples
   across frames instead of each pixel keeping its own. The entries live in a GPU hash table of 2^21 entries,
   48 bytes each, about 100 MB. Samples are summed as 1/1024 fixed point with atomic adds.
-- **Blend.** A pass over the entries blends each frame's samples into a running history, capped at 64 samples
-  while playing (it still follows changes) and 1024 in exports. Entries unseen for 600 frames are freed.
+- **Blend.** A pass over the entries blends each frame's samples into a running history (see the fixes below
+  for how it is weighted and how it follows changes). Entries unseen for 600 frames are freed.
 - **Gather.** Each pixel reads its texel's history.
 - **Keys.** A texel is its world texel coordinates and its face's direction. A crossed plant is its 1/16
   cell, since it has no axis-aligned face. Only the G-buffer's terrain is cached, so texels never move.
@@ -317,6 +317,30 @@ ray tracing). Three causes and fixes:
 
 Result: 0.4% with TAA off (mean change 1.15 levels against 0.12 without ray tracing), and 0.0% with TAA on.
 A glowstone placed in the room lights it within half a second.
+
+**Slow light changes fixed (2026-11-19).** The long average that stopped the static made changes crawl: a
+sea lantern placed in the room took about 3 s to light its surroundings, and a removed one was still half there
+after 1.2 s. Three changes:
+- **A fast average beside the slow one.** Each texel also keeps a 6-frame average, and the frames' variance.
+  When the fast average is further from the slow one than its noise explains (4 standard deviations, and a
+  twentieth of the light), the slow one jumps to it. Entries are now 112 bytes.
+  - Testing single frames against the history instead brought the static back (11%): single frames are too
+    noisy.
+- **React to world changes.** When a built section is rebuilt (a block placed or broken), every texel's slow
+  average is held to 8 frames for 0.6 s while playing, or 16 sub-frames in exports. The changed light and its
+  bounce settle within that window, and the average then grows back a frame at a time.
+  - A 10-frame window was too short at a high frame rate, and 0.3 s left the bounce behind, since the bounce
+    reads light that is itself still settling.
+- **History in time.** While playing, the slow average reaches back about a second (16 to 96 frames), not a
+  fixed 96 frames. In exports it covers 64 sub-frames (8 output frames), down from 256.
+
+Results, still night room:
+- around the placed lantern, 93% of its light shows after 0.3 s and 98% after 0.6 s (it took about 3 s);
+- a removed light is 67% to 95% gone after 0.3 s across runs (it was 23%);
+- the static stays fixed: 0.3% of pixels change by more than 8 levels with TAA off.
+
+Bedrock's own path settles at a similar pace without ray tracing (89% of the frame's change after 1.2 s): its
+fog's light volume refreshes a few slices at a time.
 
 **Still to do for the bounce:** sky light bounced as well, in place of Bedrock's ambient term, as an option;
 entity textures for their bounce colour; glossy (specular) bounce.

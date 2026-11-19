@@ -14,7 +14,7 @@ import static org.lwjgl.vulkan.VK12.*;
  * ambient terms). Both are in the units of Bedrock's indirect light (light arriving over pi: the lighting pass
  * multiplies them by the diffuse colour).
  *
- * <p>A hash table on the GPU of {@link #ENTRIES} entries, 80 bytes each (std430):
+ * <p>A hash table on the GPU of {@link #ENTRIES} entries, 112 bytes each (std430):
  * <pre>
  *   uint key        the texel's check hash (0: empty); claimed with an atomic compare-and-swap
  *   uint lastFrame  the frame its samples last arrived (entries left unseen for EVICT frames are freed)
@@ -22,9 +22,13 @@ import static org.lwjgl.vulkan.VK12.*;
  *   uint pad
  *   uvec4 sumA      this frame's samples of A, rgb in 1/1024 fixed point (atomic adds)
  *   uvec4 sumB      of B
- *   vec4 historyA   the averaged A (rgb) and how many frames it holds (w), capped so it still changes
- *   vec4 historyB   the averaged B (rgb)
+ *   vec4 historyA   the slow average of A (rgb), shown, and how many frames it holds (w, capped)
+ *   vec4 historyB   the slow average of B (rgb), and how much a frame's luminance varies (w: its variance)
+ *   vec4 fastA      the fast average of A (rgb), over the last FAST frames, and how many it holds (w)
+ *   vec4 fastB      the fast average of B (rgb)
  * </pre>
+ * The slow average hides the noise; the fast one notices real changes (a light placed or broken, a new shadow)
+ * and the slow one jumps to it then (see blendTexel).
  * A texel is its world texel coordinates (in the face's plane: the texel; across it: the plane's step) at its
  * level, and its face's direction; crossed plants, with no axis-aligned face, by their cell. Level 0 is Bedrock's
  * 1/16-block texel; farther from the camera, where texels are smaller than a pixel, levels 1 to 4 halve the
@@ -35,12 +39,12 @@ import static org.lwjgl.vulkan.VK12.*;
  */
 final class TexelCache {
 	static final int ENTRIES = 1 << 21;
-	static final int ENTRY_SIZE = 80;
+	static final int ENTRY_SIZE = 112;
 
 	/** The GLSL for a shader with the cache at binding {@code CACHE_BINDING} (define it first). */
 	static final String GLSL = """
 			struct TexelEntry { uint key; uint lastFrame; uint count; uint pad; uvec4 sumA; uvec4 sumB;
-			    vec4 historyA; vec4 historyB; };
+			    vec4 historyA; vec4 historyB; vec4 fastA; vec4 fastB; };
 			layout(set = 0, binding = CACHE_BINDING, std430) buffer TexelCache { TexelEntry entries[]; };
 			const uint CACHE_ENTRIES = ENTRIES_HEREu;
 			const uint PROBES = 8u;
@@ -124,22 +128,59 @@ final class TexelCache {
 			    atomicAdd(entries[slot].count, 1u);
 			}
 
-			// The blend stage, one thread an entry: this frame's mean into the history, as one frame of at most cap
-			// held, and entries unseen for EVICT frames freed. Each frame weighs the same whatever its sample count:
-			// a texel near the camera, many pixels wide, gets many samples a frame, and weighing them by count let
-			// every frame outweigh the history (each texel's light re-rolled every frame: static).
+			// The blend stage, one thread an entry: this frame's mean into the averages, and entries unseen for EVICT
+			// frames freed. Each frame weighs the same whatever its sample count (a texel near the camera, many
+			// pixels wide, gets many samples a frame; weighing them by count let every frame outweigh the history,
+			// each texel's light re-rolled every frame: static).
+			//
+			// Two averages: a slow one (up to cap frames) that hides the noise and is shown, and a fast one (FAST
+			// frames) that follows changes. A single frame is too noisy to tell a change from noise; the fast
+			// average isn't. When it is further from the slow one than its own noise explains (4 standard
+			// deviations of a FAST-frame average, from the frames' variance, and a twentieth of the light), the
+			// light really changed: the slow average takes the fast one's value and count, and the change shows in a
+			// few frames instead of the whole slow history.
+			const float FAST = 6.0;
 			void blendTexel(uint slot, uint frame, float cap) {
 			    if (slot >= CACHE_ENTRIES || entries[slot].key == 0u) {
 			        return;
 			    }
 			    uint count = entries[slot].count;
 			    if (count > 0u) {
-			        float held = entries[slot].historyA.w;
-			        float weight = 1.0 / (held + 1.0);
+			        const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 			        vec3 meanA = vec3(entries[slot].sumA.xyz) / FIXED_POINT / float(count);
 			        vec3 meanB = vec3(entries[slot].sumB.xyz) / FIXED_POINT / float(count);
-			        entries[slot].historyA = vec4(mix(entries[slot].historyA.rgb, meanA, weight), min(held + 1.0, cap));
-			        entries[slot].historyB = vec4(mix(entries[slot].historyB.rgb, meanB, weight), 0.0);
+			        float now = dot(meanA + meanB, LUMA);
+
+			        vec4 fastA = entries[slot].fastA;
+			        vec4 fastB = entries[slot].fastB;
+			        float fastWeight = 1.0 / (fastA.w + 1.0);
+			        // The frames' variance around the fast average (before this frame joins it).
+			        float before = dot(fastA.rgb + fastB.rgb, LUMA);
+			        float variance = fastA.w > 0.0
+			                ? mix(entries[slot].historyB.w, (now - before) * (now - before), 1.0 / 16.0) : 0.0;
+			        fastA = vec4(mix(fastA.rgb, meanA, fastWeight), min(fastA.w + 1.0, FAST));
+			        fastB = vec4(mix(fastB.rgb, meanB, fastWeight), 0.0);
+
+			        // Held to this frame's cap first: a lowered cap (the world changed) takes effect at once.
+			        float held = min(entries[slot].historyA.w, cap);
+			        float slowWeight = 1.0 / (held + 1.0);
+			        vec3 slowA = mix(entries[slot].historyA.rgb, meanA, slowWeight);
+			        vec3 slowB = mix(entries[slot].historyB.rgb, meanB, slowWeight);
+			        held = min(held + 1.0, cap);
+
+			        float fastLight = dot(fastA.rgb + fastB.rgb, LUMA);
+			        float slowLight = dot(slowA + slowB, LUMA);
+			        // An exponential average of weight w over noise of variance v varies by v * w / (2 - w).
+			        float fastNoise = sqrt(variance * fastWeight / (2.0 - fastWeight));
+			        if (fastA.w >= FAST && abs(fastLight - slowLight) > 4.0 * fastNoise + 0.05 * slowLight + 0.001) {
+			            slowA = fastA.rgb;
+			            slowB = fastB.rgb;
+			            held = fastA.w;
+			        }
+			        entries[slot].historyA = vec4(slowA, held);
+			        entries[slot].historyB = vec4(slowB, variance);
+			        entries[slot].fastA = fastA;
+			        entries[slot].fastB = fastB;
 			        entries[slot].sumA = uvec4(0u);
 			        entries[slot].sumB = uvec4(0u);
 			        entries[slot].count = 0u;
@@ -147,6 +188,8 @@ final class TexelCache {
 			    } else if (frame - entries[slot].lastFrame > EVICT) {
 			        entries[slot].historyA = vec4(0.0);
 			        entries[slot].historyB = vec4(0.0);
+			        entries[slot].fastA = vec4(0.0);
+			        entries[slot].fastB = vec4(0.0);
 			        entries[slot].key = 0u;
 			    }
 			}
