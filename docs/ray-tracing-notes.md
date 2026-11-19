@@ -460,5 +460,11 @@ G-buffer and the texel cache, and kept Bedrock's block light while the world aro
   entities carry (unshadowed), and uses that in place of Bedrock's block light (or over the floor share).
 - At 1080p, 1 ray a pixel: 17.1 ms a frame (17.6 before, within noise).
 
-**Later, outside ray tracing:** take a look at vertical (falling) water. The player asked for this on
+**Export check (2026-11-19).** The offline preset forced on (8 sub-frames, 16 rays a pixel each) in the test room with
+mobs, at 1080p: 48 ms a frame on average, so about 3 minutes of exporting a minute of 60 fps video; 0.10% of pixels
+change by more than 8 levels between frames a moment apart, against 1.38% while playing at 1 ray. A real Flashback
+export is still to try.
+
+**Later, outside ray tracing:** particles (lava's smoke) drawn nearly black at night, even beside lava: they are
+vanilla-lit into the graded image and probably need what entities got (EntityPass). And take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.
