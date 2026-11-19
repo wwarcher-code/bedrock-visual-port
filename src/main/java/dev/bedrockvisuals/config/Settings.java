@@ -36,7 +36,7 @@ public final class Settings {
 		boolean bounce;
 		float bounceGain = 1f;
 		int samples = 1;
-		int exportSamples = 4;
+		int exportSamples = 16;
 		int exportSubframes = 0;
 	}
 

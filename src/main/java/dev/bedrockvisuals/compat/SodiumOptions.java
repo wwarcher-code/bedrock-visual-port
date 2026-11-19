@@ -251,7 +251,7 @@ public final class SodiumOptions implements ConfigEntryPoint {
 						.setTooltip(text("Light samples each pixel takes in each sub-frame of an export."))
 						.setEnabledProvider(SodiumOptions::rayTracing)
 						.setRange(1, 16, 1)
-						.setDefaultValue(4)
+						.setDefaultValue(16)
 						.setValueFormatter(value -> text(Integer.toString(value)))
 						.setBinding(RtEmissive::setOfflineSamples, RtEmissive::offlineSamples)
 						.setStorageHandler(SAVE));

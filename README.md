@@ -229,7 +229,7 @@ by its Java light level.
   dark places stay visible.
 - `/bv light gain <x>` scales it (10 by default, which matches Bedrock a block or two from glowstone).
 - `/bv light samples <n>` sets samples per pixel while playing (1), and `/bv light samples export <n>` per
-  export sub-frame (4).
+  export sub-frame (16).
 
 **Ray-traced bounce light** (`/bv bounce on`, off by default). Sunlight, moonlight and the traced emitted light
 bounce off surfaces in their colours: the underside of an overhang lit by the sunny ground below it, a room's

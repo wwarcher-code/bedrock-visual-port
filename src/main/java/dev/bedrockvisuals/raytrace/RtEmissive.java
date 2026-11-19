@@ -640,7 +640,7 @@ public final class RtEmissive {
 	private static float floor = 0.35f;
 	private static int samples = 1;
 	/** Samples a pixel in each of the offline preset's sub-frames. */
-	private static int offlineSamples = 4;
+	private static int offlineSamples = 16;
 	private static boolean entityLights = true;
 	/**
 	 * How long a texel's slow average reaches back while playing (TexelCache), in seconds: as many frames as the
