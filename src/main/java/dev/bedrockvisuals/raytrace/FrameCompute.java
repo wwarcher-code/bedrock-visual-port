@@ -26,6 +26,9 @@ import org.lwjgl.vulkan.*;
  * images, so the shader writes a buffer (the last binding, {@code bytesPerPixel} a pixel, rows packed) that is
  * copied into {@link #view()}'s texture.
  *
+ * <p>A pass may have several stages (shaders over the same bindings and push constants), dispatched in order with
+ * a full barrier between them; each stage has its own dispatch size. The last stage writes the output.
+ *
  * <p>Each dispatch gets a slot (command buffer, descriptor set, output buffer), reused once the renderpearl
  * submission it ran in has finished: the offline preset dispatches several times in one submission.
  */
@@ -44,7 +47,7 @@ final class FrameCompute {
 	}
 
 	private final String name;
-	private final String source;
+	private final String[] sources;
 	private final int[] types;
 	private final int pushSize;
 	private final int bytesPerPixel;
@@ -52,7 +55,7 @@ final class FrameCompute {
 
 	private long setLayout;
 	private long pipelineLayout;
-	private long pipeline;
+	private long[] pipelines;
 	private long sampler;
 	private final List<Slot> slots = new ArrayList<>();
 	private GpuTexture texture;
@@ -73,8 +76,13 @@ final class FrameCompute {
 	 * @param format the output texture's format, {@code bytesPerPixel} a texel
 	 */
 	FrameCompute(String name, String source, int[] types, int pushSize, int bytesPerPixel, GpuFormat format) {
+		this(name, new String[] {source}, types, pushSize, bytesPerPixel, format);
+	}
+
+	/** A pass of several stages, one shader each (see the class comment). */
+	FrameCompute(String name, String[] sources, int[] types, int pushSize, int bytesPerPixel, GpuFormat format) {
 		this.name = name;
-		this.source = source;
+		this.sources = sources;
 		this.types = types;
 		this.pushSize = pushSize;
 		this.bytesPerPixel = bytesPerPixel;
@@ -87,6 +95,14 @@ final class FrameCompute {
 
 	/** Dispatches one thread a pixel (8x8 groups) over w x h and copies the result into {@link #view()}. */
 	void dispatch(RtDevice rt, int w, int h, List<Binding> bindings, ByteBuffer pushConstants) {
+		dispatch(rt, w, h, bindings, pushConstants, new int[][] {{(w + 7) / 8, (h + 7) / 8, 1}});
+	}
+
+	/**
+	 * Dispatches each stage with its own group counts ({@code groups[stage]}: x, y, z), in order, and copies the
+	 * output (w x h) into {@link #view()}.
+	 */
+	void dispatch(RtDevice rt, int w, int h, List<Binding> bindings, ByteBuffer pushConstants, int[][] groups) {
 		ensureTexture(w, h);
 		ensurePipeline(rt);
 		Slot slot = freeSlot(rt);
@@ -121,12 +137,14 @@ final class FrameCompute {
 			rt.executeInFrame(slot.commands, commands -> {
 				// As renderpearl's own barrier between passes: what came before is done and visible.
 				fullBarrier(commands, stack);
-				vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
 				vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0,
 						stack.longs(slot.set), null);
 				vkCmdPushConstants(commands, pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushConstants);
-				vkCmdDispatch(commands, (w + 7) / 8, (h + 7) / 8, 1);
-				fullBarrier(commands, stack);
+				for (int stage = 0; stage < pipelines.length; stage++) {
+					vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines[stage]);
+					vkCmdDispatch(commands, groups[stage][0], groups[stage][1], groups[stage][2]);
+					fullBarrier(commands, stack);
+				}
 				VkBufferImageCopy.Buffer region = VkBufferImageCopy.calloc(1, stack);
 				region.imageSubresource().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0)
 						.layerCount(1);
@@ -196,7 +214,7 @@ final class FrameCompute {
 	}
 
 	private void ensurePipeline(RtDevice rt) {
-		if (pipeline != 0) {
+		if (pipelines != null) {
 			return;
 		}
 		VkDevice device = rt.device;
@@ -216,25 +234,29 @@ final class FrameCompute {
 					.pSetLayouts(stack.longs(setLayout)).pPushConstantRanges(push), null, handle), "vkCreatePipelineLayout");
 			pipelineLayout = handle.get(0);
 
-			ByteBuffer spirv = RayQuerySmokeTest.compile(source);
-			long module;
-			try {
-				RtDevice.check(vkCreateShaderModule(device, VkShaderModuleCreateInfo.calloc(stack).sType$Default()
-						.pCode(spirv), null, handle), "vkCreateShaderModule");
-				module = handle.get(0);
-			} finally {
-				MemoryUtil.memFree(spirv);
+			long[] built = new long[sources.length];
+			for (int stage = 0; stage < sources.length; stage++) {
+				ByteBuffer spirv = RayQuerySmokeTest.compile(sources[stage]);
+				long module;
+				try {
+					RtDevice.check(vkCreateShaderModule(device, VkShaderModuleCreateInfo.calloc(stack).sType$Default()
+							.pCode(spirv), null, handle), "vkCreateShaderModule");
+					module = handle.get(0);
+				} finally {
+					MemoryUtil.memFree(spirv);
+				}
+				try {
+					VkComputePipelineCreateInfo.Buffer info = VkComputePipelineCreateInfo.calloc(1, stack);
+					info.get(0).sType$Default().layout(pipelineLayout).stage().sType$Default()
+							.stage(VK_SHADER_STAGE_COMPUTE_BIT).module(module).pName(stack.UTF8("main"));
+					RtDevice.check(vkCreateComputePipelines(device, VK_NULL_HANDLE, info, null, handle),
+							"vkCreateComputePipelines");
+					built[stage] = handle.get(0);
+				} finally {
+					vkDestroyShaderModule(device, module, null);
+				}
 			}
-			try {
-				VkComputePipelineCreateInfo.Buffer info = VkComputePipelineCreateInfo.calloc(1, stack);
-				info.get(0).sType$Default().layout(pipelineLayout).stage().sType$Default()
-						.stage(VK_SHADER_STAGE_COMPUTE_BIT).module(module).pName(stack.UTF8("main"));
-				RtDevice.check(vkCreateComputePipelines(device, VK_NULL_HANDLE, info, null, handle),
-						"vkCreateComputePipelines");
-				pipeline = handle.get(0);
-			} finally {
-				vkDestroyShaderModule(device, module, null);
-			}
+			pipelines = built;
 
 			RtDevice.check(vkCreateSampler(device, VkSamplerCreateInfo.calloc(stack).sType$Default()
 					.magFilter(VK_FILTER_NEAREST).minFilter(VK_FILTER_NEAREST).mipmapMode(VK_SAMPLER_MIPMAP_MODE_NEAREST)

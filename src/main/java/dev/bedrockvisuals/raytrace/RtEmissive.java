@@ -36,13 +36,9 @@ public final class RtEmissive {
 		FLOOR
 	}
 
-	private static final String SHADER = """
-			#version 460
-			#extension GL_EXT_ray_query : require
-			#extension GL_EXT_buffer_reference : require
-			#extension GL_EXT_buffer_reference_uvec2 : require
-			#extension GL_EXT_scalar_block_layout : require
-			layout(local_size_x = 8, local_size_y = 8) in;
+	/** Bindings, push constants and functions every stage shares. */
+	private static final String COMMON = """
+
 			layout(set = 0, binding = 0) uniform accelerationStructureEXT scene;
 			struct InstanceInfo { uvec2 vertices; uint kind; uint stride; uint firstVertex[3]; uint passes; };
 			layout(set = 0, binding = 1, std430) readonly buffer Instances { InstanceInfo instances[]; };
@@ -56,13 +52,15 @@ public final class RtEmissive {
 			// index, the top bit set for a light that stands in for block light (EmissiveLights).
 			layout(set = 0, binding = 7, std430) readonly buffer Cells { vec4 cells[]; };
 			layout(set = 0, binding = 7, std430) readonly buffer CellIndices { uint cellWords[]; };
-			layout(set = 0, binding = 8, std430) writeonly buffer Irradiance { uvec2 pixels[]; };
+			#define CACHE_BINDING 8
+			layout(set = 0, binding = 9, std430) writeonly buffer Irradiance { uvec2 pixels[]; };
 			layout(buffer_reference, scalar, buffer_reference_align = 4) readonly buffer Words { uint w[]; };
 			layout(push_constant) uniform Params {
 			    mat4 inverseViewProjection; // clip space to camera-relative world space (the lighting pass's)
 			    vec4 camera;                // xyz: the camera relative to the scene's origin; w: the light's gain
 			    vec4 grid;                  // xyz: the scene's origin relative to the light grid's corner; w: samples
 			    uvec4 size;                 // xy: the G-buffer's size; z: the frame number
+			    ivec4 originBlock;          // xyz: the scene's origin in world blocks; w: samples a texel's history holds
 			};
 
 			const int CELLS_X = 24;
@@ -107,40 +105,76 @@ public final class RtEmissive {
 			    return float((word >> 22u) ^ word) / 4294967296.0;
 			}
 
+			""" + TexelCache.GLSL + """
+
+			// The pixel's surface: false for sky. p: its point relative to the scene's origin, at its texel's centre
+			// on axis-aligned faces; n its normal; thinSheet for crossed plants.
+			bool surface(uvec2 pixel, out vec3 p, out vec3 n, out bool thinSheet) {
+			    float depth = texelFetch(Depth, ivec2(pixel), 0).r;
+			    if (depth <= 0.0) {
+			        return false;
+			    }
+			    vec2 texCoord = (vec2(pixel) + 0.5) / vec2(size.xy);
+			    n = normalize(texelFetch(Normal, ivec2(pixel), 0).rgb * 2.0 - 1.0);
+			    vec4 world = inverseViewProjection * vec4(texCoord * 2.0 - 1.0, depth, 1.0);
+			    p = world.xyz / world.w + camera.xyz;
+			    vec3 a = abs(n);
+			    thinSheet = max(a.x, max(a.y, a.z)) < 0.9;
+			    if (!thinSheet && max(a.x, max(a.y, a.z)) >= 0.95) {
+			        vec3 axis = round(n);
+			        vec3 toCentre = TEXEL_GRID * 0.5 - (p - floor(p / TEXEL_GRID) * TEXEL_GRID);
+			        p += toCentre - dot(toCentre, axis) * axis;
+			    }
+			    return true;
+			}
+
+			// The light grid cell at g: its first vec4 and first index word, or false outside the grid.
+			bool gridCell(vec3 g, out uint base, out uint indexBase) {
+			    ivec3 cell = ivec3(floor(g / CELL));
+			    if (any(lessThan(cell, ivec3(0))) || any(greaterThanEqual(cell, ivec3(CELLS_X, CELLS_Y, CELLS_Z)))) {
+			        return false;
+			    }
+			    uint cellIndex = uint((cell.z * CELLS_Y + cell.y) * CELLS_X + cell.x);
+			    base = cellIndex * uint(PER_CELL + 1);
+			    indexBase = uint(CELLS_X * CELLS_Y * CELLS_Z * (PER_CELL + 1)) * 4u + cellIndex * uint(PER_CELL);
+			    return true;
+			}
+			""";
+
+	private static final String GROUPS_8X8 = """
+			#version 460
+			#extension GL_EXT_ray_query : require
+			#extension GL_EXT_buffer_reference : require
+			#extension GL_EXT_buffer_reference_uvec2 : require
+			#extension GL_EXT_scalar_block_layout : require
+			layout(local_size_x = 8, local_size_y = 8) in;
+			""";
+
+	/** Stage 1, a thread a pixel: samples of the light at the pixel's texel, added to its cache entry. */
+	private static final String TRACE = GROUPS_8X8 + COMMON + """
 			void main() {
 			    uvec2 pixel = gl_GlobalInvocationID.xy;
 			    if (any(greaterThanEqual(pixel, size.xy))) {
 			        return;
 			    }
-			    uint index = pixel.y * size.x + pixel.x;
-			    float depth = texelFetch(Depth, ivec2(pixel), 0).r;
-			    if (depth <= 0.0) {
-			        pixels[index] = uvec2(0u);
+			    vec3 p;
+			    vec3 n;
+			    bool thinSheet;
+			    if (!surface(pixel, p, n, thinSheet)) {
 			        return;
-			    }
-			    state = index * 9781u + size.z * 6271u + 1u;
-			    vec2 texCoord = (vec2(pixel) + 0.5) / vec2(size.xy);
-			    vec3 n = normalize(texelFetch(Normal, ivec2(pixel), 0).rgb * 2.0 - 1.0);
-			    vec4 world = inverseViewProjection * vec4(texCoord * 2.0 - 1.0, depth, 1.0);
-			    vec3 p = world.xyz / world.w + camera.xyz;
-			    vec3 a = abs(n);
-			    bool thinSheet = max(a.x, max(a.y, a.z)) < 0.9;
-			    if (!thinSheet && max(a.x, max(a.y, a.z)) >= 0.95) {
-			        // Shaded per 1/16-block texel, at its centre.
-			        vec3 axis = round(n);
-			        vec3 toCentre = TEXEL_GRID * 0.5 - (p - floor(p / TEXEL_GRID) * TEXEL_GRID);
-			        p += toCentre - dot(toCentre, axis) * axis;
 			    }
 			    vec3 g = p + grid.xyz;
-			    ivec3 cell = ivec3(floor(g / CELL));
-			    if (any(lessThan(cell, ivec3(0))) || any(greaterThanEqual(cell, ivec3(CELLS_X, CELLS_Y, CELLS_Z)))) {
-			        pixels[index] = uvec2(0u);
+			    uint base;
+			    uint indexBase;
+			    if (!gridCell(g, base, indexBase)) {
 			        return;
 			    }
-			    uint cellIndex = uint((cell.z * CELLS_Y + cell.y) * CELLS_X + cell.x);
-			    uint base = cellIndex * uint(PER_CELL + 1);
 			    uint count = floatBitsToUint(cells[base].x);
-			    uint indexBase = uint(CELLS_X * CELLS_Y * CELLS_Z * (PER_CELL + 1)) * 4u + cellIndex * uint(PER_CELL);
+			    int slot = findTexel(texelKey(p, n, thinSheet, originBlock.xyz), true);
+			    if (slot < 0) {
+			        return;
+			    }
+			    state = (pixel.y * size.x + pixel.x) * 9781u + size.z * 6271u + 1u;
 
 			    // How much each of the cell's lights would give the point, unshadowed, from its centre.
 			    float weights[PER_CELL];
@@ -155,27 +189,10 @@ public final class RtEmissive {
 			        weights[i] = w;
 			        total += w;
 			    }
-			    // A point on a light that only stands in for Bedrock's block light (lava: its own glow comes from block
-			    // light there, not from its texels): marked, so the lighting keeps Bedrock's block light on it.
-			    float standIn = 0.0;
-			    for (uint i = 0u; i < count; i++) {
-			        uint word = cellWords[indexBase + i];
-			        if ((word & 0x80000000u) == 0u) {
-			            continue;
-			        }
-			        Light light = lights[word & 0x7FFFFFFFu];
-			        vec3 d = g - light.p0.xyz;
-			        vec3 lightNormal = normalize(cross(light.e1.xyz, light.e2.xyz));
-			        float s = dot(d, light.e1.xyz) / dot(light.e1.xyz, light.e1.xyz);
-			        float t = dot(d, light.e2.xyz) / dot(light.e2.xyz, light.e2.xyz);
-			        if (abs(dot(d, lightNormal)) < 0.02 && s >= -0.01 && s <= 1.01 && t >= -0.01 && t <= 1.01) {
-			            standIn = 1.0;
-			            break;
-			        }
-			    }
-			    vec3 sum = vec3(0.0);
 			    int samples = max(int(grid.w), 1);
-			    if (total > 0.0) {
+			    if (total <= 0.0) {
+			        addSample(slot, vec3(0.0));
+			    } else {
 			        for (int sampleIndex = 0; sampleIndex < samples; sampleIndex++) {
 			            // A light, in proportion to its weight.
 			            float pick = random() * total;
@@ -197,12 +214,14 @@ public final class RtEmissive {
 			            vec4 texel = textureLod(Atlas, uv, 0.0);
 			            float emissive = max(textureLod(Materials, uv, 0.0).g, light.uv2.z);
 			            if (emissive <= 0.0 || (light.e2.w > 0.0 && texel.a < light.e2.w)) {
+			                addSample(slot, vec3(0.0));
 			                continue;
 			            }
 			            vec3 glow = pow(texel.rgb, vec3(2.2)) * emissive * 2.0;
 			            vec3 toPoint = x - g;
 			            float d = length(toPoint);
 			            if (d < 0.05) {
+			                addSample(slot, vec3(0.0));
 			                continue;
 			            }
 			            vec3 direction = toPoint / d;
@@ -216,6 +235,7 @@ public final class RtEmissive {
 			            float area = length(lightNormal);
 			            float cosLight = abs(dot(lightNormal / area, direction));
 			            if (cosReceiver <= 0.0 || cosLight <= 0.0) {
+			                addSample(slot, vec3(0.0));
 			                continue;
 			            }
 			            rayQueryEXT query;
@@ -228,21 +248,80 @@ public final class RtEmissive {
 			                }
 			            }
 			            if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
+			                addSample(slot, vec3(0.0));
 			                continue;
 			            }
-			            sum += glow * cosReceiver * cosLight * area / max(d * d, 1.0 / 64.0) / probability;
+			            addSample(slot, glow * cosReceiver * cosLight * area / max(d * d, 1.0 / 64.0) / probability
+			                    * camera.w / 3.14159265);
 			        }
 			    }
-			    vec3 irradiance = sum / float(samples) * camera.w / 3.14159265;
-			    pixels[index] = uvec2(packHalf2x16(irradiance.rg), packHalf2x16(vec2(irradiance.b, standIn)));
+			}
+						""";
+
+	/** Stage 2, a thread a cache entry: this frame's samples blended into its history. */
+	private static final String BLEND = """
+			#version 460
+			#extension GL_EXT_ray_query : require
+			#extension GL_EXT_buffer_reference : require
+			#extension GL_EXT_buffer_reference_uvec2 : require
+			#extension GL_EXT_scalar_block_layout : require
+			layout(local_size_x = 64) in;
+			""" + COMMON + """
+			void main() {
+			    blendTexel(gl_GlobalInvocationID.x, size.z, float(originBlock.w));
 			}
 			""";
 
-	private static final FrameCompute PASS = new FrameCompute("ray-traced emissive light", SHADER, new int[] {
+	/** Stage 3, a thread a pixel: its texel's light, to the output. */
+	private static final String GATHER = GROUPS_8X8 + COMMON + """
+			void main() {
+			    uvec2 pixel = gl_GlobalInvocationID.xy;
+			    if (any(greaterThanEqual(pixel, size.xy))) {
+			        return;
+			    }
+			    uint index = pixel.y * size.x + pixel.x;
+			    vec3 p;
+			    vec3 n;
+			    bool thinSheet;
+			    if (!surface(pixel, p, n, thinSheet)) {
+			        pixels[index] = uvec2(0u);
+			        return;
+			    }
+			    int slot = findTexel(texelKey(p, n, thinSheet, originBlock.xyz), false);
+			    vec3 light = slot >= 0 ? entries[slot].history.rgb : vec3(0.0);
+			    vec3 g = p + grid.xyz;
+			    uint base = 0u;
+			    uint indexBase = 0u;
+			    uint count = gridCell(g, base, indexBase) ? floatBitsToUint(cells[base].x) : 0u;
+			    // A point on a light that only stands in for Bedrock's block light (lava: its own glow comes from block
+			    // light there, not from its texels): marked, so the lighting keeps Bedrock's block light on it.
+			    float standIn = 0.0;
+			    for (uint i = 0u; i < count; i++) {
+			        uint word = cellWords[indexBase + i];
+			        if ((word & 0x80000000u) == 0u) {
+			            continue;
+			        }
+			        Light light = lights[word & 0x7FFFFFFFu];
+			        vec3 d = g - light.p0.xyz;
+			        vec3 lightNormal = normalize(cross(light.e1.xyz, light.e2.xyz));
+			        float s = dot(d, light.e1.xyz) / dot(light.e1.xyz, light.e1.xyz);
+			        float t = dot(d, light.e2.xyz) / dot(light.e2.xyz, light.e2.xyz);
+			        if (abs(dot(d, lightNormal)) < 0.02 && s >= -0.01 && s <= 1.01 && t >= -0.01 && t <= 1.01) {
+			            standIn = 1.0;
+			            break;
+			        }
+			    }
+			    pixels[index] = uvec2(packHalf2x16(light.rg), packHalf2x16(vec2(light.b, standIn)));
+			}
+			""";
+
+	private static final FrameCompute PASS = new FrameCompute("ray-traced emissive light",
+			new String[] {TRACE, BLEND, GATHER}, new int[] {
 			VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER}, 112, 8, GpuFormat.RGBA16_FLOAT);
+			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER},
+			128, 8, GpuFormat.RGBA16_FLOAT);
 
 	private static Mode mode = Mode.OFF;
 	/**
@@ -256,6 +335,13 @@ public final class RtEmissive {
 	private static int samples = 1;
 	/** Samples a pixel in each of the offline preset's sub-frames (its 8 sub-frames then average 32). */
 	private static int offlineSamples = 4;
+	/**
+	 * How many samples a texel's history holds at most (TexelCache) while playing: the light settles over about a
+	 * second for texels a pixel or two wide, and still follows changes.
+	 */
+	private static final int HISTORY = 64;
+	/** In exports (the camera and the world hold still within each frame's sub-frames). */
+	private static final int EXPORT_HISTORY = 1024;
 	private static boolean failed;
 	private static String failure = "";
 	private static boolean tracedThisFrame;
@@ -326,7 +412,7 @@ public final class RtEmissive {
 			int w = depth.getWidth(0);
 			int h = depth.getHeight(0);
 			Matrix4f inverse = new Matrix4f(projection).mul(modelView).invert();
-			ByteBuffer constants = stack.malloc(112);
+			ByteBuffer constants = stack.malloc(128);
 			inverse.get(0, constants);
 			constants.putFloat(64, (float) (frame.cameraX() - frame.originX()));
 			constants.putFloat(68, (float) (frame.cameraY() - frame.originY()));
@@ -336,11 +422,14 @@ public final class RtEmissive {
 					.putFloat(88, frame.originZ() - grid.minZ())
 					.putFloat(92, dev.bedrockvisuals.render.OfflineRender.active() ? offlineSamples : samples);
 			constants.putInt(96, w).putInt(100, h).putInt(104, (int) frameNumber++).putInt(108, 0);
+			constants.putInt(112, frame.originX()).putInt(116, frame.originY()).putInt(120, frame.originZ())
+					.putInt(124, dev.bedrockvisuals.render.OfflineRender.active() ? EXPORT_HISTORY : HISTORY);
 			PASS.dispatch(rt, w, h, List.of(new FrameCompute.Structure(frame.tlas()),
 					new FrameCompute.Buffer(frame.instances().buffer()), new FrameCompute.Image(depth),
 					new FrameCompute.Image(normal), new FrameCompute.Image(atlas), new FrameCompute.Image(materials),
-					new FrameCompute.Buffer(grid.lights().buffer()), new FrameCompute.Buffer(grid.cells().buffer())),
-					constants);
+					new FrameCompute.Buffer(grid.lights().buffer()), new FrameCompute.Buffer(grid.cells().buffer()),
+					new FrameCompute.Buffer(TexelCache.buffer(rt).buffer())), constants, new int[][] {
+							{(w + 7) / 8, (h + 7) / 8, 1}, {TexelCache.ENTRIES / 64, 1, 1}, {(w + 7) / 8, (h + 7) / 8, 1}});
 			tracedThisFrame = true;
 		} catch (RuntimeException e) {
 			failed = true;

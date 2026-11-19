@@ -140,6 +140,7 @@ public final class SectionGeometry {
 		BUILT.clear();
 		builtBytes = 0;
 		EmissiveLights.clear();
+		TexelCache.clear();
 	}
 
 	static Iterable<Built> built() {

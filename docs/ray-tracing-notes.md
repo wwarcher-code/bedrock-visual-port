@@ -246,6 +246,24 @@ with `/bv light off|replace|floor` (script: `rtemissive`, `rtgain`, `rtfloor`, `
 - **Samples:** 1 a frame while playing (noisy; TAA averages it), 4 a sub-frame in exports (32 over the 8
   sub-frames; some grain remains).
 
+**The texel cache (2026-11-18): the grain fixed.** At first every pixel traced its own random light and point
+and kept only its own samples: 1 a frame while playing, 32 over an export's sub-frames. That left visible
+grain. Now the light is cached per 1/16-block texel of the world, which was the design's per-texel lighting
+from the start (`raytrace/TexelCache`):
+- **Accumulate.** Every pixel adds its samples to its texel's entry, so a texel gathers its pixels' samples
+  across frames instead of each pixel keeping its own. The entries live in a GPU hash table of 2^21 entries,
+  48 bytes each, about 100 MB. Samples are summed as 1/1024 fixed point with atomic adds.
+- **Blend.** A pass over the entries blends each frame's samples into a running history, capped at 64 samples
+  while playing (it still follows changes) and 1024 in exports. Entries unseen for 600 frames are freed.
+- **Gather.** Each pixel reads its texel's history.
+- **Keys.** A texel is its world texel coordinates and its face's direction. A crossed plant is its 1/16
+  cell, since it has no axis-aligned face. Only the G-buffer's terrain is cached, so texels never move.
+- **Result.** The test room comes out smooth while playing (after a few seconds), while flying through it,
+  and in exports.
+
+**Pitfall met:** GLSL's `%` is also Java's format marker. `String.formatted` on shader source threw at class
+load and crashed the game, so shader constants go in with `replace`.
+
 **Still to do for the emissive light:**
 - emissive entities and items, and moving lights (entity light sources);
 - the forward-lit entities, water and volumetric fog still use Bedrock's block light;
