@@ -150,6 +150,10 @@ public final class DeferredRenderer {
 		}
 		GBuffer gbuffer = GBufferPass.gbuffer();
 		try {
+			// Ray-traced sun and moon shadows, when on: traced from the G-buffer for the lighting pass to read.
+			dev.bedrockvisuals.raytrace.RtShadows.trace(gbuffer.depthView(), gbuffer.view(GBuffer.Target.NORMAL),
+					blockAtlas.getTextureView(), GBufferPass.projection(), GBufferPass.modelView(),
+					ShadowPass.fromMoon() ? light.moonDirection() : light.sunDirection());
 			LightingPass.render(main, gbuffer, GBufferPass.projection(), GBufferPass.modelView(), light);
 			FrameTimes.section(FrameTimes.Metric.LIGHTING_CPU);
 			RenderSystem.getDevice().createCommandEncoder().copyTextureToTexture(gbuffer.depth(),

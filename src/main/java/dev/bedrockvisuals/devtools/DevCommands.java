@@ -173,6 +173,7 @@ public final class DevCommands {
 								feedback(c.getSource(), "Offline export preset: " + dev.bedrockvisuals.render.OfflineRender.status());
 								return 1;
 							}))))
+						.then(rayTracedShadows())
 							.then(ClientCommands.literal("status").executes(c -> {
 							DiagnosticsReport report = new DiagnosticsReport("Bedrock Visuals status");
 							report.lightingAt("now");
@@ -181,5 +182,32 @@ public final class DevCommands {
 							c.getSource().sendFeedback(Component.literal("[Bedrock Visuals] Status report copied to the clipboard."));
 							return 1;
 						}))));
+	}
+
+	/** /bv shadows [maps|traced|compare] [radius <degrees>]: the ray-traced sun and moon shadows (RtShadows). */
+	private static com.mojang.brigadier.builder.LiteralArgumentBuilder<net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource> rayTracedShadows() {
+		var root = ClientCommands.literal("shadows").executes(c -> {
+			feedback(c.getSource(), "Ray-traced shadows: " + dev.bedrockvisuals.raytrace.RtShadows.status()
+					+ ". /bv shadows maps|traced|compare; /bv shadows radius <degrees> sets the light's size.");
+			return 1;
+		});
+		String[] names = {"maps", "traced", "compare"};
+		dev.bedrockvisuals.raytrace.RtShadows.Mode[] modes = dev.bedrockvisuals.raytrace.RtShadows.Mode.values();
+		for (int i = 0; i < names.length; i++) {
+			dev.bedrockvisuals.raytrace.RtShadows.Mode mode = modes[i];
+			root.then(ClientCommands.literal(names[i]).executes(c -> {
+				dev.bedrockvisuals.raytrace.RtShadows.setMode(mode);
+				feedback(c.getSource(), "Ray-traced shadows: " + dev.bedrockvisuals.raytrace.RtShadows.status());
+				return 1;
+			}));
+		}
+		root.then(ClientCommands.literal("radius").then(ClientCommands.argument("degrees",
+				com.mojang.brigadier.arguments.FloatArgumentType.floatArg(0, 5)).executes(c -> {
+			dev.bedrockvisuals.raytrace.RtShadows.setSunRadius(
+					com.mojang.brigadier.arguments.FloatArgumentType.getFloat(c, "degrees"));
+			feedback(c.getSource(), "Ray-traced shadows: " + dev.bedrockvisuals.raytrace.RtShadows.status());
+			return 1;
+		})));
+		return root;
 	}
 }

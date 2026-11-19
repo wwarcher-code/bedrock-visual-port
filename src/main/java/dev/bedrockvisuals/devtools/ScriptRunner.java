@@ -37,7 +37,9 @@ import net.minecraft.client.Screenshot;
  * <li>{@code frametimes <seconds> <file>} records frame times (FrameTimes) to the file;</li>
  * <li>{@code wait <seconds>} holds the lines after it back for that long;</li>
  * <li>{@code raytest} runs the ray query smoke test again; {@code rtscene on|off} turns the ray-traced scene on or off;
- * {@code rtview <file>} saves a picture of the ray-traced scene from the camera (RtDebugView) as PNG;</li>
+ * {@code rtview <file>} saves a picture of the ray-traced scene from the camera (RtDebugView) as PNG;
+ * {@code rtshadows off|on|compare} picks the sun and moon shadows (RtShadows), {@code rtsun <degrees>} the light's
+ * angular radius for them;</li>
  * <li>{@code quit} closes the game (saving the world).</li>
  * </ul>
  */
@@ -154,6 +156,9 @@ public final class ScriptRunner {
 			case "raytest" -> dev.bedrockvisuals.raytrace.RayQuerySmokeTest.rerun();
 			case "rtscene" -> dev.bedrockvisuals.raytrace.RtScene.setEnabled(argument.equals("on"));
 			case "rtview" -> dev.bedrockvisuals.raytrace.RtDebugView.request(Path.of(argument));
+			case "rtshadows" -> dev.bedrockvisuals.raytrace.RtShadows.setMode(
+					dev.bedrockvisuals.raytrace.RtShadows.Mode.valueOf(argument.toUpperCase(Locale.ROOT)));
+			case "rtsun" -> dev.bedrockvisuals.raytrace.RtShadows.setSunRadius(Float.parseFloat(argument));
 			case "offline" -> {
 				if (argument.equals("on") || argument.equals("off")) {
 					dev.bedrockvisuals.render.OfflineRender.setForced(argument.equals("on"));

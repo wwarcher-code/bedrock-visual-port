@@ -18,6 +18,7 @@
 		"minecraft.SkyRendererMixin",
 		"minecraft.StagedDrawMixin",
 		"renderpearl.FrontendGpuDeviceAccessor",
+		"renderpearl.VulkanCommandEncoderAccessor",
 		"renderpearl.VulkanDeviceAccessor",
 		"renderpearl.VulkanFeatureSetsMixin",
 		"sodium.DefaultChunkRendererMixin",

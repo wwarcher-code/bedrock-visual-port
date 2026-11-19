@@ -164,4 +164,49 @@ wrote past a buffer and crashed the JVM (an access violation in `jbyte_disjoint_
 - include particles;
 - add Distant Horizons' terrain past the render distance.
 
-**Next: phase 3.** Ray-traced sun and moon shadows, checked against the shadow maps.
+**Phase 3, ray-traced sun and moon shadows (done, 2026-11-18).** `raytrace/RtShadows`, chosen with
+`/bv shadows maps|traced|compare` (script: `rtshadows off|on|compare`):
+- **Where it runs.** renderpearl records a whole frame into its command buffers and submits it once at the end.
+  So the trace is recorded into that frame: `VulkanCommandEncoder.execute` takes a command buffer of ours,
+  between the G-buffer and the lighting pass.
+  - renderpearl keeps every image in the general layout and puts full memory barriers between its passes, so
+    the compute shader samples the G-buffer's depth and normals directly.
+  - renderpearl textures can't be storage images (no storage usage). The result is written to a buffer and
+    copied into a renderpearl texture, `RtShadowMap`.
+  - The scene is built just before the trace, once each render of the level. Minecraft has prepared the
+    level's entities by then, so the shadows use this frame's entities.
+- **Freeing memory.** Our resources are now also used inside renderpearl's submissions. Freed memory, and each
+  trace's command buffer, descriptor set and output, therefore wait for renderpearl's timeline semaphore to
+  pass the submission that was being recorded (`VulkanCommandEncoderAccessor`). The offline preset traces
+  eight times in one renderpearl submission, each trace with its own resources.
+- **The test.** It matches the lighting pass's own shadow test:
+  - the pixel's world position comes from the same inverse view-projection;
+  - axis-aligned faces are snapped to their 1/16 texel's centre;
+  - crossed plants (no axis-aligned normal) are turned towards the light, and their rays ignore hits in their
+    own block, where the plant's other quad stands;
+  - solid and cutout terrain cast shadows, with cutout alpha-tested against the block atlas using Sodium's own
+    cutoff (the material bits of the hit quad's vertex);
+  - translucent terrain casts no shadow, as in the maps;
+  - entities cast shadows;
+  - each ray aims at a random point of the light's disc (0.27 degrees by default), new each frame and pixel.
+- **In the lighting pass** (`deferred.fsh`), the traced visibility replaces the cascades' test and their edge
+  fade, for Java terrain only. The sky-light guards against cave light leaks still apply. So does the far
+  terrain's height-map shadow past the loaded chunks.
+- **Checked on the RTX 3080 Ti, test scene, morning sun:**
+  - On surfaces the light really reaches (N·L at least 0.1), the comparison view's two verdicts, guards
+    included, disagree on 4.1% of pixels: single grass-blade pixels and the edges of tree shadows.
+  - Lower N·L was compared too, and the disagreements there had the same final brightness either way, since
+    such faces get almost no light.
+  - The traced frame and the shadow-map frame differ by more than 10 grey levels on 4.7% of pixels.
+  - Cost: 0.12 ms of GPU a frame at 854x480 (3.72 against 3.59 ms average).
+  - Eight sub-frames a frame (the offline preset) with a 1.5-degree light ran cleanly.
+
+**Pitfall met:** `reload` (resource packs) reads shaders from `build/resources/main`, not from `src`. After
+editing a shader, run `gradlew.bat processResources` before reloading, or the change is silently missing.
+
+**Still to do for the shadows:**
+- the hand and the item in it, which the scene leaves out, cast no ray-traced shadow;
+- Distant Horizons' terrain is still shaded by its height-map march, not by rays;
+- the offline preset doesn't switch the traced shadows on by itself yet.
+
+**Next: phase 4.** Emissive texels as lights, sampled per sub-frame.

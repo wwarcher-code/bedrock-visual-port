@@ -211,6 +211,14 @@ While an export runs, the renderer switches to its offline preset (`render/Offli
 Flashback steps the replay one frame of the export's frame rate per output frame, and its own SSAA option
 still works on top. `/bv offline on` tries the preset without an export.
 
+**Ray-traced sun and moon shadows** (`/bv shadows traced`, off by default; `raytrace/RtShadows.java`). They need
+a GPU with hardware ray queries. Each pixel's texel casts a ray to the sun or moon through every loaded chunk
+and entity, in place of the shadow cascades, so shadows reach as far as the chunks are loaded.
+`/bv shadows radius <degrees>` sets the light's size: 0.27 by default (the real sun's), and 0 for hard
+shadows. A larger light softens shadows with distance, and the export's sub-frames average the penumbra.
+`/bv shadows compare` shows where the two methods disagree; `/bv shadows maps` goes back to the cascades. See
+`docs/ray-tracing-notes.md`.
+
 ## Distant Horizons
 
 Level 1 uses DH's public API only, no mixins. Before DH composites its LODs onto Minecraft's frame, the

@@ -23,6 +23,10 @@ uniform sampler2D DistantDepth;      // with DistantParams.w: DH's depth before 
 uniform sampler2D DistantWaterDepth; // DH's final depth, its water surface included
 uniform sampler2D DistantFinalColor; // DH's final colour, its water included
 uniform sampler2D PreviousScene;   // the previous frame's HDR scene (BloomPass.java), for reflections
+uniform sampler2D RtShadowMap;     // ray-traced sun or moon visibility per pixel, red (RtShadows.java)
+layout(std140) uniform RtShadowData {
+    vec4 RtShadowParams;           // x: RtShadowMap holds this frame's, y: show the comparison view
+};
 
 #include <bedrockvisuals:common.glsl>
 #define SKY_PROBE SkyProbe
@@ -941,6 +945,33 @@ void main() {
     vec3 nMoon = thinSheet && dot(n, moonDir) < 0.0 ? -n : n;
     vec3 nCaster = moonCasts ? nMoon : nSun;
     float mapped = shadowVisibility(snapToTexel(position, n), nCaster, moonCasts ? moonDir : sunDir, edgeFade);
+    // Ray-traced shadows (RtShadows.java), when on: the same test, traced through every loaded chunk and entity,
+    // in place of the cascades' (and of their fade at the edge of their range). The far terrain's heights still
+    // shade it from beyond the loaded chunks, below.
+    if (RtShadowParams.x > 0.5 && distant < 0.0) {
+        float rayTraced = texture(RtShadowMap, texCoord).r;
+        if (RtShadowParams.y > 0.5) {
+            // The comparison view: red where the shadow maps light the point, green where the rays do, each as
+            // the lighting below would use it (with the sky-light guards against casters missing from the maps).
+            // Yellow: both lit; black: both shadowed; grey: facing away from the light or grazed by it (N.L under
+            // 0.1: next to no light either way, and the two tests differ most there).
+            float guard = 1.0;
+            if (skyLight < 0.999) {
+                vec3 from = position + nCaster * 0.05;
+                guard = inLightVolume(from) ? voxelRayVisibility(from, moonCasts ? moonDir : sunDir, 64)
+                        : underTerrain(from) ? 0.0 : 1.0;
+            }
+            float byMaps = (mapped < 0.0 ? skyFallback : mix(skyFallback, mapped * skyGuard, edgeFade)) * guard;
+            float byRays = rayTraced * skyGuard * guard;
+            fragColor = dot(nCaster, moonCasts ? moonDir : sunDir) < 0.1 ? vec4(0.3, 0.3, 0.3, 1.0)
+                    : vec4(byMaps, byRays, 0.0, 1.0);
+            meterLuminance = vec4(0.18, 0.0, 0.0, 1.0);
+            hdrColor = vec4(0.0, 0.0, 0.0, 1.0);
+            return;
+        }
+        mapped = rayTraced;
+        edgeFade = 1.0;
+    }
     float casterVisibility = mapped < 0.0 ? skyFallback : mix(skyFallback, mapped * skyGuard, edgeFade);
     // Underground, Sodium's cave culling leaves the rock and the surface above out of the sections it draws, so
     // out of the shadow map, and the sun reached cave floors that had some sky light. Any ray from a cave to the

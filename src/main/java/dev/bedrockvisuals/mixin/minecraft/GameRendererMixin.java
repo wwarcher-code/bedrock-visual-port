@@ -78,14 +78,14 @@ abstract class GameRendererMixin {
 	@Inject(method = "renderLevel", at = @At("HEAD"))
 	private void bedrockvisuals$jitter(CallbackInfo ci) {
 		RenderHooks.beginLevel();
-		dev.bedrockvisuals.raytrace.EntityGeometry.beginLevel();
+		dev.bedrockvisuals.raytrace.RtScene.beginLevel(gameRenderState.levelRenderState.cameraRenderState);
 		TemporalAA.beginFrame(gameRenderState.levelRenderState.cameraRenderState);
 	}
 
 	@Inject(method = "renderLevel", at = @At(value = "INVOKE",
 			target = "Lnet/minecraft/client/renderer/GameRenderer;render3dHud(Lnet/minecraft/client/renderer/state/level/CameraRenderState;Lnet/minecraft/client/renderer/state/level/PlayerRenderState;Lnet/minecraft/client/renderer/state/OptionsRenderState;Z)V"))
 	private void bedrockvisuals$resolve(CallbackInfo ci) {
-		dev.bedrockvisuals.raytrace.RtScene.afterLevel(gameRenderState.levelRenderState.cameraRenderState);
+		dev.bedrockvisuals.raytrace.RtScene.afterLevel();
 		TemporalAA.resolve(mainRenderTarget);
 		RenderHooks.afterLevel(mainRenderTarget);
 	}

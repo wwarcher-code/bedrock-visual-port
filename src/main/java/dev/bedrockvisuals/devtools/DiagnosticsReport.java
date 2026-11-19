@@ -83,6 +83,7 @@ final class DiagnosticsReport {
 		line("offline export " + dev.bedrockvisuals.render.OfflineRender.status());
 		line("ray queries " + dev.bedrockvisuals.raytrace.RayQuery.status());
 		line("ray-traced scene " + dev.bedrockvisuals.raytrace.RtScene.status());
+		line("ray-traced shadows " + dev.bedrockvisuals.raytrace.RtShadows.status());
 		line("quality " + dev.bedrockvisuals.render.Quality.status());
 		line("local exposure " + LocalExposure.status());
 		line("weather " + Weather.status());

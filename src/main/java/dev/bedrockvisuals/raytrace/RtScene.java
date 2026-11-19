@@ -44,6 +44,8 @@ public final class RtScene {
 	private static Frame current;
 	private static int lastEntityQuads;
 	private static Vec3 cameraPosition = Vec3.ZERO;
+	private static CameraRenderState levelCamera;
+	private static boolean builtThisLevel;
 	/** The CPU time of building the scene, averaged over recent frames (ms). */
 	private static double buildMillis;
 
@@ -111,23 +113,47 @@ public final class RtScene {
 		current = null;
 	}
 
-	/** The level has been drawn (before the hand): builds this frame's scene. */
-	public static void afterLevel(CameraRenderState camera) {
-		EntityGeometry.endLevel();
-		if (!enabled()) {
-			return;
+	/** The level starts rendering (its entities are captured from here on). */
+	public static void beginLevel(CameraRenderState camera) {
+		levelCamera = camera;
+		builtThisLevel = false;
+		EntityGeometry.beginLevel();
+	}
+
+	/**
+	 * Builds this render of the level's scene, once, if it is on: as soon as Minecraft has prepared the level's
+	 * entities (before the deferred lighting, which traces through it), or after the level at the latest.
+	 * Returns the scene, or null.
+	 */
+	public static Frame ensureBuilt() {
+		if (!enabled() || levelCamera == null) {
+			return null;
 		}
+		if (builtThisLevel) {
+			return current;
+		}
+		builtThisLevel = true;
 		try {
 			long start = System.nanoTime();
-			build(camera);
+			build(levelCamera);
 			buildMillis += ((System.nanoTime() - start) / 1e6 - buildMillis) * 0.05;
-			RtDebugView.afterScene(current);
+			return current;
 		} catch (RuntimeException e) {
 			failed = true;
 			failure = e.getMessage();
 			BedrockVisualsClient.LOGGER.error("[raytrace] building the scene failed; it is off now", e);
 			release();
 			SectionGeometry.clear();
+			return null;
+		}
+	}
+
+	/** The level has been drawn (before the hand). */
+	public static void afterLevel() {
+		EntityGeometry.endLevel();
+		Frame frame = ensureBuilt();
+		if (frame != null) {
+			RtDebugView.afterScene(frame);
 		}
 	}
 

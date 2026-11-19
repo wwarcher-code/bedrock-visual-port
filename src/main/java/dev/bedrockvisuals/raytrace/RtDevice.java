@@ -4,11 +4,11 @@ import static org.lwjgl.util.vma.Vma.*;
 import static org.lwjgl.vulkan.KHRAccelerationStructure.*;
 import static org.lwjgl.vulkan.VK12.*;
 
+import com.mojang.renderpearl.backend.vulkan.VulkanCommandEncoder;
 import com.mojang.renderpearl.backend.vulkan.VulkanDevice;
+import dev.bedrockvisuals.mixin.renderpearl.VulkanCommandEncoderAccessor;
 import java.nio.LongBuffer;
 import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.function.Consumer;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
@@ -24,7 +24,9 @@ import org.lwjgl.vulkan.*;
  * render thread, and deletion deferred until the GPU is done with what is deleted.
  *
  * <p>Every submission gets a serial and a fence. Something deleted waits for the submission that was next when it
- * was deleted (and every one before it) to finish: only the ray tracing's own submissions use its resources.
+ * was deleted (and every one before it) to finish. Commands the ray tracing records into renderpearl's own frame
+ * ({@link #executeInFrame}) use its resources too, so something deleted also waits for the renderpearl submission
+ * being recorded when it was deleted (renderpearl signals a timeline semaphore with each submission's index).
  */
 public final class RtDevice {
 	/** At most this many submissions in flight before {@link #submit} waits for the oldest. */
@@ -50,12 +52,17 @@ public final class RtDevice {
 	private record InFlight(long serial, VkCommandBuffer commands, long fence) {
 	}
 
-	private record Deferred(long serial, Runnable free) {
+	private record Deferred(long serial, long frameSubmission, Runnable free) {
 	}
+
+	private final VulkanCommandEncoder encoder;
+	private final long frameSemaphore;
 
 	private RtDevice(VulkanDevice vulkan) {
 		device = vulkan.vkDevice();
 		queue = vulkan.graphicsQueue().vkQueue();
+		encoder = vulkan.createCommandEncoder();
+		frameSemaphore = ((VulkanCommandEncoderAccessor) (Object) encoder).bedrockvisuals$submitSemaphore();
 		try (MemoryStack stack = MemoryStack.stackPush()) {
 			VkPhysicalDeviceAccelerationStructurePropertiesKHR asProps = VkPhysicalDeviceAccelerationStructurePropertiesKHR
 					.calloc(stack).sType$Default();
@@ -144,7 +151,48 @@ public final class RtDevice {
 
 	/** Runs {@code free} once every submission so far, and the next one, has finished. */
 	void later(Runnable free) {
-		deferred.add(new Deferred(nextSerial, free));
+		deferred.add(new Deferred(nextSerial, frameSubmission(), free));
+	}
+
+	/** The index of the renderpearl submission being recorded now. */
+	long frameSubmission() {
+		return ((VulkanCommandEncoderAccessor) (Object) encoder).bedrockvisuals$currentSubmitIndex();
+	}
+
+	/** Every renderpearl submission up to this index has finished. */
+	long completedFrameSubmission() {
+		try (MemoryStack stack = MemoryStack.stackPush()) {
+			LongBuffer value = stack.mallocLong(1);
+			check(vkGetSemaphoreCounterValue(device, frameSemaphore, value), "vkGetSemaphoreCounterValue");
+			return value.get(0);
+		}
+	}
+
+	/** A primary command buffer of the ray tracing's own, for {@link #executeInFrame}. */
+	VkCommandBuffer allocateCommandBuffer() {
+		try (MemoryStack stack = MemoryStack.stackPush()) {
+			PointerBuffer pointer = stack.mallocPointer(1);
+			check(vkAllocateCommandBuffers(device, VkCommandBufferAllocateInfo.calloc(stack).sType$Default()
+					.commandPool(commandPool).level(VK_COMMAND_BUFFER_LEVEL_PRIMARY).commandBufferCount(1), pointer),
+					"vkAllocateCommandBuffers");
+			return new VkCommandBuffer(pointer.get(0), device);
+		}
+	}
+
+	/**
+	 * Records commands into a command buffer of the ray tracing's and hands it to renderpearl, to run in order
+	 * within the frame renderpearl is recording (between its passes: never inside one). The command buffer must not
+	 * be reused until {@link #completedFrameSubmission} reaches the {@link #frameSubmission} of now.
+	 */
+	void executeInFrame(VkCommandBuffer commands, Consumer<VkCommandBuffer> record) {
+		try (MemoryStack stack = MemoryStack.stackPush()) {
+			vkResetCommandBuffer(commands, 0);
+			check(vkBeginCommandBuffer(commands, VkCommandBufferBeginInfo.calloc(stack).sType$Default()
+					.flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)), "vkBeginCommandBuffer");
+			record.accept(commands);
+			check(vkEndCommandBuffer(commands), "vkEndCommandBuffer");
+		}
+		encoder.execute(commands);
 	}
 
 	/** An acceleration structure over the whole of a storage buffer. */
@@ -233,16 +281,16 @@ public final class RtDevice {
 	}
 
 	private void freeFinished() {
-		// A deferred free waits for the submission that came next after it, which must exist and have finished.
-		long done = inFlight.isEmpty() ? nextSerial - 1 : completedSerial;
-		while (!deferred.isEmpty() && deferred.peekFirst().serial() <= done) {
-			deferred.poll().free().run();
+		if (deferred.isEmpty()) {
+			return;
 		}
-		if (inFlight.isEmpty() && !deferred.isEmpty()) {
-			// Nothing in flight uses anything: everything waiting can go.
-			List<Deferred> rest = new ArrayList<>(deferred);
-			deferred.clear();
-			rest.forEach(d -> d.free().run());
+		// A deferred free waits for the submission that came next after it (or, with nothing of ours in flight,
+		// for none), and for the renderpearl submission recorded when it was made. Both only grow along the queue.
+		long done = inFlight.isEmpty() ? Long.MAX_VALUE : completedSerial;
+		long frameDone = completedFrameSubmission();
+		while (!deferred.isEmpty() && deferred.peekFirst().serial() <= done
+				&& deferred.peekFirst().frameSubmission() <= frameDone) {
+			deferred.poll().free().run();
 		}
 	}
 
