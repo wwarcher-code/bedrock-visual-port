@@ -22,9 +22,13 @@ import java.util.List;
  * each: its world block (w: 1 once used), then six faces of rgb and the frames held (w). Their store is wrapped
  * by world position, so the grid follows the camera without copying.
  *
+ * <p>With the bounce light on, each probe also keeps the light bounced to it (as the texels get it: the sun, moon
+ * and cached light off the surfaces its rays meet), {@code BOUNCE_SAMPLES} rays a frame over the whole sphere, as a
+ * second ambient cube: entities in a sunlit room get the light its floor and walls send back, as the terrain does.
+ *
  * <p>The output is an atlas of {@link #ATLAS_WIDTH} x {@link #ATLAS_HEIGHT} texels (RGBA16F): the probe at grid
- * cell (x, y, z) at texel (x * 6 + face, z + y * Z), faces +x, -x, +y, -y, +z, -z; alpha 1 for a probe in the
- * open, 0 inside a solid block. Entities sample it by their position relative to {@link #cornerX} and so on;
+ * cell (x, y, z) at texel (x * 12 + face, z + y * Z), faces +x, -x, +y, -y, +z, -z of the emitted light, then the
+ * same six of the bounced light; alpha 1 for a probe in the open, 0 inside a solid block. Entities sample it by their position relative to {@link #cornerX} and so on;
  * the lights entities carry they add themselves (unshadowed), from EntityLights' list.
  */
 public final class EntityProbes {
@@ -32,9 +36,9 @@ public final class EntityProbes {
 	public static final int Y = 24;
 	public static final int Z = 48;
 	static final int COUNT = X * Y * Z;
-	static final int PROBE_SIZE = 112;
+	static final int PROBE_SIZE = 16 + 12 * 16;
 	static final long BYTES = (long) COUNT * PROBE_SIZE;
-	static final int ATLAS_WIDTH = X * 6;
+	static final int ATLAS_WIDTH = X * 12;
 	static final int ATLAS_HEIGHT = Y * Z;
 
 	private static final String SOURCE = """
@@ -47,10 +51,12 @@ public final class EntityProbes {
 			#define OUTPUT_BINDING 11
 			""" + RtEmissive.COMMON + """
 			layout(set = 0, binding = 10) uniform sampler2D LightVolumeMap;
-			struct Probe { ivec4 cell; vec4 face[6]; };
+			struct Probe { ivec4 cell; vec4 face[12]; };
 			layout(set = 0, binding = CACHE_BINDING, std430) buffer ProbeStore { TexelEntry cacheEntries[CACHE_ENTRIES]; Probe probes[]; };
 			const ivec3 GRID = ivec3(PROBES_X, PROBES_Y, PROBES_Z);
 			const int SAMPLES = 8;
+			// Bounce rays a probe a frame, in directions over the whole sphere (RtEmissive's bounceRadiance).
+			const int BOUNCE_SAMPLES = 4;
 			const float HISTORY = 24.0;
 
 			// Whether the block at a world position is solid and opaque (the light volume's blue, LightVolume).
@@ -117,17 +123,17 @@ public final class EntityProbes {
 			    ivec3 world = originBlock.xyz - GRID / 2 + local;
 			    ivec3 wrapped = world - GRID * ivec3(floor(vec3(world) / vec3(GRID)));
 			    uint slot = uint((wrapped.z * GRID.y + wrapped.y) * GRID.x + wrapped.x);
-			    uint out0 = uint((local.z + local.y * GRID.z) * GRID.x * 6 + local.x * 6);
+			    uint out0 = uint((local.z + local.y * GRID.z) * GRID.x * 12 + local.x * 12);
 
 			    Probe probe = probes[slot];
 			    if (probe.cell.xyz != world || probe.cell.w == 0 || (changeCount.x > 0 && changedNear(world))) {
-			        for (int i = 0; i < 6; i++) {
+			        for (int i = 0; i < 12; i++) {
 			            probe.face[i] = vec4(0.0);
 			        }
 			        probe.cell = ivec4(world, 1);
 			    }
 			    bool solid = entityCount.z != 0 && solidAt(world);
-			    if (!solid && switches.x > 0.5) {
+			    if (!solid && (switches.x > 0.5 || switches.y > 0.5)) {
 			        vec3 p = vec3(world - originBlock.xyz) + 0.5;
 			        vec3 g = p + grid.xyz;
 			        // The light grid's cell, looked up up to half a cell away at random each frame (as for the texels).
@@ -135,7 +141,8 @@ public final class EntityProbes {
 			        vec3 jitter = (vec3(h & 0x3FFu, (h >> 10u) & 0x3FFu, (h >> 20u) & 0x3FFu) / 1024.0 - 0.5) * CELL;
 			        uint base = 0u;
 			        uint indexBase = 0u;
-			        uint count = gridCell(g + jitter, base, indexBase) ? floatBitsToUint(cells[base].x) : 0u;
+			        uint count = switches.x > 0.5 && gridCell(g + jitter, base, indexBase) ? floatBitsToUint(cells[base].x)
+			                : 0u;
 			        float cumulative[PER_CELL];
 			        float total = 0.0;
 			        for (uint i = 0u; i < count; i++) {
@@ -157,15 +164,35 @@ public final class EntityProbes {
 			            sum[4] += light * max(direction.z, 0.0);
 			            sum[5] += light * max(-direction.z, 0.0);
 			        }
+			        // The bounced light, as the texels get it (RtEmissive's bounceRadiance), from every direction: with
+			        // directions uniform over the sphere (pdf 1 / 4 pi), each face's light over pi is 4 x the radiance x
+			        // the cosine.
+			        vec3 bounced[6] = vec3[6](vec3(0.0), vec3(0.0), vec3(0.0), vec3(0.0), vec3(0.0), vec3(0.0));
+			        if (switches.y > 0.5) {
+			            for (int s = 0; s < BOUNCE_SAMPLES; s++) {
+			                vec3 u = sequence3(uint(s) + 64u);
+			                float z = u.x * 2.0 - 1.0;
+			                float phi = u.y * 2.0 * PI;
+			                vec3 direction = vec3(sqrt(max(1.0 - z * z, 0.0)) * vec2(cos(phi), sin(phi)), z);
+			                vec3 light = min(bounceRadiance(p, direction), vec3(MAX_SAMPLE)) * 4.0;
+			                bounced[0] += light * max(direction.x, 0.0);
+			                bounced[1] += light * max(-direction.x, 0.0);
+			                bounced[2] += light * max(direction.y, 0.0);
+			                bounced[3] += light * max(-direction.y, 0.0);
+			                bounced[4] += light * max(direction.z, 0.0);
+			                bounced[5] += light * max(-direction.z, 0.0);
+			            }
+			        }
 			        float held = probe.face[0].w;
 			        float weight = 1.0 / (held + 1.0);
 			        for (int i = 0; i < 6; i++) {
 			            probe.face[i] = vec4(mix(probe.face[i].rgb, min(sum[i] / float(SAMPLES), vec3(MAX_SAMPLE)), weight),
 			                    min(held + 1.0, HISTORY));
+			            probe.face[6 + i] = vec4(mix(probe.face[6 + i].rgb, bounced[i] / float(BOUNCE_SAMPLES), weight), 0.0);
 			        }
 			    }
 			    probes[slot] = probe;
-			    for (int i = 0; i < 6; i++) {
+			    for (int i = 0; i < 12; i++) {
 			        vec3 light = solid ? vec3(0.0) : probe.face[i].rgb;
 			        pixels[out0 + uint(i)] = uvec2(packHalf2x16(light.rg), packHalf2x16(vec2(light.b, solid ? 0.0 : 1.0)));
 			    }

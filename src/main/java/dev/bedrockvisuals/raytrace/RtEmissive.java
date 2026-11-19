@@ -232,6 +232,78 @@ public final class RtEmissive {
 			    return light.rgb * cosReceiver * fade * fade / max(d2, 0.0625) * switches.w / PI;
 			}
 
+			// The light a bounce ray from origin sends back from the surface it meets: the sun or moon on it (its own
+			// shadow ray) and the light cached at its texel, times its colour; none for the sky (Bedrock's ambient
+			// term has it). In the cache's units (light over pi).
+			vec3 bounceRadiance(vec3 origin, vec3 direction) {
+			    rayQueryEXT query;
+			    rayQueryInitializeEXT(query, scene, gl_RayFlagsNoneEXT, 0x01, origin, 0.001, direction, 256.0);
+			    while (rayQueryProceedEXT(query)) {
+			        if (rayQueryGetIntersectionTypeEXT(query, false) == gl_RayQueryCandidateIntersectionTriangleEXT
+			                && blocks(query)) {
+			            rayQueryConfirmIntersectionEXT(query);
+			        }
+			    }
+			    if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
+			        return vec3(0.0); // the sky: its light is Bedrock's ambient term already
+			    }
+			    // The surface met: its position, facing normal and colour.
+			    InstanceInfo info = instances[rayQueryGetIntersectionInstanceCustomIndexEXT(query, true)];
+			    uint geometry = uint(rayQueryGetIntersectionGeometryIndexEXT(query, true));
+			    uint primitive = uint(rayQueryGetIntersectionPrimitiveIndexEXT(query, true));
+			    uvec3 corners = (primitive & 1u) == 0u ? uvec3(0u, 1u, 2u) : uvec3(2u, 3u, 0u);
+			    Words words = Words(info.vertices);
+			    vec2 b = rayQueryGetIntersectionBarycentricsEXT(query, true);
+			    vec3 hit = origin + direction * rayQueryGetIntersectionTEXT(query, true);
+			    vec3 v0;
+			    vec3 v1;
+			    vec3 v2;
+			    vec3 albedo;
+			    bool terrain = info.kind == 0u;
+			    if (terrain) {
+			        uint first = info.firstVertex[geometry] + (primitive >> 1u) * 4u;
+			        v0 = sodiumPosition(words, first + corners.x);
+			        v1 = sodiumPosition(words, first + corners.y);
+			        v2 = sodiumPosition(words, first + corners.z);
+			        vec2 uv = sodiumUv(words, first + corners.x) * (1.0 - b.x - b.y) + sodiumUv(words, first + corners.y) * b.x
+			                + sodiumUv(words, first + corners.z) * b.y;
+			        // The block's texture times Sodium's vertex colour (biome tint and ambient occlusion).
+			        albedo = pow(textureLod(Atlas, uv, 0.0).rgb, vec3(2.2)) * unpackUnorm4x8(words.w[first * 5u + 2u]).rgb;
+			    } else {
+			        uint first = (primitive >> 1u) * 4u;
+			        v0 = entityPosition(words, first + corners.x);
+			        v1 = entityPosition(words, first + corners.y);
+			        v2 = entityPosition(words, first + corners.z);
+			        // Entity textures aren't in the block atlas: their vertex colour, at a middling albedo.
+			        albedo = unpackUnorm4x8(words.w[first * 9u + 3u]).rgb * 0.4;
+			    }
+			    vec3 hitNormal = normalize(cross(v1 - v0, v2 - v0));
+			    if (dot(hitNormal, direction) > 0.0) {
+			        hitNormal = -hitNormal;
+			    }
+			    vec3 light = vec3(0.0);
+			    // The sun or moon on it.
+			    vec3 towards = normalize(towardsLight.xyz);
+			    float nDotL = dot(hitNormal, towards);
+			    if (nDotL > 0.0 && dot(lightColor.rgb, vec3(1.0)) > 0.0) {
+			        light += albedo / PI * lightColor.rgb * nDotL
+			                * transmittance(hit + hitNormal * 0.01, towards, 1024.0, 0x01u);
+			    }
+			    // And the light cached at its texel (emitted and bounced): the cache feeding itself. Its fast average
+			    // (TexelCache), not the slow one shown: light passed on from surface to surface at the slow average's pace
+			    // took seconds to settle after a change, a second more for every bounce; the receiving texel's own
+			    // average smooths what the fast one adds in noise.
+			    if (terrain) {
+			        int level = texelLevel(length(hit - camera.xyz));
+			        vec3 centre = texelCentre(hit, hitNormal, false, level);
+			        int slot = findTexel(texelKey(centre, hitNormal, false, originBlock.xyz, level), false);
+			        if (slot >= 0) {
+			            light += albedo * (entries[slot].fastA.rgb * switches.x + entries[slot].fastB.rgb);
+			        }
+			    }
+			    return light * switches.z;
+			}
+
 			// The light grid cell at g: its first vec4 and first index word, or false outside the grid.
 			bool gridCell(vec3 g, out uint base, out uint indexBase) {
 			    ivec3 cell = ivec3(floor(g / CELL));
@@ -336,73 +408,7 @@ public final class RtEmissive {
 			    vec3 side = normalize(cross(abs(normal.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0), normal));
 			    vec3 up = cross(normal, side);
 			    vec3 direction = normalize(side * (r * cos(phi)) + up * (r * sin(phi)) + normal * sqrt(max(1.0 - r * r, 0.0)));
-
-			    rayQueryEXT query;
-			    rayQueryInitializeEXT(query, scene, gl_RayFlagsNoneEXT, 0x01, p + normal * 0.01, 0.001, direction, 256.0);
-			    while (rayQueryProceedEXT(query)) {
-			        if (rayQueryGetIntersectionTypeEXT(query, false) == gl_RayQueryCandidateIntersectionTriangleEXT
-			                && blocks(query)) {
-			            rayQueryConfirmIntersectionEXT(query);
-			        }
-			    }
-			    if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
-			        return vec3(0.0); // the sky: its light is Bedrock's ambient term already
-			    }
-			    // The surface met: its position, facing normal and colour.
-			    InstanceInfo info = instances[rayQueryGetIntersectionInstanceCustomIndexEXT(query, true)];
-			    uint geometry = uint(rayQueryGetIntersectionGeometryIndexEXT(query, true));
-			    uint primitive = uint(rayQueryGetIntersectionPrimitiveIndexEXT(query, true));
-			    uvec3 corners = (primitive & 1u) == 0u ? uvec3(0u, 1u, 2u) : uvec3(2u, 3u, 0u);
-			    Words words = Words(info.vertices);
-			    vec2 b = rayQueryGetIntersectionBarycentricsEXT(query, true);
-			    vec3 hit = p + normal * 0.01 + direction * rayQueryGetIntersectionTEXT(query, true);
-			    vec3 v0;
-			    vec3 v1;
-			    vec3 v2;
-			    vec3 albedo;
-			    bool terrain = info.kind == 0u;
-			    if (terrain) {
-			        uint first = info.firstVertex[geometry] + (primitive >> 1u) * 4u;
-			        v0 = sodiumPosition(words, first + corners.x);
-			        v1 = sodiumPosition(words, first + corners.y);
-			        v2 = sodiumPosition(words, first + corners.z);
-			        vec2 uv = sodiumUv(words, first + corners.x) * (1.0 - b.x - b.y) + sodiumUv(words, first + corners.y) * b.x
-			                + sodiumUv(words, first + corners.z) * b.y;
-			        // The block's texture times Sodium's vertex colour (biome tint and ambient occlusion).
-			        albedo = pow(textureLod(Atlas, uv, 0.0).rgb, vec3(2.2)) * unpackUnorm4x8(words.w[first * 5u + 2u]).rgb;
-			    } else {
-			        uint first = (primitive >> 1u) * 4u;
-			        v0 = entityPosition(words, first + corners.x);
-			        v1 = entityPosition(words, first + corners.y);
-			        v2 = entityPosition(words, first + corners.z);
-			        // Entity textures aren't in the block atlas: their vertex colour, at a middling albedo.
-			        albedo = unpackUnorm4x8(words.w[first * 9u + 3u]).rgb * 0.4;
-			    }
-			    vec3 hitNormal = normalize(cross(v1 - v0, v2 - v0));
-			    if (dot(hitNormal, direction) > 0.0) {
-			        hitNormal = -hitNormal;
-			    }
-			    vec3 light = vec3(0.0);
-			    // The sun or moon on it.
-			    vec3 towards = normalize(towardsLight.xyz);
-			    float nDotL = dot(hitNormal, towards);
-			    if (nDotL > 0.0 && dot(lightColor.rgb, vec3(1.0)) > 0.0) {
-			        light += albedo / PI * lightColor.rgb * nDotL
-			                * transmittance(hit + hitNormal * 0.01, towards, 1024.0, 0x01u);
-			    }
-			    // And the light cached at its texel (emitted and bounced): the cache feeding itself. Its fast average
-			    // (TexelCache), not the slow one shown: light passed on from surface to surface at the slow average's pace
-			    // took seconds to settle after a change, a second more for every bounce; the receiving texel's own
-			    // average smooths what the fast one adds in noise.
-			    if (terrain) {
-			        int level = texelLevel(length(hit - camera.xyz));
-			        vec3 centre = texelCentre(hit, hitNormal, false, level);
-			        int slot = findTexel(texelKey(centre, hitNormal, false, originBlock.xyz, level), false);
-			        if (slot >= 0) {
-			            light += albedo * (entries[slot].fastA.rgb * switches.x + entries[slot].fastB.rgb);
-			        }
-			    }
-			    return light * switches.z;
+			    return bounceRadiance(p + normal * 0.01, direction);
 			}
 
 			// Whether a point x of an entity's light is seen from p: through the terrain all the way, and through the
@@ -910,12 +916,8 @@ public final class RtEmissive {
 			PASS.dispatch(rt, w * 2, h, bindings, constants, new int[][] {{(w + 7) / 8, (h + 7) / 8, 1},
 					{TexelCache.ENTRIES / 64, 1, 1}, {(w + 7) / 8, (h + 7) / 8, 1}});
 			tracedThisFrame = true;
-			// The entities' light (EntityProbes), with the emitted light.
-			if (mode != Mode.OFF) {
-				EntityProbes.dispatch(rt, bindings, constants, lightVolume, materials, frame);
-			} else {
-				EntityProbes.skip();
-			}
+			// The entities' light (EntityProbes): the emitted light and the bounce, whichever is on.
+			EntityProbes.dispatch(rt, bindings, constants, lightVolume, materials, frame);
 		} catch (RuntimeException e) {
 			failed = true;
 			failure = e.getMessage();

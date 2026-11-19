@@ -177,9 +177,11 @@ public final class LightingPass {
 			Std140Builder builder = Std140Builder.onStack(stack, 32 + ENTITY_LIGHTS * 32)
 					.putVec4(dev.bedrockvisuals.raytrace.EntityProbes.cornerRelativeX(),
 							dev.bedrockvisuals.raytrace.EntityProbes.cornerRelativeY(),
-							dev.bedrockvisuals.raytrace.EntityProbes.cornerRelativeZ(), probes ? 1 : 0)
+							dev.bedrockvisuals.raytrace.EntityProbes.cornerRelativeZ(),
+							probes && dev.bedrockvisuals.raytrace.RtEmissive.active() ? 1 : 0)
 					.putVec4(dev.bedrockvisuals.raytrace.RtEmissive.floorShare(), carried,
-							dev.bedrockvisuals.raytrace.RtEmissive.gain(), 0);
+							dev.bedrockvisuals.raytrace.RtEmissive.gain(),
+							probes && dev.bedrockvisuals.raytrace.RtEmissive.bounceActive() ? 1 : 0);
 			for (int i = 0; i < ENTITY_LIGHTS * 2; i++) {
 				int o = i * 4;
 				builder.putVec4(CARRIED[o], CARRIED[o + 1], CARRIED[o + 2], CARRIED[o + 3]);
