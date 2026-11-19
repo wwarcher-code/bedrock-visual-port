@@ -24,8 +24,10 @@ uniform sampler2D DistantWaterDepth; // DH's final depth, its water surface incl
 uniform sampler2D DistantFinalColor; // DH's final colour, its water included
 uniform sampler2D PreviousScene;   // the previous frame's HDR scene (BloomPass.java), for reflections
 uniform sampler2D RtShadowMap;     // ray-traced sun or moon visibility per pixel, red (RtShadows.java)
+uniform sampler2D RtEmissiveMap;   // ray-traced light from emissive texels over pi, per pixel (RtEmissive.java)
 layout(std140) uniform RtShadowData {
     vec4 RtShadowParams;           // x: RtShadowMap holds this frame's, y: show the comparison view
+    vec4 RtEmissiveParams;         // x: RtEmissiveMap holds this frame's, y: the share of block light kept under it
 };
 
 #include <bedrockvisuals:common.glsl>
@@ -1111,6 +1113,13 @@ void main() {
     float cameraSky = sqrt(VolumeCamera.x) * 15.0 / 16.0;
     float skyCurve = skyLight * mix(pow(skyLight, 4.0), skyLight * skyLight, cameraSky);
     vec3 blockRadiance = BlockLightColor.rgb * blockLightRadiance(blockLight, position, n);
+    // Ray-traced light from emissive texels (RtEmissive.java), when on: in place of the block light, or over the
+    // given share of it (a floor that keeps dark places visible).
+    if (RtEmissiveParams.x > 0.5 && distant < 0.0) {
+        // Alpha 1: the point is on a light that stands in for block light (lava), which keeps Bedrock's.
+        vec4 traced = texture(RtEmissiveMap, texCoord);
+        blockRadiance = max(traced.rgb, blockRadiance * max(RtEmissiveParams.y, traced.a));
+    }
     vec3 indirect = max(blockRadiance + SkyColor.rgb * skyCurve, AmbientColor.rgb);
     color += diffuseColor * indirect * (1.0 - emissive);
 

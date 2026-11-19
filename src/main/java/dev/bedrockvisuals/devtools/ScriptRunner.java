@@ -39,7 +39,9 @@ import net.minecraft.client.Screenshot;
  * <li>{@code raytest} runs the ray query smoke test again; {@code rtscene on|off} turns the ray-traced scene on or off;
  * {@code rtview <file>} saves a picture of the ray-traced scene from the camera (RtDebugView) as PNG;
  * {@code rtshadows off|on|compare} picks the sun and moon shadows (RtShadows), {@code rtsun <degrees>} the light's
- * angular radius for them;</li>
+ * angular radius for them; {@code rtemissive off|replace|floor}, {@code rtgain <x>}, {@code rtfloor <0..1>} and
+ * {@code rtsamples <n>} set the ray-traced emissive light (RtEmissive);</li>
+ * <li>{@code exposure lock|unlock} holds the exposure where it is, for comparing frames' brightness;</li>
  * <li>{@code quit} closes the game (saving the world).</li>
  * </ul>
  */
@@ -159,6 +161,14 @@ public final class ScriptRunner {
 			case "rtshadows" -> dev.bedrockvisuals.raytrace.RtShadows.setMode(
 					dev.bedrockvisuals.raytrace.RtShadows.Mode.valueOf(argument.toUpperCase(Locale.ROOT)));
 			case "rtsun" -> dev.bedrockvisuals.raytrace.RtShadows.setSunRadius(Float.parseFloat(argument));
+			case "rtemissive" -> dev.bedrockvisuals.raytrace.RtEmissive.setMode(
+					dev.bedrockvisuals.raytrace.RtEmissive.Mode.valueOf(argument.toUpperCase(Locale.ROOT)));
+			case "rtgain" -> dev.bedrockvisuals.raytrace.RtEmissive.setGain(Float.parseFloat(argument));
+			case "rtfloor" -> dev.bedrockvisuals.raytrace.RtEmissive.setFloor(Float.parseFloat(argument));
+			case "exposure" -> dev.bedrockvisuals.render.AutoExposure.lock(argument.equals("lock"));
+			case "rtexportsamples" -> dev.bedrockvisuals.raytrace.RtEmissive.setOfflineSamples(Integer.parseInt(argument));
+			case "rtlights" -> dev.bedrockvisuals.raytrace.EmissiveLights.dump(Path.of(argument));
+			case "rtsamples" -> dev.bedrockvisuals.raytrace.RtEmissive.setSamples(Integer.parseInt(argument));
 			case "offline" -> {
 				if (argument.equals("on") || argument.equals("off")) {
 					dev.bedrockvisuals.render.OfflineRender.setForced(argument.equals("on"));

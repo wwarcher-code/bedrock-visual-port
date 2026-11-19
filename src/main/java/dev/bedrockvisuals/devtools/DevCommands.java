@@ -174,6 +174,7 @@ public final class DevCommands {
 								return 1;
 							}))))
 						.then(rayTracedShadows())
+						.then(rayTracedLight())
 							.then(ClientCommands.literal("status").executes(c -> {
 							DiagnosticsReport report = new DiagnosticsReport("Bedrock Visuals status");
 							report.lightingAt("now");
@@ -208,6 +209,49 @@ public final class DevCommands {
 			feedback(c.getSource(), "Ray-traced shadows: " + dev.bedrockvisuals.raytrace.RtShadows.status());
 			return 1;
 		})));
+		return root;
+	}
+
+	/** /bv light [off|replace|floor] [gain|floor <x>] [samples <n>]: ray-traced light from emissive texels. */
+	private static com.mojang.brigadier.builder.LiteralArgumentBuilder<net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource> rayTracedLight() {
+		var root = ClientCommands.literal("light").executes(c -> {
+			feedback(c.getSource(), "Ray-traced emissive light: " + dev.bedrockvisuals.raytrace.RtEmissive.status()
+					+ ". /bv light off|replace|floor; /bv light gain <x>, /bv light floor <0-1>, /bv light samples <n>"
+					+ " (a frame while playing), /bv light samples export <n> (a sub-frame in exports).");
+			return 1;
+		});
+		for (dev.bedrockvisuals.raytrace.RtEmissive.Mode mode : dev.bedrockvisuals.raytrace.RtEmissive.Mode.values()) {
+			root.then(ClientCommands.literal(mode.name().toLowerCase(java.util.Locale.ROOT)).executes(c -> {
+				dev.bedrockvisuals.raytrace.RtEmissive.setMode(mode);
+				feedback(c.getSource(), "Ray-traced emissive light: " + dev.bedrockvisuals.raytrace.RtEmissive.status());
+				return 1;
+			}));
+		}
+		root.then(ClientCommands.literal("gain").then(ClientCommands.argument("x",
+				com.mojang.brigadier.arguments.FloatArgumentType.floatArg(0, 100)).executes(c -> {
+			dev.bedrockvisuals.raytrace.RtEmissive.setGain(com.mojang.brigadier.arguments.FloatArgumentType.getFloat(c, "x"));
+			feedback(c.getSource(), "Ray-traced emissive light: " + dev.bedrockvisuals.raytrace.RtEmissive.status());
+			return 1;
+		})));
+		root.then(ClientCommands.literal("floor").then(ClientCommands.argument("x",
+				com.mojang.brigadier.arguments.FloatArgumentType.floatArg(0, 1)).executes(c -> {
+			dev.bedrockvisuals.raytrace.RtEmissive.setFloor(com.mojang.brigadier.arguments.FloatArgumentType.getFloat(c, "x"));
+			feedback(c.getSource(), "Ray-traced emissive light: " + dev.bedrockvisuals.raytrace.RtEmissive.status());
+			return 1;
+		})));
+		root.then(ClientCommands.literal("samples").then(ClientCommands.argument("n",
+				com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, 16)).executes(c -> {
+			dev.bedrockvisuals.raytrace.RtEmissive.setSamples(
+					com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(c, "n"));
+			feedback(c.getSource(), "Ray-traced emissive light: " + dev.bedrockvisuals.raytrace.RtEmissive.status());
+			return 1;
+		})).then(ClientCommands.literal("export").then(ClientCommands.argument("n",
+				com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, 16)).executes(c -> {
+			dev.bedrockvisuals.raytrace.RtEmissive.setOfflineSamples(
+					com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(c, "n"));
+			feedback(c.getSource(), "Ray-traced emissive light: " + dev.bedrockvisuals.raytrace.RtEmissive.status());
+			return 1;
+		}))));
 		return root;
 	}
 }

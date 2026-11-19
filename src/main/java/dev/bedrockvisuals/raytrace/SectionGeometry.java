@@ -58,7 +58,11 @@ public final class SectionGeometry {
 
 	/** A section's built structure and its vertices. */
 	record Built(int originX, int originY, int originZ, long structure, long structureAddress, RtBuffer storage,
-			RtBuffer vertices, int[] firstVertex, int passes, int triangles) {
+			RtBuffer vertices, int[] firstVertex, int passes, int triangles, float[] lights) {
+		/** How many emissive quads {@link #lights} holds (EmissiveLights.FLOATS each). */
+		int lightCount() {
+			return lights.length / EmissiveLights.FLOATS;
+		}
 	}
 
 	private static final Long2ObjectLinkedOpenHashMap<Pending> PENDING = new Long2ObjectLinkedOpenHashMap<>();
@@ -123,6 +127,7 @@ public final class SectionGeometry {
 		rt.free(built.storage());
 		rt.free(built.vertices());
 		builtBytes -= built.storage().size() + built.vertices().size();
+		EmissiveLights.changed();
 	}
 
 	/** Everything goes (the world closed, Sodium's renderer was destroyed, or the scene was turned off). */
@@ -134,6 +139,7 @@ public final class SectionGeometry {
 		}
 		BUILT.clear();
 		builtBytes = 0;
+		EmissiveLights.clear();
 	}
 
 	static Iterable<Built> built() {
@@ -216,6 +222,9 @@ public final class SectionGeometry {
 				int[] counts = new int[geometries];
 				int[] firstVertex = new int[PASSES];
 				int passes = 0;
+				float[] lights = EmissiveLights.NONE;
+				EmissiveLights.Emitters emitters = EmissiveLights.emitters(pending.originX(), pending.originY(),
+						pending.originZ());
 				long sectionRawStart = rawAt;
 				int vertex = 0;
 				int g = 0;
@@ -230,6 +239,7 @@ public final class SectionGeometry {
 					int passVertices = data.remaining() / VERTEX_STRIDE;
 					MemoryUtil.memCopy(MemoryUtil.memAddress(data), staging.mapped() + rawAt, data.remaining());
 					rawAt += data.remaining();
+					lights = EmissiveLights.collect(data, lights, emitters);
 					long positionsStart = positionsAt;
 					positionsAt = writePositions(stage, (int) positionsAt, data);
 					int passTriangles = passVertices / 4 * 2;
@@ -266,7 +276,7 @@ public final class SectionGeometry {
 				copy.get(0).srcOffset(sectionRawStart).dstOffset(0).size(sectionRaw);
 				vkCmdCopyBuffer(commands, staging.buffer(), raw.buffer(), copy);
 				results[s] = new Built(pending.originX(), pending.originY(), pending.originZ(), structure,
-						rt.structureAddress(structure), storage, raw, firstVertex, passes, triangles);
+						rt.structureAddress(structure), storage, raw, firstVertex, passes, triangles, lights);
 			}
 		} finally {
 			copy.free();
@@ -291,6 +301,9 @@ public final class SectionGeometry {
 				free(old);
 			}
 			builtBytes += results[s].storage().size() + results[s].vertices().size();
+			if (results[s].lightCount() > 0 || old != null && old.lightCount() > 0) {
+				EmissiveLights.changed();
+			}
 		}
 		totalBuilds += n;
 		return true;

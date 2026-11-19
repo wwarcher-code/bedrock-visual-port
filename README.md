@@ -219,6 +219,17 @@ shadows. A larger light softens shadows with distance, and the export's sub-fram
 `/bv shadows compare` shows where the two methods disagree; `/bv shadows maps` goes back to the cascades. See
 `docs/ray-tracing-notes.md`.
 
+**Ray-traced light from glowing texels** (`/bv light replace` or `/bv light floor`, off by default;
+`raytrace/RtEmissive.java`). Every texel that glows in Bedrock's material maps lights the world in its own
+colour, with shadows that soften with distance from the light. Lava, which barely glows in those maps, glows
+by its Java light level.
+- `replace` puts the traced light in place of Bedrock's block light.
+- `floor` keeps a share of Bedrock's block light underneath (`/bv light floor <0-1>`, 0.35 by default), so
+  dark places stay visible.
+- `/bv light gain <x>` scales it (10 by default, which matches Bedrock a block or two from glowstone).
+- `/bv light samples <n>` sets samples per pixel while playing (1), and `/bv light samples export <n>` per
+  export sub-frame (4).
+
 ## Distant Horizons
 
 Level 1 uses DH's public API only, no mixins. Before DH composites its LODs onto Minecraft's frame, the

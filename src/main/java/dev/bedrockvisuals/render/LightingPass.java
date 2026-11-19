@@ -66,6 +66,7 @@ public final class LightingPass {
 			.withUniform("DistantData", UniformType.UNIFORM_BUFFER)
 			.withUniform("RtShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("RtShadowData", UniformType.UNIFORM_BUFFER)
+			.withUniform("RtEmissiveMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("DistantHeightMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("SkyProbe", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("SunTexture", UniformType.COMBINED_IMAGE_SAMPLER)
@@ -110,8 +111,7 @@ public final class LightingPass {
 	private static final int DISTANT_SIZE = 64 + 64;
 	/** Set once the froxel volume has been attempted; before that its flag is set optimistically. */
 	private static boolean froxelTried;
-	/** RtShadowData (lighting/deferred.fsh): x 1 when RtShadowMap holds this frame's ray-traced shadows; y the
-	 * comparison view. */
+	/** RtShadowData (lighting/deferred.fsh): the ray-traced shadows' and emissive light's flags. */
 	private static GpuBuffer rtShadowData;
 
 	private LightingPass() {
@@ -139,12 +139,14 @@ public final class LightingPass {
 		CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
 		if (rtShadowData == null) {
 			rtShadowData = RenderSystem.getDevice().createBuffer(() -> "Bedrock Visuals ray-traced shadow data",
-					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, 16);
+					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, 32);
 		}
 		try (MemoryStack stack = MemoryStack.stackPush()) {
 			boolean traced = dev.bedrockvisuals.raytrace.RtShadows.active();
-			encoder.writeToBuffer(rtShadowData.slice(), Std140Builder.onStack(stack, 16)
-					.putVec4(traced ? 1 : 0, dev.bedrockvisuals.raytrace.RtShadows.comparing() ? 1 : 0, 0, 0).get());
+			boolean emissive = dev.bedrockvisuals.raytrace.RtEmissive.active();
+			encoder.writeToBuffer(rtShadowData.slice(), Std140Builder.onStack(stack, 32)
+					.putVec4(traced ? 1 : 0, dev.bedrockvisuals.raytrace.RtShadows.comparing() ? 1 : 0, 0, 0)
+					.putVec4(emissive ? 1 : 0, dev.bedrockvisuals.raytrace.RtEmissive.floorShare(), 0, 0).get());
 		}
 		Matrix4f inverseViewProjection = new Matrix4f(projection).mul(modelView).invert();
 		try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -290,6 +292,10 @@ public final class LightingPass {
 					? dev.bedrockvisuals.raytrace.RtShadows.view() : null;
 			pass.setUniform("RtShadowMap", rayTraced != null ? rayTraced : gbuffer.depthView(), nearest);
 			pass.setUniform("RtShadowData", rtShadowData);
+			// Ray-traced light from emissive texels (RtEmissive), in place of or over Bedrock's block light.
+			GpuTextureView emissiveLight = dev.bedrockvisuals.raytrace.RtEmissive.active()
+					? dev.bedrockvisuals.raytrace.RtEmissive.view() : null;
+			pass.setUniform("RtEmissiveMap", emissiveLight != null ? emissiveLight : gbuffer.depthView(), nearest);
 			GpuSampler linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
 			pass.setUniform("SkyProbe", SkyProbe.view() != null ? SkyProbe.view() : gbuffer.depthView(),
 					RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR, true));

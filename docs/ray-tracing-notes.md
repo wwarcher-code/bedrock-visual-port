@@ -209,4 +209,48 @@ editing a shader, run `gradlew.bat processResources` before reloading, or the ch
 - Distant Horizons' terrain is still shaded by its height-map march, not by rays;
 - the offline preset doesn't switch the traced shadows on by itself yet.
 
-**Next: phase 4.** Emissive texels as lights, sampled per sub-frame.
+**Phase 4, emissive texels as lights (done, 2026-11-18).** `raytrace/EmissiveLights` and `RtEmissive`, chosen
+with `/bv light off|replace|floor` (script: `rtemissive`, `rtgain`, `rtfloor`, `rtsamples`, `rtexportsamples`;
+`rtlights <file>` dumps the lights):
+- **The lights.** When a section's structure is built, each quad whose texels have emissive in Bedrock's
+  material maps becomes an area light, a parallelogram in position and texture coordinates. The material atlas
+  now keeps its level-0 emissive channel on the CPU for this.
+  - A block that gives off Java light but barely glows in Bedrock's maps (mean emissive under 0.1: lava,
+    glowstone, shroomlight) glows by its light level / 15 instead. The block is found just behind the quad,
+    and only in sections whose palette has a light-giving block.
+  - Fluids draw their surfaces from both sides; those duplicates are dropped.
+- **The grid.** Around the camera, 24 x 12 x 24 cells of 4 blocks list the 48 lights that light each cell
+  most (power over squared distance to its nearest point). Each light reaches as far as its power allows
+  (estimated irradiance 0.004, at most 32 blocks). The grid is world-aligned and rebuilt only when the camera
+  changes cell or the lights change; that takes 2 to 10 ms of CPU near the test scene's 263 lights.
+  - Each cell keeps its lights' centres and powers next to each other. Weighing them per pixel used to read
+    whole light records, which cost about 3 ms; now it's about 0.5 ms.
+  - At first a cell kept only 24 lights. That was too few for a 3x3 lava pool drawn from both sides: cells
+    dropped some of its faces, and their borders showed as sharp-edged dark rectangles.
+- **The trace.** For each pixel, at its texel's centre:
+  - one of its cell's lights is picked in proportion to its unshadowed estimate;
+  - a uniform point of that light is chosen;
+  - the texel's glow there is the block atlas colour times the emissive times 2, as the lighting pass draws
+    emissive surfaces;
+  - a shadow ray goes to it (cutout alpha-tested, translucent passing light);
+  - the light that arrives over pi goes to an RGBA16F texture.
+  - On a stand-in light's own surface (lava), alpha is 1, and the lighting keeps Bedrock's block light there:
+    lava's look came from block light, not from its texels.
+- **In the lighting pass:** `replace` puts the traced light in place of Bedrock's block light term. `floor`
+  takes the larger of the traced light and 0.35 of Bedrock's block light.
+- **Calibration** (test scene at night, exposure locked with the new `exposure lock` script line, 8 samples):
+  - gain 12 matched Bedrock's brightness a block from glowstone, and 10 is the default;
+  - big glowing faces (sea lantern, shroomlight) come out brighter than Bedrock's block light;
+  - small ones (a torch) come out dimmer, since the light falls off as distance squared, not Minecraft's
+    linear levels.
+- **Samples:** 1 a frame while playing (noisy; TAA averages it), 4 a sub-frame in exports (32 over the 8
+  sub-frames; some grain remains).
+
+**Still to do for the emissive light:**
+- emissive entities and items, and moving lights (entity light sources);
+- the forward-lit entities, water and volumetric fog still use Bedrock's block light;
+- glossy reflection of the lights;
+- in exports the grid is rebuilt every frame the camera changes cell (up to about 10 ms of CPU near many
+  lava faces).
+
+**Next: phase 5.** Bounce light from the sun and moon (and the emissive light) off lit surfaces.

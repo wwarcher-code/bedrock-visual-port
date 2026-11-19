@@ -38,6 +38,12 @@ public final class MaterialAtlas {
 	/** Set when building fails; the fallback material is used until restart and the error is logged once. */
 	private static boolean failed;
 	private static String status = "not built yet";
+	/** Level 0's emissive channel (MERS green), kept for finding emissive quads on the CPU (raytrace/EmissiveLights). */
+	private static byte[] emissive;
+	private static int emissiveWidth;
+	private static int emissiveHeight;
+	/** Counts rebuilds, so users of {@link #emissive} can tell when it changed. */
+	private static int generation;
 
 	private MaterialAtlas() {
 	}
@@ -84,6 +90,16 @@ public final class MaterialAtlas {
 		MaterialAtlasImage.Result image = MaterialAtlasImage.build(width, height, atlasTexture.getMipLevels(), slots,
 				name -> map.textureSetFor(pack, name), pack.pbrFallback().blocks());
 
+		int[] base = image.levels().getFirst();
+		byte[] channel = new byte[width * height];
+		for (int i = 0; i < channel.length; i++) {
+			channel[i] = (byte) (base[i] >> 8);
+		}
+		emissive = channel;
+		emissiveWidth = width;
+		emissiveHeight = height;
+		generation++;
+
 		GpuDevice device = RenderSystem.getDevice();
 		texture = device.createTexture(() -> "Bedrock Visuals material atlas",
 				GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA8_UNORM, width, height, 1,
@@ -101,6 +117,48 @@ public final class MaterialAtlas {
 		BedrockVisualsClient.LOGGER.info("[materials] built {}x{} material atlas with {} mip levels in {} ms: "
 						+ "{} of {} block sprites from Bedrock texture sets", width, height, image.levels().size(),
 				(System.nanoTime() - start) / 1_000_000, image.filledSlots(), slots.size());
+	}
+
+	/**
+	 * The emissive texels in a rectangle of the block atlas (UVs, either order): their mean emissive (0 to 1), or 0
+	 * without a material atlas.
+	 */
+	public static float emissiveMean(float u0, float v0, float u1, float v1) {
+		byte[] channel = emissive;
+		if (channel == null) {
+			return 0;
+		}
+		int x0 = Math.clamp((int) Math.floor(Math.min(u0, u1) * emissiveWidth + 0.01), 0, emissiveWidth - 1);
+		int x1 = Math.clamp((int) Math.ceil(Math.max(u0, u1) * emissiveWidth - 0.01), x0 + 1, emissiveWidth);
+		int y0 = Math.clamp((int) Math.floor(Math.min(v0, v1) * emissiveHeight + 0.01), 0, emissiveHeight - 1);
+		int y1 = Math.clamp((int) Math.ceil(Math.max(v0, v1) * emissiveHeight - 0.01), y0 + 1, emissiveHeight);
+		int sum = 0;
+		for (int y = y0; y < y1; y++) {
+			int row = y * emissiveWidth;
+			for (int x = x0; x < x1; x++) {
+				sum += channel[row + x] & 0xFF;
+			}
+		}
+		return sum / 255f / ((x1 - x0) * (y1 - y0));
+	}
+
+	/** The emissive channel's size in texels (0 before it is built). */
+	public static int emissiveWidth() {
+		return emissiveWidth;
+	}
+
+	public static int emissiveHeight() {
+		return emissiveHeight;
+	}
+
+	/** Changes when the material atlas is rebuilt. */
+	public static int generation() {
+		return generation;
+	}
+
+	/** The current material atlas on the GPU, or null before it is built. */
+	public static GpuTextureView currentView() {
+		return view;
 	}
 
 	/** A one-line summary of the last build, for diagnostics. */

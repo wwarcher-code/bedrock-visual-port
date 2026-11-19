@@ -59,9 +59,17 @@ public final class AutoExposure {
 	private AutoExposure() {
 	}
 
+	/** While set, the exposure stays at this average luminance (tests that compare frames' brightness). */
+	private static float lockedAverage = Float.NaN;
+
+	/** Holds the exposure where it is now (true) or lets it adapt again (false). */
+	public static void lock(boolean locked) {
+		lockedAverage = locked ? averageLuminance() : Float.NaN;
+	}
+
 	/** The exposure this frame's lighting is multiplied by, in this renderer's units. */
 	public static float exposure() {
-		return exposureFor(averageLuminance());
+		return exposureFor(Float.isNaN(lockedAverage) ? averageLuminance() : lockedAverage);
 	}
 
 	/** The adapted, clamped average luminance in Bedrock's units (0.18 before the first measurement). */
