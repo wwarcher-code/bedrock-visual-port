@@ -86,7 +86,7 @@ public final class RtEmissive {
 			const int CELLS_X = 24;
 			const int CELLS_Y = 12;
 			const int CELLS_Z = 24;
-			const int PER_CELL = 48;
+			const int PER_CELL = 96; // EmissiveLights.PER_CELL
 			const float CELL = 4.0;
 			const float ALPHA_CUTOFF[4] = float[4](0.0, 0.1, 0.5, 1.0);
 			const float PI = 3.14159265;
@@ -233,24 +233,33 @@ public final class RtEmissive {
 
 	/** Stage 1, a thread a pixel: samples of the light at the pixel's texel, added to its cache entry. */
 	private static final String TRACE = GROUPS_8X8 + COMMON + """
-			// One sample of the light from emissive texels at point p (normal n), given the cell's lights and their
-			// weights: as the terrain lets it through (an entity in the way sets shadowed instead, for TexelCache's C).
+			// One sample of the light from emissive texels at point p (normal n), given the cell's lights' running
+			// totals of weight (cumulative[i]: lights 0 to i): as the terrain lets it through (an entity in the way
+			// sets shadowed instead, for TexelCache's C).
 			vec3 emissiveSample(vec3 p, vec3 g, vec3 n, bool thinSheet, uint count, uint indexBase,
-			        float weights[PER_CELL], float total, vec3 u, out bool shadowed) {
+			        float cumulative[PER_CELL], float total, vec3 u, out bool shadowed) {
 			    shadowed = false;
 			    if (total <= 0.0) {
 			        return vec3(0.0);
 			    }
+			    // The first light whose running total passes the pick: halving the range, 7 steps for 96 lights
+			    // instead of a walk through them for every sample.
 			    float pick = u.x * total;
-			    uint chosen = 0u;
-			    for (uint i = 0u; i < count; i++) {
-			        chosen = i;
-			        pick -= weights[i];
-			        if (pick <= 0.0) {
-			            break;
+			    uint low = 0u;
+			    uint high = count - 1u;
+			    while (low < high) {
+			        uint middle = (low + high) / 2u;
+			        if (cumulative[middle] < pick) {
+			            low = middle + 1u;
+			        } else {
+			            high = middle;
 			        }
 			    }
-			    float probability = weights[chosen] / total;
+			    uint chosen = low;
+			    float probability = (cumulative[chosen] - (chosen > 0u ? cumulative[chosen - 1u] : 0.0)) / total;
+			    if (probability <= 0.0) {
+			        return vec3(0.0);
+			    }
 			    Light light = lights[cellWords[indexBase + chosen] & 0x7FFFFFFFu];
 			    // A random point of it, and its texel's glow.
 			    float s = u.y;
@@ -418,7 +427,12 @@ public final class RtEmissive {
 			    vec3 g = p + grid.xyz;
 			    uint base = 0u;
 			    uint indexBase = 0u;
-			    uint count = switches.x > 0.5 && gridCell(g, base, indexBase) ? floatBitsToUint(cells[base].x) : 0u;
+			    // The cell is looked up up to half a cell away, at random for each 8 x 8 tile of pixels and frame (a tile
+			    // reads one cell's list, as without it): a light in one cell's list but not the next one's fades out over
+			    // a few blocks in the texels' averages, instead of stopping at the cells' boundary in a hard line.
+			    uint tile = texelHash(gl_WorkGroupID.y * 4096u + gl_WorkGroupID.x ^ texelHash(size.z * 0x9e3779b9u));
+			    vec3 cellJitter = (vec3(tile & 0x3FFu, (tile >> 10u) & 0x3FFu, (tile >> 20u) & 0x3FFu) / 1024.0 - 0.5) * CELL;
+			    uint count = switches.x > 0.5 && gridCell(g + cellJitter, base, indexBase) ? floatBitsToUint(cells[base].x) : 0u;
 			    float weights[PER_CELL];
 			    float total = 0.0;
 			    for (uint i = 0u; i < count; i++) {
@@ -428,8 +442,8 @@ public final class RtEmissive {
 			        float facing = dot(n, toLight) * inversesqrt(d2);
 			        facing = thinSheet ? abs(facing) : facing;
 			        float w = entry.w * clamp(facing * 0.8 + 0.2, 0.0, 1.0) / d2;
-			        weights[i] = w;
 			        total += w;
+			        weights[i] = total; // running total, for emissiveSample's pick
 			    }
 			    entitiesNear = entityCount.y != 0;
 			    // The lights entities carry: how much each gives the point, unshadowed. Their light itself is worked out

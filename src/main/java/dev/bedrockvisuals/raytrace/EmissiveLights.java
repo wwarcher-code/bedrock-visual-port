@@ -38,7 +38,8 @@ public final class EmissiveLights {
 	static final int CELLS_X = 24;
 	static final int CELLS_Y = 12;
 	static final int CELLS_Z = 24;
-	static final int PER_CELL = 48;
+	/** The lights a cell lists (the shaders' PER_CELL too): 48 let a lava pool and fall crowd a sea lantern out. */
+	static final int PER_CELL = 96;
 	/** Below this estimated irradiance (power / distance squared) a light no longer counts. */
 	private static final float CUTOFF = 0.004f;
 	private static final float MAX_REACH = 32;

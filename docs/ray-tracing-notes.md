@@ -441,5 +441,12 @@ entity textures for their bounce colour; glossy (specular) bounce.
   Bedrock's maps (EmitterColors): torch 1.0 0.74 0.33, lantern 1.0 0.53 0.15, soul torch 0.38 0.97 1.0.
   Blocks that barely glow (lava) weigh all their texels alike.
 
+**Hard lines between lights (2026-11-19).** Each 4-block cell listed the 48 lights that matter most at it; a lava
+pool and its lavafall (every lava face a light) crowded a sea lantern out of cells 3 blocks from it, and its light
+stopped at the cell's edge in a straight line. Cells now list 96, and each 8 x 8 tile of pixels looks its cell up
+up to half a cell away, at random every frame, so a light dropped from one cell's list fades out over a few
+blocks. The pick among a cell's lights is a binary search over running totals. At 1080p, 1 ray a pixel: 16.8 ms
+a frame before, 17.6 after; at 8 rays a pixel 33 before, 40 after.
+
 **Later, outside ray tracing:** take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.
