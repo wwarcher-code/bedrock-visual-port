@@ -1120,17 +1120,13 @@ void main() {
     // How much the point glows as a light standing in for block light (lava), when the traced light is on.
     float standInGlow = 0.0;
     if (RtEmissiveParams.x > 0.5 && distant < 0.0) {
-        // Alpha 1: the point is on a light that stands in for block light (lava), which keeps Bedrock's.
         vec4 traced = texture(RtEmissiveMap, vec2(texCoord.x * 0.5, texCoord.y));
-        // The same for any face of a block that gives off Java light while barely glowing in Bedrock's maps:
-        // more block light inside the block behind it than in front. The trace's own test only knows the
-        // strongest 48 lights of each cell, which a lavafall or a lava pool outnumbers.
-        float standIn = traced.a;
         // Any face of a block the light volume marks as glowing all over (lava; EmitterColors.glowsAllOver), at
-        // its light level. Per block, not per pixel: a torch's stick and a lantern's frame don't glow.
+        // its light level. Per block, not per pixel.
+        float standIn = 0.0;
         vec3 inside = position - n * 0.1; // thin flowing lava is under a block deep
         if (glowsAllOver(inside)) {
-            standIn = max(standIn, max(lightVolumeAt(inside).y, 1.0 / 15.0));
+            standIn = max(lightVolumeAt(inside).y, 1.0 / 15.0);
         }
         // Such a face glows as the traced light takes it to (every texel at its light level / 15, as glowstone's
         // texels glow at their emissive): seen lit by Bedrock's block light instead, lava looked like stone by a

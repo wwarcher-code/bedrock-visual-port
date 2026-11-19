@@ -32,8 +32,6 @@ public final class EmitterColors {
 	/** Per block (any thread): whether it glows all over (glowsAllOver). */
 	private static final Map<Block, Boolean> ALL_OVER = new java.util.concurrent.ConcurrentHashMap<>();
 	private static volatile int allOverGeneration = -1;
-	/** Below this mean emissive over its textures, a block that gives off Java light glows all over (lava). */
-	private static final float WEAK_EMISSIVE = 0.1f;
 	private static final float[] NONE = new float[0];
 	private static int generation = -1;
 
@@ -50,13 +48,18 @@ public final class EmitterColors {
 	}
 
 	/**
-	 * Whether a block gives off Java light while its textures barely glow in Bedrock's maps (lava): its whole
-	 * surface then stands in for its glow, every texel glowing at its light level, as the traced light takes it
-	 * to (EmissiveLights). Blocks with glowing texels of their own (torches, lanterns, glowstone) glow by those.
-	 * Any thread (the light volume's scan, LightVolume).
+	 * Whether a block is a liquid that gives off Java light while its textures don't glow in Bedrock's maps
+	 * (lava): its whole surface then stands in for its glow, every texel glowing at its light level, as the traced
+	 * light takes it to (EmissiveLights). Blocks with glowing texels of their own (torches, lanterns, glowstone)
+	 * glow by those. A test of the mean glow over a block's textures took in nearly every light (a torch's flame
+	 * or glowstone's bright flecks are a small share of their texels), and they glowed all over, sticks and
+	 * frames included; the solid blocks with no glowing texels at all (enchanting tables, candles, amethyst,
+	 * lit redstone ore) don't look lit up in Java or Bedrock either. Any thread (the light volume's scan,
+	 * LightVolume).
 	 */
 	public static boolean glowsAllOver(BlockState state) {
-		if (state.getLightEmission() == 0 || MaterialAtlas.emissiveWidth() == 0) {
+		if (state.getLightEmission() == 0 || !(state.getBlock() instanceof net.minecraft.world.level.block.LiquidBlock)
+				|| MaterialAtlas.emissiveWidth() == 0) {
 			return false;
 		}
 		if (allOverGeneration != MaterialAtlas.generation()) {
@@ -70,16 +73,47 @@ public final class EmitterColors {
 				for (TextureAtlasSprite sprite : sprites(block)) {
 					add(sprite, glowing, all);
 				}
-				return all[3] > 0 && glowing[3] / all[3] < WEAK_EMISSIVE;
+				return all[3] > 0 && glowing[3] < MIN_GLOW;
 			} catch (RuntimeException e) {
 				return false;
 			}
 		});
 	}
 
+	/**
+	 * Logs, for every block state that gives off Java light, its textures' glow in Bedrock's maps: summed (in
+	 * texels at full glow), strongest, and over how many texels; and whether it glows all over. (/bv light emitters)
+	 */
+	public static int report() {
+		int states = 0;
+		for (Block block : net.minecraft.core.registries.BuiltInRegistries.BLOCK) {
+			for (BlockState state : block.getStateDefinition().getPossibleStates()) {
+				if (state.getLightEmission() == 0) {
+					continue;
+				}
+				double[] glowing = new double[5];
+				double[] all = new double[4];
+				for (TextureAtlasSprite sprite : sprites(state)) {
+					add(sprite, glowing, all);
+				}
+				dev.bedrockvisuals.BedrockVisualsClient.LOGGER.info(
+						"[emitters] {} light {}: glow sum {} max {} over {} texels; all over {}", state,
+						state.getLightEmission(), String.format(java.util.Locale.ROOT, "%.2f", glowing[3]),
+						String.format(java.util.Locale.ROOT, "%.2f", glowing[4]), Math.round(all[3]),
+						glowsAllOver(state));
+				states++;
+			}
+		}
+		return states;
+	}
+
 	/** Every texture a block's default model uses; a fluid's particle texture, having no model. */
 	private static Set<TextureAtlasSprite> sprites(Block block) {
-		BlockState state = block.defaultBlockState();
+		return sprites(block.defaultBlockState());
+	}
+
+	/** Every texture a block state's model uses; a fluid's particle texture, having no model. */
+	private static Set<TextureAtlasSprite> sprites(BlockState state) {
 		var models = Minecraft.getInstance().getModelManager().getBlockStateModelSet();
 		Set<TextureAtlasSprite> sprites = new LinkedHashSet<>();
 		List<BlockStateModelPart> parts = new ArrayList<>();
@@ -153,6 +187,9 @@ public final class EmitterColors {
 				glowing[1] += g * glow;
 				glowing[2] += b * glow;
 				glowing[3] += glow;
+				if (glowing.length > 4) {
+					glowing[4] = Math.max(glowing[4], glow);
+				}
 				all[0] += r;
 				all[1] += g;
 				all[2] += b;

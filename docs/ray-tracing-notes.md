@@ -435,8 +435,15 @@ entity textures for their bounce colour; glossy (specular) bounce.
   glow in Bedrock's maps on average (lava; EmitterColors.glowsAllOver) are flagged per block in the light
   volume (blue 64, or 192 when also solid), and with the traced light on, every face of a flagged block glows
   at its light level / 15, as the traced light takes its texels to: emissive, with its reflection scaled down
-  as much (the slopes mirrored the glowing lavafall as pale patches). Per block, so a torch's stick or a
-  lantern's frame doesn't glow; per-face tests against the light levels missed flowing lava's slopes.
+  as much (the slopes mirrored the glowing lavafall as pale patches). Per block; per-face tests against the
+  light levels missed flowing lava's slopes.
+- That flag's test, a mean glow under 0.1 over the block's textures, took in nearly every light: a torch's flame
+  or glowstone's flecks are a small share of their texels, so torches, lanterns, glowstone, froglights, copper
+  bulbs and lit furnaces glowed all over at their light level, sticks and frames included (`/bv light emitters`
+  logs each light-giving state's glow: torch 0.6 texels at full glow, glowstone 25 of 256, lava 0). It is now
+  liquids only, giving off light with no glowing texels (under half a texel's worth): lava. Solid blocks
+  without glowing texels (enchanting tables, candles, amethyst, lit redstone ore) don't look lit up in Java or
+  Bedrock either. The traced light's own stand-in test per quad (above) is unchanged: the gain is tuned to it.
 - A carried glowing block's light colour is the mean of its model's texels weighed by their emissive in
   Bedrock's maps (EmitterColors): torch 1.0 0.74 0.33, lantern 1.0 0.53 0.15, soul torch 0.38 0.97 1.0.
   Blocks that barely glow (lava) weigh all their texels alike.

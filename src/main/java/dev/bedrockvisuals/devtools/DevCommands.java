@@ -270,6 +270,11 @@ public final class DevCommands {
 			feedback(c.getSource(), "Ray-traced emissive light: " + dev.bedrockvisuals.raytrace.RtEmissive.status());
 			return 1;
 		})));
+		root.then(ClientCommands.literal("emitters").executes(c -> {
+			int states = dev.bedrockvisuals.raytrace.EmitterColors.report();
+			feedback(c.getSource(), states + " light-giving block states logged ([emitters] in the log).");
+			return 1;
+		}));
 		root.then(ClientCommands.literal("entities").then(ClientCommands.literal("on").executes(c -> {
 			dev.bedrockvisuals.raytrace.RtEmissive.setEntityLights(true);
 			feedback(c.getSource(), "Ray-traced emissive light: " + dev.bedrockvisuals.raytrace.RtEmissive.status());
