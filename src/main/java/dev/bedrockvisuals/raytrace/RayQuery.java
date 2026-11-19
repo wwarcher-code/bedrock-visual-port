@@ -42,9 +42,15 @@ public final class RayQuery {
 		return featureSet;
 	}
 
-	/** Minecraft's Vulkan device, or null on another backend. */
+	/** Minecraft's Vulkan device, or null on another backend or before the device exists (mod startup). */
 	public static VulkanDevice device() {
-		if (RenderSystem.getDevice() instanceof FrontendGpuDeviceAccessor frontend
+		Object device;
+		try {
+			device = RenderSystem.getDevice();
+		} catch (IllegalStateException notYet) {
+			return null;
+		}
+		if (device instanceof FrontendGpuDeviceAccessor frontend
 				&& frontend.bedrockvisuals$backend() instanceof VulkanDevice vulkan) {
 			return vulkan;
 		}

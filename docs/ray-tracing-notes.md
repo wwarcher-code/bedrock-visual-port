@@ -396,6 +396,21 @@ Results:
   scene is freed.
 - Script lines: `rtentities on|off`, `settings <page>` / `settings close`.
 
+**Dark speckle on arriving somewhere (2026-11-19).** Arriving in an area at 1080p, most texels stayed dark for
+many seconds and lit up one by one. Two causes:
+- **Chunk loads counted as edits.** Sodium rebuilds a section when the chunks around it load (its border
+  faces change), and the cache wiped every texel within 24 blocks for each rebuild that changed a section's
+  shape. Arriving, that is every frame for seconds: texels never got past their first few samples, which
+  for a texel lit by many lights are mostly zero. Wipes now need a block placed or broken in or beside the
+  chunk within 1.5 s (`ChunkChanges.editedNear`); unloads don't wipe either.
+- **A full table.** Entries were only freed after 600 frames unseen, so after travelling at 1080p new texels
+  could find no free slot among their 8 probes. A new texel now takes over the probed entry unseen longest,
+  if unseen for more than 120 frames.
+- At 1080p (`-PwindowSize=1920x1080`), flying 1,200 blocks out and back: before, the room was still speckled
+  8 s after returning; after, nearly clean at 1 s and clean by 8 s.
+- Also fixed: with ray tracing saved on, the game crashed at startup (the device was asked for before it
+  existed).
+
 **Still to do for entities:** mobs themselves (lit forward) still take Bedrock's block light, not the traced
 light; entity textures' own emissive texels (eyes) aren't lights; the carried light doesn't bounce.
 

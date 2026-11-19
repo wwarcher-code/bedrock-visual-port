@@ -15,6 +15,11 @@ import java.util.concurrent.atomic.AtomicIntegerArray;
 public final class ChunkChanges {
 	static final int WRAP = 64;
 	private static final AtomicIntegerArray STAMPS = new AtomicIntegerArray(WRAP * WRAP);
+	/** When (System.nanoTime) a block was last placed or broken in each chunk column. */
+	private static final java.util.concurrent.atomic.AtomicLongArray EDITED = new java.util.concurrent.atomic.AtomicLongArray(
+			WRAP * WRAP);
+	/** How long after an edit a chunk's rebuilds count as that edit's (through the server, and the light after). */
+	private static final long EDIT_REACH = 1_500_000_000L;
 	private static final AtomicInteger NEXT = new AtomicInteger();
 	/** Set when anything changed since the light volume last looked (takeChanged). */
 	private static volatile boolean changed;
@@ -37,6 +42,7 @@ public final class ChunkChanges {
 
 	/** A block was placed or broken in the chunk column: its changes, and the light updates after, are edits. */
 	public static void markEdit(int chunkX, int chunkZ) {
+		EDITED.set(index(chunkX, chunkZ), System.nanoTime());
 		editsUntil = System.nanoTime() + EDIT_WINDOW;
 		mark(chunkX, chunkZ);
 	}
@@ -49,6 +55,24 @@ public final class ChunkChanges {
 		boolean was = changed && System.nanoTime() < editsUntil;
 		changed = false;
 		return was;
+	}
+
+	/**
+	 * Whether a block was placed or broken lately in the chunk column or one beside it (a rebuild for a block at
+	 * the border reaches the neighbour). Sections are also rebuilt when the chunks around them load, their
+	 * border faces changing: those aren't edits.
+	 */
+	public static boolean editedNear(int chunkX, int chunkZ) {
+		long now = System.nanoTime();
+		for (int dz = -1; dz <= 1; dz++) {
+			for (int dx = -1; dx <= 1; dx++) {
+				long at = EDITED.get(index(chunkX + dx, chunkZ + dz));
+				if (at != 0 && now - at < EDIT_REACH) {
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	/** The chunk column's stamp: different from an earlier one if it changed since. */

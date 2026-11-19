@@ -68,6 +68,9 @@ final class TexelCache {
 			// would otherwise flash a texel for a while. A little light near the brightest lights is lost.
 			const float MAX_SAMPLE = 64.0;
 			const uint EVICT = 600u;
+			// An entry unseen this many frames may be taken by a new texel with nowhere else to go (the shader's
+			// push constants' size.z is the frame number).
+			const uint STEAL = 120u;
 
 			uint texelHash(uint x) {
 			    x ^= x >> 16u; x *= 0x7feb352du; x ^= x >> 15u; x *= 0x846ca68bu; x ^= x >> 16u;
@@ -124,7 +127,40 @@ final class TexelCache {
 			            uint slot = (key.x + i) % CACHE_ENTRIES;
 			            uint previous = atomicCompSwap(entries[slot].key, 0u, key.y);
 			            if (previous == 0u || previous == key.y) {
+			                if (previous == 0u) {
+			                    entries[slot].lastFrame = size.z;
+			                }
 			                return int(slot);
+			            }
+			        }
+			        // All taken (after travelling, the table fills with texels left behind, which would only be
+			        // freed EVICT frames on, the new ones black till then): the one unseen longest, if unseen for
+			        // STEAL frames, starts over as this texel.
+			        uint oldest = 0u;
+			        uint oldestAge = 0u;
+			        for (uint i = 0u; i < PROBES; i++) {
+			            uint slot = (key.x + i) % CACHE_ENTRIES;
+			            uint age = size.z - entries[slot].lastFrame;
+			            if (age > oldestAge) {
+			                oldest = slot;
+			                oldestAge = age;
+			            }
+			        }
+			        if (oldestAge > STEAL) {
+			            uint was = entries[oldest].key;
+			            if (was != 0u && atomicCompSwap(entries[oldest].key, was, key.y) == was) {
+			                entries[oldest].lastFrame = size.z;
+			                entries[oldest].count = 0u;
+			                entries[oldest].wiped = 0u;
+			                entries[oldest].sumA = uvec4(0u);
+			                entries[oldest].sumB = uvec4(0u);
+			                entries[oldest].sumC = uvec4(0u);
+			                entries[oldest].historyA = vec4(0.0);
+			                entries[oldest].historyB = vec4(0.0);
+			                entries[oldest].fastA = vec4(0.0);
+			                entries[oldest].fastB = vec4(0.0);
+			                entries[oldest].fastC = vec4(0.0);
+			                return int(oldest);
 			            }
 			        }
 			    }

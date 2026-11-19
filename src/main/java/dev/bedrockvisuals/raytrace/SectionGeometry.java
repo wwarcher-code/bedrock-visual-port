@@ -117,8 +117,10 @@ public final class SectionGeometry {
 	private static void remove(long key) {
 		Built built = BUILT.remove(key);
 		if (built != null) {
-			// Gone (unloaded, or emptied by a block broken): the cached light around it follows.
-			RtEmissive.changed(built.originX(), built.originY(), built.originZ());
+			// Emptied by a block broken: the cached light around it follows. Unloaded: nothing near it is in view.
+			if (dev.bedrockvisuals.render.ChunkChanges.editedNear(built.originX() >> 4, built.originZ() >> 4)) {
+				RtEmissive.changed(built.originX(), built.originY(), built.originZ());
+			}
 			free(built);
 		}
 	}
@@ -308,7 +310,13 @@ public final class SectionGeometry {
 				// Rebuilt with only its light levels changed (Minecraft's light engine spreading a change over a few
 				// ticks), it changes nothing the rays see: wiping the cached light again for each of those kept
 				// restarting the bounce light for a second or two after a light was removed.
-				if (old.shape() != results[s].shape()) {
+				//
+				// Only after a block edit near it: a section is also rebuilt as the chunks around it load (its border
+				// faces culled), and wiping for those, all around, every frame while arriving somewhere, kept the
+				// light there at its first few noisy samples (mostly dark texels) for seconds. The averages' own
+				// change test (TexelCache.blendTexel) follows what loading chunks change.
+				if (old.shape() != results[s].shape()
+						&& dev.bedrockvisuals.render.ChunkChanges.editedNear(old.originX() >> 4, old.originZ() >> 4)) {
 					RtEmissive.changed(old.originX(), old.originY(), old.originZ());
 				}
 			}

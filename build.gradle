@@ -93,6 +93,12 @@ tasks.named('runClient') {
 	if (script.isPresent()) {
 		jvmArgs "-Dbedrockvisuals.script=${script.get()}"
 	}
+	// -PwindowSize=1920x1080: the game's window size (tests at the player's resolution).
+	def windowSize = providers.gradleProperty('windowSize')
+	if (windowSize.isPresent()) {
+		def (width, height) = windowSize.get().tokenize('x')
+		args '--width', width, '--height', height
+	}
 	def world = providers.gradleProperty('quickPlay')
 	if (world.isPresent()) {
 		args '--quickPlaySingleplayer', world.get()
