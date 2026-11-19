@@ -25,10 +25,15 @@ import net.minecraft.world.level.block.state.BlockState;
  * colour. A block whose texels barely glow there (lava) weighs all its texels alike, as its whole surface stands
  * in for its glow. Linear, its largest channel 1; null without the model or the material maps.
  */
-final class EmitterColors {
+public final class EmitterColors {
 	/** Below this summed emissive (in texels at full glow) a block's texels are taken as glowing alike. */
 	private static final float MIN_GLOW = 0.5f;
 	private static final Map<Block, float[]> CACHE = new HashMap<>();
+	/** Per block (any thread): whether it glows all over (glowsAllOver). */
+	private static final Map<Block, Boolean> ALL_OVER = new java.util.concurrent.ConcurrentHashMap<>();
+	private static volatile int allOverGeneration = -1;
+	/** Below this mean emissive over its textures, a block that gives off Java light glows all over (lava). */
+	private static final float WEAK_EMISSIVE = 0.1f;
 	private static final float[] NONE = new float[0];
 	private static int generation = -1;
 
@@ -44,31 +49,64 @@ final class EmitterColors {
 		return color.length == 0 ? null : color;
 	}
 
+	/**
+	 * Whether a block gives off Java light while its textures barely glow in Bedrock's maps (lava): its whole
+	 * surface then stands in for its glow, every texel glowing at its light level, as the traced light takes it
+	 * to (EmissiveLights). Blocks with glowing texels of their own (torches, lanterns, glowstone) glow by those.
+	 * Any thread (the light volume's scan, LightVolume).
+	 */
+	public static boolean glowsAllOver(BlockState state) {
+		if (state.getLightEmission() == 0 || MaterialAtlas.emissiveWidth() == 0) {
+			return false;
+		}
+		if (allOverGeneration != MaterialAtlas.generation()) {
+			allOverGeneration = MaterialAtlas.generation();
+			ALL_OVER.clear();
+		}
+		return ALL_OVER.computeIfAbsent(state.getBlock(), block -> {
+			try {
+				double[] glowing = new double[4];
+				double[] all = new double[4];
+				for (TextureAtlasSprite sprite : sprites(block)) {
+					add(sprite, glowing, all);
+				}
+				return all[3] > 0 && glowing[3] / all[3] < WEAK_EMISSIVE;
+			} catch (RuntimeException e) {
+				return false;
+			}
+		});
+	}
+
+	/** Every texture a block's default model uses; a fluid's particle texture, having no model. */
+	private static Set<TextureAtlasSprite> sprites(Block block) {
+		BlockState state = block.defaultBlockState();
+		var models = Minecraft.getInstance().getModelManager().getBlockStateModelSet();
+		Set<TextureAtlasSprite> sprites = new LinkedHashSet<>();
+		List<BlockStateModelPart> parts = new ArrayList<>();
+		models.get(state).collectParts(RandomSource.create(42), parts);
+		for (BlockStateModelPart part : parts) {
+			for (Direction direction : Direction.values()) {
+				for (BakedQuad quad : part.getQuads(direction)) {
+					sprites.add(quad.materialInfo().sprite());
+				}
+			}
+			for (BakedQuad quad : part.getQuads(null)) {
+				sprites.add(quad.materialInfo().sprite());
+			}
+		}
+		if (sprites.isEmpty()) {
+			sprites.add(models.getParticleMaterial(state).sprite());
+		}
+		return sprites;
+	}
+
 	private static float[] compute(Block block) {
 		int width = MaterialAtlas.emissiveWidth();
 		if (width == 0) {
 			return NONE;
 		}
 		try {
-			BlockState state = block.defaultBlockState();
-			var models = Minecraft.getInstance().getModelManager().getBlockStateModelSet();
-			Set<TextureAtlasSprite> sprites = new LinkedHashSet<>();
-			List<BlockStateModelPart> parts = new ArrayList<>();
-			models.get(state).collectParts(RandomSource.create(42), parts);
-			for (BlockStateModelPart part : parts) {
-				for (Direction direction : Direction.values()) {
-					for (BakedQuad quad : part.getQuads(direction)) {
-						sprites.add(quad.materialInfo().sprite());
-					}
-				}
-				for (BakedQuad quad : part.getQuads(null)) {
-					sprites.add(quad.materialInfo().sprite());
-				}
-			}
-			if (sprites.isEmpty()) {
-				// Fluids have no block model: their particle texture (lava's still texture).
-				sprites.add(models.getParticleMaterial(state).sprite());
-			}
+			Set<TextureAtlasSprite> sprites = sprites(block);
 			double[] glowing = new double[4];
 			double[] all = new double[4];
 			for (TextureAtlasSprite sprite : sprites) {

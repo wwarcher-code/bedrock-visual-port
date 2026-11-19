@@ -1117,6 +1117,8 @@ void main() {
     vec3 blockRadiance = BlockLightColor.rgb * blockLightRadiance(blockLight, position, n);
     // Ray-traced light from emissive texels (RtEmissive.java), when on: in place of the block light, or over the
     // given share of it (a floor that keeps dark places visible).
+    // How much the point glows as a light standing in for block light (lava), when the traced light is on.
+    float standInGlow = 0.0;
     if (RtEmissiveParams.x > 0.5 && distant < 0.0) {
         // Alpha 1: the point is on a light that stands in for block light (lava), which keeps Bedrock's.
         vec4 traced = texture(RtEmissiveMap, vec2(texCoord.x * 0.5, texCoord.y));
@@ -1124,15 +1126,22 @@ void main() {
         // more block light inside the block behind it than in front. The trace's own test only knows the
         // strongest 48 lights of each cell, which a lavafall or a lava pool outnumbers.
         float standIn = traced.a;
-        if (emissive < 0.1) {
-            vec2 behind = lightVolumeAt(position - n * 0.3);
-            vec2 front = lightVolumeAt(position + n * 0.3);
-            standIn = behind.y > 0.0 && front.x >= 0.0 && behind.y > front.y + 0.01 ? 1.0 : standIn;
+        // Any face of a block the light volume marks as glowing all over (lava; EmitterColors.glowsAllOver), at
+        // its light level. Per block, not per pixel: a torch's stick and a lantern's frame don't glow.
+        vec3 inside = position - n * 0.1; // thin flowing lava is under a block deep
+        if (glowsAllOver(inside)) {
+            standIn = max(standIn, max(lightVolumeAt(inside).y, 1.0 / 15.0));
         }
-        // A face standing in for its own glow keeps Bedrock's light alone: the traced light on it is mostly its
-        // neighbouring faces' (each lava face is a light, a few hundredths of a block from the next), which
-        // added to its own glow burnt lava to a flat red.
-        blockRadiance = standIn > 0.5 ? blockRadiance : max(traced.rgb, blockRadiance * RtEmissiveParams.y);
+        // Such a face glows as the traced light takes it to (every texel at its light level / 15, as glowstone's
+        // texels glow at their emissive): seen lit by Bedrock's block light instead, lava looked like stone by a
+        // torch while lighting the room. The traced light on it, mostly its neighbouring lava faces', isn't added
+        // (that burnt it to a flat red).
+        if (standIn > 0.0) {
+            emissive = max(emissive, standIn);
+            standInGlow = standIn;
+        } else {
+            blockRadiance = max(traced.rgb, blockRadiance * RtEmissiveParams.y);
+        }
     }
     vec3 indirect = max(blockRadiance + SkyColor.rgb * skyCurve, AmbientColor.rgb);
     // Ray-traced bounce light (RtEmissive.java): the sun, moon and emitted light off other surfaces, over
@@ -1180,7 +1189,9 @@ void main() {
         vec4 traced = terrainReflection(position + n * 0.02, mirror);
         reflected = mix(reflected, traced.rgb, traced.a * ssrWeight);
     }
-    color += reflected * specularScale;
+    // Glowing lava reflects as little as it is lit: its smooth flowing slopes mirrored the glowing lavafall
+    // above them as pale pink patches over their own glow.
+    color += reflected * specularScale * (1.0 - standInGlow);
     color += albedo * emissive * 2.0;
     if (distantWaterHere) {
         color = distantWaterSurface(color, ray, distantWater, distant, sunDir, moonDir);

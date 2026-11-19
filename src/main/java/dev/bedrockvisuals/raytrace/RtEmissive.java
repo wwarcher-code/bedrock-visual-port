@@ -595,7 +595,7 @@ public final class RtEmissive {
 			        float s = dot(d, light.e1.xyz) / dot(light.e1.xyz, light.e1.xyz);
 			        float t = dot(d, light.e2.xyz) / dot(light.e2.xyz, light.e2.xyz);
 			        if (abs(dot(d, lightNormal)) < 0.02 && s >= -0.01 && s <= 1.01 && t >= -0.01 && t <= 1.01) {
-			            standIn = 1.0;
+			            standIn = max(light.uv2.z, 1.0 / 15.0); // its light level / 15
 			            break;
 			        }
 			    }

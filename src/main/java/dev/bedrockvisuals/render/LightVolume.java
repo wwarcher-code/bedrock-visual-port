@@ -253,9 +253,11 @@ public final class LightVolume {
 				int skyLevel = openSky ? 15 : sky == null ? 0 : sky.get(x & 15, skyY, z & 15);
 				int blockLevel = block == null ? 0 : block.get(x & 15, localY, z & 15);
 				boolean solid = false;
+				boolean glowsAllOver = false;
 				if (!empty) {
 					BlockState state = section.getBlockState(x & 15, localY, z & 15);
 					solid = state.isSolidRender();
+					glowsAllOver = dev.bedrockvisuals.raytrace.EmitterColors.glowsAllOver(state);
 					if (!colors.isEmpty() && state.getLightEmission() > 0) {
 						float[] color = colors.get(state.getBlock());
 						if (color != null) {
@@ -270,7 +272,9 @@ public final class LightVolume {
 				int texel = (row * SIZE_XZ + column) * 4;
 				texels[texel] = (byte) (skyLevel * 17);
 				texels[texel + 1] = (byte) (blockLevel * 17);
-				texels[texel + 2] = (byte) (solid ? 255 : 0);
+				// Blue: solid and opaque above a half (255; 192 also glowing all over), and glowing all over (lava,
+				// raytrace/EmitterColors.glowsAllOver) at a quarter (64) or 192.
+				texels[texel + 2] = (byte) (solid ? (glowsAllOver ? 192 : 255) : (glowsAllOver ? 64 : 0));
 				// Alpha: 1 under the column's terrain surface (WaterColumns.terrainTop), where a ray that leaves the
 				// volume upwards still has terrain over it (the cave check, light_volume.glsl).
 				boolean covered = y < WaterColumns.terrainTop(x, z);
