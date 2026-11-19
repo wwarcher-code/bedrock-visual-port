@@ -952,8 +952,13 @@ void main() {
     // Ray-traced shadows (RtShadows.java), when on: the same test, traced through every loaded chunk and entity,
     // in place of the cascades' (and of their fade at the edge of their range). The far terrain's heights still
     // shade it from beyond the loaded chunks, below.
+    vec3 rtTint = vec3(1.0); // the colour stained glass gives the light that casts shadows (ray-traced only)
     if (RtShadowParams.x > 0.5 && distant < 0.0) {
-        float rayTraced = texture(RtShadowMap, texCoord).r;
+        // rgb: the light let through, tinted by stained glass on the way: its brightest channel is the
+        // visibility, and its colour (rtTint) tints the sun or moon below.
+        vec3 rayTracedLight = texture(RtShadowMap, texCoord).rgb;
+        float rayTraced = max(rayTracedLight.r, max(rayTracedLight.g, rayTracedLight.b));
+        rtTint = rayTraced > 0.0 ? rayTracedLight / rayTraced : vec3(1.0);
         if (RtShadowParams.y > 0.5) {
             // The comparison view: red where the shadow maps light the point, green where the rays do, each as
             // the lighting below would use it (with the sky-light guards against casters missing from the maps).
@@ -1075,8 +1080,10 @@ void main() {
     sunVisibility = min(sunVisibility, distantHeightShadow(snapped, sunDir, mapped >= 0.0));
     moonVisibility = min(moonVisibility, distantHeightShadow(snapped, moonDir, mapped >= 0.0));
 
-    vec3 color = directLight(nSun, v, sunDir, sunLight() * sunVisibility, diffuseColor, f0, roughness);
-    color += directLight(nMoon, v, moonDir, moonLight() * moonVisibility, diffuseColor, f0, roughness);
+    vec3 color = directLight(nSun, v, sunDir, sunLight() * sunVisibility * (moonCasts ? vec3(1.0) : rtTint),
+            diffuseColor, f0, roughness);
+    color += directLight(nMoon, v, moonDir, moonLight() * moonVisibility * (moonCasts ? rtTint : vec3(1.0)),
+            diffuseColor, f0, roughness);
     color *= causticsMultiplier(position, n);
     // Bedrock's point lights (DiscreteIndirectCombinedLightingPass with PointLightShading): each declared light
     // block lights the surface from its centre out to its radius (its light level in blocks), by

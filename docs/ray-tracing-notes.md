@@ -484,6 +484,8 @@ off and 17.8 with all of it.
 - Tried and left: 64-block bounce rays (0.2 ms, loses far sunlit terrain's bounce); writing texel positions
   only when they change (no difference, kept).
 
+- **Coloured light through stained glass.** Translucent terrain used to let rays through untouched. Now every ray that tests for shadow multiplies in each translucent face it crosses (RtShadows.TRANSLUCENT_TINT): the sun and moon shadows (RtShadowMap's rgb, the lighting pass tinting the light that casts by it), the light from emissive texels, the bounce's sun rays and the entities' probes. A face lets through its texel's hue (brightest channel at 1; dark glass dims) by the square root of its alpha, under another square root since a block or pane has two faces. Plain colour and alpha read too faint: a sunlit patch under purple glass washed out to near white. Water and other biome-tinted surfaces (Sodium's vertex colour not grey) still pass untinted. Translucent geometry is built with NO_DUPLICATE_ANY_HIT so a face counts once. Cost unchanged at 1080p (diffuse 2.19 ms, shadows 0.15 ms). Not yet: carried entity lights through glass, and the bounce ray itself.
+
 **Later, outside ray tracing:** particles (lava's smoke) drawn nearly black at night, even beside lava: they are
 vanilla-lit into the graded image and probably need what entities got (EntityPass). And take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.

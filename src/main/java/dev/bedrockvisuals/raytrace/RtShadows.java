@@ -21,7 +21,8 @@ import org.lwjgl.system.MemoryStack;
  * shadow cascades' test ({@code RtShadowMap}, lighting/deferred.fsh).
  *
  * <p>Like the shadow maps: solid and cutout terrain cast (cutout alpha-tested against the block atlas with Sodium's
- * own cutoff), translucent terrain doesn't, and entities do. Unlike them it reaches as far as the loaded chunks,
+ * own cutoff), translucent terrain doesn't (it tints the light instead: stained glass, TRANSLUCENT_TINT), and
+ * entities do. Unlike them it reaches as far as the loaded chunks,
  * and it can soften: each ray goes to a random point of the light's disc ({@link #setSunRadius}), new every frame,
  * so the offline preset's sub-frames (or TAA) average a penumbra.
  *
@@ -37,6 +38,41 @@ public final class RtShadows {
 		/** The lighting pass shows both: red where the maps light a point, green where the rays do. */
 		COMPARE
 	}
+
+	/**
+	 * GLSL: the colour translucent terrain lets through, for shaders declaring {@code instances}, {@code Words},
+	 * {@code sodiumUv} and {@code Atlas} as RtShadows and RtEmissive do. Light through stained glass (and ice,
+	 * slime, honey) takes on its colour: each face crossed lets through its texel's hue (its brightest channel at
+	 * 1) by the square root of its alpha (white where clear), and under a square root again, as a block or a
+	 * pane has two faces. Water, and anything else Sodium tints by biome (a vertex colour that isn't grey), lets
+	 * light through untinted, as before: the lighting pass handles water's look itself.
+	 */
+	static final String TRANSLUCENT_TINT = """
+			vec3 translucentTint(rayQueryEXT query) {
+			    InstanceInfo info = instances[rayQueryGetIntersectionInstanceCustomIndexEXT(query, false)];
+			    uint geometry = uint(rayQueryGetIntersectionGeometryIndexEXT(query, false));
+			    if (info.kind != 0u || ((info.passes >> (2u * geometry)) & 3u) != 2u) {
+			        return vec3(1.0);
+			    }
+			    uint primitive = uint(rayQueryGetIntersectionPrimitiveIndexEXT(query, false));
+			    uvec3 corners = (primitive & 1u) == 0u ? uvec3(0u, 1u, 2u) : uvec3(2u, 3u, 0u);
+			    uint first = info.firstVertex[geometry] + (primitive >> 1u) * 4u;
+			    Words words = Words(info.vertices);
+			    vec3 tint = unpackUnorm4x8(words.w[first * 5u + 2u]).rgb;
+			    if (max(tint.r, max(tint.g, tint.b)) - min(tint.r, min(tint.g, tint.b)) > 0.06) {
+			        return vec3(1.0);
+			    }
+			    vec2 b = rayQueryGetIntersectionBarycentricsEXT(query, false);
+			    vec2 uv = sodiumUv(words, first + corners.x) * (1.0 - b.x - b.y) + sodiumUv(words, first + corners.y) * b.x
+			            + sodiumUv(words, first + corners.z) * b.y;
+			    vec4 texel = textureLod(Atlas, uv, 0.0);
+			    // Its hue, the brightest channel at 1 (dark glass, below a quarter, dims it too): a bright patch of
+			    // sun through it keeps its colour instead of washing out to white.
+			    vec3 color = pow(texel.rgb, vec3(2.2));
+			    color = min(color / max(max(color.r, max(color.g, color.b)), 0.25), vec3(1.0));
+			    return sqrt(mix(vec3(1.0), color, sqrt(texel.a)));
+			}
+			""";
 
 	private static final String SHADER = """
 			#version 460
@@ -104,6 +140,7 @@ public final class RtShadows {
 			    return textureLod(Atlas, uv, 0.0).a >= ALPHA_CUTOFF[(material >> 1u) & 3u];
 			}
 
+			""" + TRANSLUCENT_TINT + """
 			uint hash(uint x) {
 			    x ^= x >> 16u; x *= 0x7feb352du; x ^= x >> 15u; x *= 0x846ca68bu; x ^= x >> 16u;
 			    return x;
@@ -158,14 +195,19 @@ public final class RtShadows {
 			    rayQueryEXT query;
 			    rayQueryInitializeEXT(query, scene, gl_RayFlagsTerminateOnFirstHitEXT, 0xFF, p + nCaster * 0.01, 0.001,
 			            direction, 2048.0);
+			    // Translucent terrain on the way tints the light (TRANSLUCENT_TINT); rgb: the light let through.
+			    vec3 through = vec3(1.0);
 			    while (rayQueryProceedEXT(query)) {
-			        if (rayQueryGetIntersectionTypeEXT(query, false) == gl_RayQueryCandidateIntersectionTriangleEXT
-			                && blocks(query)) {
-			            rayQueryConfirmIntersectionEXT(query);
+			        if (rayQueryGetIntersectionTypeEXT(query, false) == gl_RayQueryCandidateIntersectionTriangleEXT) {
+			            if (blocks(query)) {
+			                rayQueryConfirmIntersectionEXT(query);
+			            } else {
+			                through *= translucentTint(query);
+			            }
 			        }
 			    }
 			    bool shadowed = rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT;
-			    pixels[index] = shadowed ? 0xFF000000u : 0xFFFFFFFFu;
+			    pixels[index] = shadowed ? 0xFF000000u : packUnorm4x8(vec4(through, 1.0));
 			}
 			""";
 

@@ -150,6 +150,25 @@ public final class RtEmissive {
 			}
 
 			bool entitiesNear;
+			""" + RtShadows.TRANSLUCENT_TINT + """
+			// The light a ray carries through the instances in mask: none if something stops it, else the colour
+			// the translucent terrain on its way lets through (RtShadows.TRANSLUCENT_TINT).
+			vec3 transmittance(vec3 origin, vec3 direction, float tMax, uint mask) {
+			    vec3 through = vec3(1.0);
+			    rayQueryEXT query;
+			    rayQueryInitializeEXT(query, scene, gl_RayFlagsTerminateOnFirstHitEXT, mask, origin, 0.001, direction, tMax);
+			    while (rayQueryProceedEXT(query)) {
+			        if (rayQueryGetIntersectionTypeEXT(query, false) == gl_RayQueryCandidateIntersectionTriangleEXT) {
+			            if (blocks(query)) {
+			                rayQueryConfirmIntersectionEXT(query);
+			            } else {
+			                through *= translucentTint(query);
+			            }
+			        }
+			    }
+			    return rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT ? vec3(0.0)
+			            : through;
+			}
 
 			// Whether anything stops a ray before tMax.
 			bool occluded(vec3 origin, vec3 direction, float tMax) {
@@ -292,12 +311,17 @@ public final class RtEmissive {
 			    float area = length(lightNormal);
 			    float cosLight = abs(dot(lightNormal / area, direction));
 			    float tMax = max(d - 0.03, 0.002);
-			    if (cosReceiver <= 0.0 || cosLight <= 0.0 || occludedBy(p + nRay * 0.01, direction, tMax, 0x01u)) {
+			    if (cosReceiver <= 0.0 || cosLight <= 0.0) {
+			        return vec3(0.0);
+			    }
+			    vec3 through = transmittance(p + nRay * 0.01, direction, tMax, 0x01u);
+			    if (dot(through, vec3(1.0)) <= 0.0) {
 			        return vec3(0.0);
 			    }
 			    shadowed = entitiesNear && occludedBy(p + nRay * 0.01, direction, tMax, 0x02u);
 			    vec3 glow = pow(texel.rgb, vec3(2.2)) * emissive * 2.0;
-			    return glow * cosReceiver * cosLight * area / max(d * d, 1.0 / 64.0) / probability * switches.w / PI;
+			    return glow * through * cosReceiver * cosLight * area / max(d * d, 1.0 / 64.0) / probability * switches.w
+			            / PI;
 			}
 
 			// One sample of the light bounced to point p (normal n): a cosine-weighted ray, and the light the surface
@@ -362,9 +386,9 @@ public final class RtEmissive {
 			    // The sun or moon on it.
 			    vec3 towards = normalize(towardsLight.xyz);
 			    float nDotL = dot(hitNormal, towards);
-			    if (nDotL > 0.0 && dot(lightColor.rgb, vec3(1.0)) > 0.0
-			            && !occludedBy(hit + hitNormal * 0.01, towards, 1024.0, 0x01u)) {
-			        light += albedo / PI * lightColor.rgb * nDotL;
+			    if (nDotL > 0.0 && dot(lightColor.rgb, vec3(1.0)) > 0.0) {
+			        light += albedo / PI * lightColor.rgb * nDotL
+			                * transmittance(hit + hitNormal * 0.01, towards, 1024.0, 0x01u);
 			    }
 			    // And the light cached at its texel (emitted and bounced): the cache feeding itself. Its fast average
 			    // (TexelCache), not the slow one shown: light passed on from surface to surface at the slow average's pace

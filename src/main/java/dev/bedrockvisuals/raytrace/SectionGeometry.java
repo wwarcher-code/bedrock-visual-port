@@ -277,7 +277,9 @@ public final class SectionGeometry {
 					positionsAt = writePositions(stage, (int) positionsAt, data);
 					int passTriangles = passVertices / 4 * 2;
 					geometry.get(g).sType$Default().geometryType(VK_GEOMETRY_TYPE_TRIANGLES_KHR)
-							.flags(pass == 0 ? VK_GEOMETRY_OPAQUE_BIT_KHR : 0);
+							// Translucent faces tint the rays crossing them (RtShadows.TRANSLUCENT_TINT): once each.
+							.flags(pass == 0 ? VK_GEOMETRY_OPAQUE_BIT_KHR
+									: pass == 2 ? VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR : 0);
 					geometry.get(g).geometry().triangles().sType$Default().vertexFormat(VK_FORMAT_R32G32B32_SFLOAT)
 							.vertexStride(12).maxVertex(passTriangles * 3 - 1).indexType(VK_INDEX_TYPE_NONE_KHR);
 					geometry.get(g).geometry().triangles().vertexData().deviceAddress(staging.address() + positionsStart);

@@ -100,10 +100,11 @@ public final class EntityProbes {
 			    vec3 lightNormal = cross(light.e1.xyz, light.e2.xyz);
 			    float area = length(lightNormal);
 			    float cosLight = abs(dot(lightNormal / area, direction));
-			    if (cosLight <= 0.0 || occluded(p, direction, max(d - 0.03, 0.002))) {
+			    vec3 through = cosLight > 0.0 ? transmittance(p, direction, max(d - 0.03, 0.002), 0xFFu) : vec3(0.0);
+			    if (dot(through, vec3(1.0)) <= 0.0) {
 			        return vec3(0.0);
 			    }
-			    vec3 glow = pow(texel.rgb, vec3(2.2)) * emissive * 2.0;
+			    vec3 glow = pow(texel.rgb, vec3(2.2)) * emissive * 2.0 * through;
 			    return glow * cosLight * area / max(d * d, 1.0 / 64.0) / probability * switches.w / PI;
 			}
 
