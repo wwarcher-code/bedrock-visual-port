@@ -22,7 +22,7 @@ import static org.lwjgl.vulkan.VK12.*;
  *   uint pad
  *   uvec4 sumA      this frame's samples of A, rgb in 1/1024 fixed point (atomic adds)
  *   uvec4 sumB      of B
- *   vec4 historyA   the averaged A (rgb) and how many samples it holds (w), capped so it still changes
+ *   vec4 historyA   the averaged A (rgb) and how many frames it holds (w), capped so it still changes
  *   vec4 historyB   the averaged B (rgb)
  * </pre>
  * A texel is its world texel coordinates (in the face's plane: the texel; across it: the plane's step) at its
@@ -45,7 +45,9 @@ final class TexelCache {
 			const uint CACHE_ENTRIES = ENTRIES_HEREu;
 			const uint PROBES = 8u;
 			const float FIXED_POINT = 1024.0;
-			const float MAX_SAMPLE = 2048.0;
+			// A single sample's cap: rare very bright samples (a light picked with a small probability, seen close)
+			// would otherwise flash a texel for a while. A little light near the brightest lights is lost.
+			const float MAX_SAMPLE = 64.0;
 			const uint EVICT = 600u;
 
 			uint texelHash(uint x) {
@@ -122,8 +124,10 @@ final class TexelCache {
 			    atomicAdd(entries[slot].count, 1u);
 			}
 
-			// The blend stage, one thread an entry: this frame's samples into the history (at most cap samples
-			// held), and entries unseen for EVICT frames freed.
+			// The blend stage, one thread an entry: this frame's mean into the history, as one frame of at most cap
+			// held, and entries unseen for EVICT frames freed. Each frame weighs the same whatever its sample count:
+			// a texel near the camera, many pixels wide, gets many samples a frame, and weighing them by count let
+			// every frame outweigh the history (each texel's light re-rolled every frame: static).
 			void blendTexel(uint slot, uint frame, float cap) {
 			    if (slot >= CACHE_ENTRIES || entries[slot].key == 0u) {
 			        return;
@@ -131,11 +135,11 @@ final class TexelCache {
 			    uint count = entries[slot].count;
 			    if (count > 0u) {
 			        float held = entries[slot].historyA.w;
-			        float total = held + float(count);
-			        vec3 meanA = vec3(entries[slot].sumA.xyz) / FIXED_POINT;
-			        vec3 meanB = vec3(entries[slot].sumB.xyz) / FIXED_POINT;
-			        entries[slot].historyA = vec4((entries[slot].historyA.rgb * held + meanA) / total, min(total, cap));
-			        entries[slot].historyB = vec4((entries[slot].historyB.rgb * held + meanB) / total, 0.0);
+			        float weight = 1.0 / (held + 1.0);
+			        vec3 meanA = vec3(entries[slot].sumA.xyz) / FIXED_POINT / float(count);
+			        vec3 meanB = vec3(entries[slot].sumB.xyz) / FIXED_POINT / float(count);
+			        entries[slot].historyA = vec4(mix(entries[slot].historyA.rgb, meanA, weight), min(held + 1.0, cap));
+			        entries[slot].historyB = vec4(mix(entries[slot].historyB.rgb, meanB, weight), 0.0);
 			        entries[slot].sumA = uvec4(0u);
 			        entries[slot].sumB = uvec4(0u);
 			        entries[slot].count = 0u;

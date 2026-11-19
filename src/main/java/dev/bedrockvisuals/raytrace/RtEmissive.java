@@ -145,6 +145,19 @@ public final class RtEmissive {
 			    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
 			    return float((word >> 22u) ^ word) / 4294967296.0;
 			}
+
+			// Three numbers in [0, 1) for this pixel's sample `stream` this frame: the R3 low-discrepancy sequence
+			// over frames, offset by the pixel (a Cranley-Patterson rotation). Each pixel's samples spread evenly over
+			// the frames instead of clumping, so its texel's average settles with less shimmer than with independent
+			// random numbers; the offsets keep the pixels of a texel from all taking the same samples.
+			uint sequencePixel;
+			vec3 sequence3(uint stream) {
+			    uint seed = sequencePixel * 0x9e3779b9u ^ (stream + 1u) * 0x85ebca6bu;
+			    seed ^= seed >> 16u; seed *= 0x7feb352du; seed ^= seed >> 15u; seed *= 0x846ca68bu; seed ^= seed >> 16u;
+			    vec3 offset = vec3(seed & 0x3FFu, (seed >> 10u) & 0x3FFu, (seed >> 20u) & 0x3FFu) / 1024.0;
+			    float n = float(size.z % 4096u);
+			    return fract(offset + n * vec3(0.8191725134, 0.6710436067, 0.5497004779));
+			}
 			""" + TexelCache.GLSL + """
 
 			// The pixel's surface: false for sky. p: its point relative to the scene's origin, at its texel's centre
@@ -192,11 +205,11 @@ public final class RtEmissive {
 			// One sample of the light from emissive texels at point p (normal n), given the cell's lights and their
 			// weights.
 			vec3 emissiveSample(vec3 p, vec3 g, vec3 n, bool thinSheet, uint count, uint indexBase,
-			        float weights[PER_CELL], float total) {
+			        float weights[PER_CELL], float total, vec3 u) {
 			    if (total <= 0.0) {
 			        return vec3(0.0);
 			    }
-			    float pick = random() * total;
+			    float pick = u.x * total;
 			    uint chosen = 0u;
 			    for (uint i = 0u; i < count; i++) {
 			        chosen = i;
@@ -208,8 +221,8 @@ public final class RtEmissive {
 			    float probability = weights[chosen] / total;
 			    Light light = lights[cellWords[indexBase + chosen] & 0x7FFFFFFFu];
 			    // A random point of it, and its texel's glow.
-			    float s = random();
-			    float t = random();
+			    float s = u.y;
+			    float t = u.z;
 			    vec3 x = light.p0.xyz + light.e1.xyz * s + light.e2.xyz * t;
 			    vec2 uv = light.uv.xy + light.uv.zw * s + light.uv2.xy * t;
 			    vec4 texel = textureLod(Atlas, uv, 0.0);
@@ -241,13 +254,13 @@ public final class RtEmissive {
 
 			// One sample of the light bounced to point p (normal n): a cosine-weighted ray, and the light the surface
 			// it meets sends back (in the cache's units: with a cosine-weighted pdf, the radiance itself).
-			vec3 bounceSample(vec3 p, vec3 n, bool thinSheet) {
+			vec3 bounceSample(vec3 p, vec3 n, bool thinSheet, vec3 u) {
 			    vec3 normal = n;
-			    if (thinSheet && random() < 0.5) {
+			    if (thinSheet && u.z < 0.5) {
 			        normal = -n; // a thin sheet takes light from both sides
 			    }
-			    float r = sqrt(random());
-			    float phi = random() * 2.0 * PI;
+			    float r = sqrt(u.x);
+			    float phi = u.y * 2.0 * PI;
 			    vec3 side = normalize(cross(abs(normal.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0), normal));
 			    vec3 up = cross(normal, side);
 			    vec3 direction = normalize(side * (r * cos(phi)) + up * (r * sin(phi)) + normal * sqrt(max(1.0 - r * r, 0.0)));
@@ -333,6 +346,7 @@ public final class RtEmissive {
 			        return;
 			    }
 			    state = (pixel.y * size.x + pixel.x) * 9781u + size.z * 6271u + 1u;
+			    sequencePixel = pixel.y * size.x + pixel.x;
 
 			    // How much each of the cell's lights would give the point, unshadowed, from its centre.
 			    vec3 g = p + grid.xyz;
@@ -353,8 +367,9 @@ public final class RtEmissive {
 			    }
 			    int samples = max(int(grid.w), 1);
 			    for (int sampleIndex = 0; sampleIndex < samples; sampleIndex++) {
-			        vec3 emitted = emissiveSample(p, g, n, thinSheet, count, indexBase, weights, total);
-			        vec3 bounced = switches.y > 0.5 ? bounceSample(p, n, thinSheet) : vec3(0.0);
+			        uint stream = uint(sampleIndex) * 2u;
+			        vec3 emitted = emissiveSample(p, g, n, thinSheet, count, indexBase, weights, total, sequence3(stream));
+			        vec3 bounced = switches.y > 0.5 ? bounceSample(p, n, thinSheet, sequence3(stream + 1u)) : vec3(0.0);
 			        addSample(slot, emitted, bounced);
 			    }
 			}
@@ -447,12 +462,12 @@ public final class RtEmissive {
 	/** Samples a pixel in each of the offline preset's sub-frames. */
 	private static int offlineSamples = 4;
 	/**
-	 * How many samples a texel's history holds at most (TexelCache) while playing: the light settles over about a
-	 * second for texels a pixel or two wide, and still follows changes.
+	 * How many frames a texel's history holds at most (TexelCache) while playing: the light averages about the
+	 * last second and a half, and still follows changes.
 	 */
-	private static final int HISTORY = 64;
-	/** In exports (the camera and the world hold still within each frame's sub-frames). */
-	private static final int EXPORT_HISTORY = 1024;
+	private static final int HISTORY = 96;
+	/** In exports, in sub-frames (the camera and the world hold still within each frame's sub-frames). */
+	private static final int EXPORT_HISTORY = 256;
 	private static boolean failed;
 	private static String failure = "";
 	private static boolean tracedThisFrame;

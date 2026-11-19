@@ -302,5 +302,21 @@ load and crashed the game, so shader constants go in with `replace`.
   - at night with the emitted light on, bounce added 7% over the whole frame;
   - cost: about 1 ms of GPU at 854x480 with shadows, emitted light and bounce all on.
 
+**Texel static fixed (2026-11-19).** The cached light flickered texel by texel, like TV static. In a still
+night scene with TAA off, 13.5% of pixels changed by more than 8 levels between frames 0.3 s apart (0% without
+ray tracing). Three causes and fixes:
+- **History blend.** The history weighed each frame by its sample count. A texel near the camera spans many
+  pixels and so gets many samples a frame, and each frame outweighed the history (about 60% new): near texels
+  were re-rolled every frame. Now each frame's mean counts as one frame (weight 1 / (frames held + 1)), with
+  96 frames held while playing (about 1.5 s) and 256 sub-frames in exports. 13.5% fell to 4.0%.
+- **Bright samples.** A sample is capped at 64 (was 2048), so a rare bright one (a light picked with a small
+  probability, seen close) can't flash a texel. A little light right by the brightest lights is lost.
+- **Even sampling.** The light pick, the point on the light and the bounce direction come from the R3
+  low-discrepancy sequence over frames, offset per pixel (a Cranley-Patterson rotation), instead of
+  independent random numbers. Each pixel's samples spread evenly over the frames.
+
+Result: 0.4% with TAA off (mean change 1.15 levels against 0.12 without ray tracing), and 0.0% with TAA on.
+A glowstone placed in the room lights it within half a second.
+
 **Still to do for the bounce:** sky light bounced as well, in place of Bedrock's ambient term, as an option;
 entity textures for their bounce colour; glossy (specular) bounce.
