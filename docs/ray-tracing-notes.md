@@ -408,6 +408,10 @@ many seconds and lit up one by one. Two causes:
   if unseen for more than 30 frames (120 still left 2% of the room without light for half a second).
 - Sections waiting for their ray-tracing structures, when more wait than a frame builds (96), are built nearest
   the camera first.
+- **Coarser texels stand in** (the player's idea). Flying in, surfaces keep crossing to finer texel levels
+  (32, 64, 128 blocks...), each new texel starting without light. Until a texel holds 8 frames of its own, it
+  shows the nearest coarser texel over the same spot that has light (or, with none, the next finer one),
+  fading to its own. Edits wipe the coarser texels near them too, so the old light can't show through.
 - After a teleport at 1080p the room is fully lit in the first frame Minecraft draws it whole (0.9 s; the
   chunks take 0.8-0.9 s to show with ray tracing off too).
 - At 1080p (`-PwindowSize=1920x1080`), flying 1,200 blocks out and back: before, the room was still speckled

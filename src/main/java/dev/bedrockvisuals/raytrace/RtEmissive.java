@@ -493,6 +493,8 @@ public final class RtEmissive {
 
 	/** Stage 3, a thread a pixel: its texel's light, to the output (emitted on the left, bounced on the right). */
 	private static final String GATHER = GROUPS_8X8 + COMMON + """
+			// Frames a texel's own light takes over from the coarser texel standing in for it.
+			const float FILL = 8.0;
 			void main() {
 			    uvec2 pixel = gl_GlobalInvocationID.xy;
 			    if (any(greaterThanEqual(pixel, size.xy))) {
@@ -542,6 +544,28 @@ public final class RtEmissive {
 			    // The emitted light as the terrain lets it through, less the share entities shadow lately.
 			    vec3 emitted = slot >= 0 ? entries[slot].historyA.rgb * (1.0 - entityTerms.x) : vec3(0.0);
 			    vec3 bounced = slot >= 0 ? entries[slot].historyB.rgb : vec3(0.0);
+			    // A texel without light of its own yet (no entry, or fewer than FILL frames: just come into view, or
+			    // nearer than before, at a finer level) shows the texel of the next coarser level over the same spot
+			    // that has some (the one it was seen as from farther away, kept a while), and fades to its own over
+			    // its first FILL frames; or, with none coarser, the next finer one (seen from nearer before).
+			    float held = slot >= 0 ? entries[slot].historyA.w : 0.0;
+			    if (held < FILL) {
+			        int other = -1;
+			        for (int up = level + 1; up <= 4 && other < 0; up++) {
+			            vec3 centre = texelCentre(p, n, thinSheet, up);
+			            int found = findTexel(texelKey(centre, n, thinSheet, originBlock.xyz, up), false);
+			            other = found >= 0 && entries[found].historyA.w >= 2.0 ? found : -1;
+			        }
+			        if (other < 0 && level > 0) {
+			            int found = findTexel(texelKey(p, n, thinSheet, originBlock.xyz, level - 1), false);
+			            other = found >= 0 && entries[found].historyA.w >= 2.0 ? found : -1;
+			        }
+			        if (other >= 0) {
+			            float own = held / FILL;
+			            emitted = mix(entries[other].historyA.rgb * (1.0 - entries[other].fastC.x), emitted, own);
+			            bounced = mix(entries[other].historyB.rgb, bounced, own);
+			        }
+			    }
 			    // The lights entities carry, from where they are this frame, times the share of them the texel saw
 			    // lately (none measured yet: all of it).
 			    uint carried = uint(entityCount.x);
