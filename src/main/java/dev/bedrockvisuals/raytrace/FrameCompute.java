@@ -69,7 +69,15 @@ final class FrameCompute {
 		long set;
 		RtBuffer output;
 		long frameSubmission = -1;
+		/** GPU timestamps before the first stage and after each (timing, for the status report and the log). */
+		long queries;
+		boolean timed;
 	}
+
+	/** Each stage's GPU time, averaged over recent dispatches (ms). */
+	private double[] stageMillis;
+	private double timestampPeriod;
+	private long lastLog;
 
 	/**
 	 * @param types the descriptor types of bindings 0 to n-1; binding n is the output buffer
@@ -106,6 +114,7 @@ final class FrameCompute {
 		ensureTexture(w, h);
 		ensurePipeline(rt);
 		Slot slot = freeSlot(rt);
+		readTimes(rt, slot);
 		long bytes = (long) w * h * bytesPerPixel;
 		if (slot.output == null || slot.output.size() < bytes) {
 			rt.free(slot.output);
@@ -140,11 +149,15 @@ final class FrameCompute {
 				vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0,
 						stack.longs(slot.set), null);
 				vkCmdPushConstants(commands, pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushConstants);
+				vkCmdResetQueryPool(commands, slot.queries, 0, pipelines.length + 1);
+				vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, slot.queries, 0);
 				for (int stage = 0; stage < pipelines.length; stage++) {
 					vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines[stage]);
 					vkCmdDispatch(commands, groups[stage][0], groups[stage][1], groups[stage][2]);
 					fullBarrier(commands, stack);
+					vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, slot.queries, stage + 1);
 				}
+				slot.timed = true;
 				VkBufferImageCopy.Buffer region = VkBufferImageCopy.calloc(1, stack);
 				region.imageSubresource().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0)
 						.layerCount(1);
@@ -153,6 +166,52 @@ final class FrameCompute {
 				fullBarrier(commands, stack);
 			});
 		}
+	}
+
+	/** A finished slot's stage times into the averages; every 10 seconds, a line in the log. */
+	private void readTimes(RtDevice rt, Slot slot) {
+		if (!slot.timed) {
+			return;
+		}
+		slot.timed = false;
+		int n = pipelines.length + 1;
+		if (stageMillis == null) {
+			stageMillis = new double[pipelines.length];
+			try (MemoryStack stack = MemoryStack.stackPush()) {
+				VkPhysicalDeviceProperties properties = VkPhysicalDeviceProperties.malloc(stack);
+				vkGetPhysicalDeviceProperties(rt.device.getPhysicalDevice(), properties);
+				timestampPeriod = properties.limits().timestampPeriod();
+			}
+		}
+		try (MemoryStack stack = MemoryStack.stackPush()) {
+			LongBuffer stamps = stack.mallocLong(n);
+			if (vkGetQueryPoolResults(rt.device, slot.queries, 0, n, stamps, 8, VK_QUERY_RESULT_64_BIT) != VK_SUCCESS) {
+				return;
+			}
+			for (int stage = 0; stage < pipelines.length; stage++) {
+				double ms = (stamps.get(stage + 1) - stamps.get(stage)) * timestampPeriod / 1e6;
+				if (ms >= 0 && ms < 1000) {
+					stageMillis[stage] += (ms - stageMillis[stage]) * 0.05;
+				}
+			}
+		}
+		long now = System.nanoTime();
+		if (now - lastLog > 10_000_000_000L) {
+			lastLog = now;
+			dev.bedrockvisuals.BedrockVisualsClient.LOGGER.info("[raytrace] {} GPU ms by stage: {}", name, times());
+		}
+	}
+
+	/** Each stage's recent GPU time, for the status report. */
+	String times() {
+		if (stageMillis == null) {
+			return "not timed yet";
+		}
+		StringBuilder out = new StringBuilder();
+		for (double ms : stageMillis) {
+			out.append(out.isEmpty() ? "" : " / ").append(String.format(java.util.Locale.ROOT, "%.2f", ms));
+		}
+		return out.toString();
 	}
 
 	private static long imageView(GpuTextureView view) {
@@ -179,6 +238,10 @@ final class FrameCompute {
 		slot.commands = rt.allocateCommandBuffer();
 		try (MemoryStack stack = MemoryStack.stackPush()) {
 			LongBuffer handle = stack.mallocLong(1);
+			RtDevice.check(vkCreateQueryPool(rt.device, VkQueryPoolCreateInfo.calloc(stack).sType$Default()
+					.queryType(VK_QUERY_TYPE_TIMESTAMP).queryCount(pipelines.length + 1), null, handle),
+					"vkCreateQueryPool");
+			slot.queries = handle.get(0);
 			VkDescriptorPoolSize.Buffer sizes = VkDescriptorPoolSize.calloc(types.length + 1, stack);
 			for (int i = 0; i < types.length; i++) {
 				sizes.get(i).type(types[i]).descriptorCount(1);

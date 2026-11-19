@@ -168,8 +168,13 @@ final class TexelCache {
 			}
 
 			// Records where a texel is (its world block and level), for blendTexel's test against the changes.
+			// Written only when it differs: every pixel of a texel writing it every frame, up to a hundred at once
+			// to one entry near the camera, cost more than the rays.
 			void placeTexel(int slot, ivec3 block, int level) {
-			    entries[slot].position = ivec4(block, level);
+			    ivec4 position = ivec4(block, level);
+			    if (entries[slot].position != position) {
+			        entries[slot].position = position;
+			    }
 			}
 
 			// Whether the world changed near a world block this frame.

@@ -465,6 +465,18 @@ mobs, at 1080p: 48 ms a frame on average, so about 3 minutes of exporting a minu
 change by more than 8 levels between frames a moment apart, against 1.38% while playing at 1 ray. A real Flashback
 export is still to try.
 
+**Performance at 1080p (2026-11-19).** The in-frame compute passes now time each stage on the GPU (logged every
+10 s, FrameCompute). With everything on, in the test room at 1 ray a pixel: the traced light's TRACE stage 2.7 ms,
+BLEND 0.14, GATHER 0.12; entity probes 0.25; traced shadows 0.12. The whole frame was 11.7 ms with ray tracing
+off and 17.8 with all of it.
+- GATHER no longer searches the cell's lights for lava (the light volume flag does it) and smooths entity terms
+  only where an entity left a mark: about 1 ms.
+- TRACE: pixels of texels many pixels wide trace with the chance that gives the texel about 16 samples a frame
+  (TEXEL_SAMPLES; 4 or 1 brought back flicker: 0.12% and 0.99% of pixels against 0.04%); half the samples
+  trace the bounce, counted twice (2.7 to 2.26 ms, no more flicker). Exports keep every sample.
+- Tried and left: 64-block bounce rays (0.2 ms, loses far sunlit terrain's bounce); writing texel positions
+  only when they change (no difference, kept).
+
 **Later, outside ray tracing:** particles (lava's smoke) drawn nearly black at night, even beside lava: they are
 vanilla-lit into the graded image and probably need what entities got (EntityPass). And take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.

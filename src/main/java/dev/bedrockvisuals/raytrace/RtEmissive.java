@@ -57,6 +57,8 @@ public final class RtEmissive {
 			layout(set = 0, binding = 5) uniform sampler2D Materials;
 			struct Light { vec4 p0; vec4 e1; vec4 e2; vec4 uv; vec4 uv2; };
 			layout(set = 0, binding = 6, std430) readonly buffer Lights { Light lights[]; };
+			// About how many of a texel's pixels trace samples into it each frame (TRACE).
+			const float TEXEL_SAMPLES = 16.0;
 			// Per cell, PER_CELL + 1 vec4s (its count; then each light's centre and power); then each entry's light
 			// index, the top bit set for a light that stands in for block light (EmissiveLights).
 			layout(set = 0, binding = 7, std430) readonly buffer Cells { vec4 cells[]; };
@@ -78,7 +80,8 @@ public final class RtEmissive {
 			layout(buffer_reference, scalar, buffer_reference_align = 4) readonly buffer Words { uint w[]; };
 			layout(push_constant) uniform Params {
 			    mat4 inverseViewProjection; // clip space to camera-relative world space (the lighting pass's)
-			    vec4 camera;                // xyz: the camera relative to the scene's origin
+			    vec4 camera;                // xyz: the camera relative to the scene's origin; w: pixels a block spans one
+			                                // block away (0 in exports: every pixel traces)
 			    vec4 grid;                  // xyz: the scene's origin relative to the light grid's corner; w: samples
 			    uvec4 size;                 // xy: the G-buffer's size; z: the frame number
 			    ivec4 originBlock;          // xyz: the scene's origin in world blocks; w: samples a texel's history holds
@@ -413,11 +416,25 @@ public final class RtEmissive {
 			        return;
 			    }
 			    ivec3 block = ivec3(floor(p)) + originBlock.xyz;
-			    placeTexel(slot, block, level);
 			    // A texel whose history is new (just seen, or wiped by a change near it this frame) takes more samples
 			    // for its first frames, so its light is right and clean at once: 12, then 6, 4, 3 and 2.
 			    bool fresh = changeCount.x > 0 && changedNear(block);
 			    float held = fresh ? 0.0 : entries[slot].historyA.w;
+			    // A texel near the camera covers many pixels, each of which traced its own samples into it: some 140
+			    // at four blocks at 1080p. Each pixel now traces with the chance that gives its texel about
+			    // TEXEL_SAMPLES a frame (all of them for texels a few pixels wide, and while a texel is new). Not in
+			    // exports (camera.w 0 there).
+			    if (held >= 5.0 && camera.w > 0.0) {
+			        vec3 toCamera = camera.xyz - p;
+			        float distance = max(length(toCamera), 0.5);
+			        float side = camera.w * float(1 << level) / 16.0 / distance;
+			        float pixels = side * side * max(abs(dot(n, toCamera / distance)), 0.2);
+			        uint h = texelHash((pixel.y * size.x + pixel.x) ^ texelHash(size.z + 0x2545f491u));
+			        if (float(h) / 4294967296.0 * pixels > TEXEL_SAMPLES) {
+			            return;
+			        }
+			    }
+			    placeTexel(slot, block, level);
 			    int samples = max(int(grid.w), 1);
 			    if (held < 5.0) {
 			        samples = max(samples, int(12.0 / (held + 1.0)));
@@ -464,7 +481,11 @@ public final class RtEmissive {
 			        bool shadowed;
 			        vec3 emitted = emissiveSample(p, g, n, thinSheet, count, indexBase, weights, total, sequence3(stream),
 			                shadowed);
-			        vec3 bounced = switches.y > 0.5 ? bounceSample(p, n, thinSheet, sequence3(stream + 1u)) : vec3(0.0);
+			        // Half the samples trace the bounce, counted twice (soft light: as clean, 0.45 ms less at 1080p); all of
+			        // them in exports.
+			        bool bounces = switches.y > 0.5 && (camera.w <= 0.0 || random() < 0.5);
+			        vec3 bounced = bounces ? bounceSample(p, n, thinSheet, sequence3(stream + 1u)) * (camera.w > 0.0 ? 2.0 : 1.0)
+			                : vec3(0.0);
 			        addSample(slot, emitted, bounced);
 			        bool seen = false;
 			        if (entityTotal > 0.0) {
@@ -532,7 +553,14 @@ public final class RtEmissive {
 			    // The entity terms, which have only a few frames' samples: the texel's own, weighed twice, with its four
 			    // neighbours' on the same face (those it has): shadowed share and carried lights seen.
 			    vec2 entityTerms = vec2(0.0, 1.0);
-			    if (slot >= 0) {
+			    // Only where an entity left a mark (a shadow, or a carried light partly hidden): elsewhere the
+			    // neighbours' four lookups a pixel would only average nothing.
+			    bool marked = slot >= 0 && (entries[slot].fastC.x > 0.001
+			            || (entries[slot].fastC.y > 0.0 && entries[slot].fastC.y < 1.999));
+			    if (slot >= 0 && !marked) {
+			        entityTerms = vec2(entries[slot].fastC.x, entries[slot].fastC.y > 0.0 ? entries[slot].fastC.y - 1.0 : 1.0);
+			    }
+			    if (marked) {
 			        float shadowSum = 2.0 * entries[slot].fastC.x;
 			        float shadowWeight = 2.0;
 			        float seenSum = entries[slot].fastC.y > 0.0 ? 2.0 * (entries[slot].fastC.y - 1.0) : 0.0;
@@ -594,29 +622,10 @@ public final class RtEmissive {
 			        emitted += light * entityTerms.y;
 			    }
 
-			    // A point on a light that only stands in for Bedrock's block light (lava: its own glow comes from block
-			    // light there, not from its texels): marked, so the lighting keeps Bedrock's block light on it.
-			    float standIn = 0.0;
-			    vec3 g = p + grid.xyz;
-			    uint base = 0u;
-			    uint indexBase = 0u;
-			    uint count = switches.x > 0.5 && gridCell(g, base, indexBase) ? floatBitsToUint(cells[base].x) : 0u;
-			    for (uint i = 0u; i < count; i++) {
-			        uint word = cellWords[indexBase + i];
-			        if ((word & 0x80000000u) == 0u) {
-			            continue;
-			        }
-			        Light light = lights[word & 0x7FFFFFFFu];
-			        vec3 d = g - light.p0.xyz;
-			        vec3 lightNormal = normalize(cross(light.e1.xyz, light.e2.xyz));
-			        float s = dot(d, light.e1.xyz) / dot(light.e1.xyz, light.e1.xyz);
-			        float t = dot(d, light.e2.xyz) / dot(light.e2.xyz, light.e2.xyz);
-			        if (abs(dot(d, lightNormal)) < 0.02 && s >= -0.01 && s <= 1.01 && t >= -0.01 && t <= 1.01) {
-			            standIn = max(light.uv2.z, 1.0 / 15.0); // its light level / 15
-			            break;
-			        }
-			    }
-			    pixels[left] = uvec2(packHalf2x16(emitted.rg), packHalf2x16(vec2(emitted.b, standIn)));
+			    // Alpha: 0. Points on blocks that glow all over (lava) are found by the lighting pass from the light
+			    // volume's flag (EmitterColors.glowsAllOver); this pass's own search of the cell's lights for them cost
+			    // a walk through up to PER_CELL lights a pixel.
+			    pixels[left] = uvec2(packHalf2x16(emitted.rg), packHalf2x16(vec2(emitted.b, 0.0)));
 			    pixels[right] = uvec2(packHalf2x16(bounced.rg), packHalf2x16(vec2(bounced.b, 1.0)));
 			}
 			""";
@@ -834,7 +843,7 @@ public final class RtEmissive {
 			constants.putFloat(64, (float) (frame.cameraX() - frame.originX()));
 			constants.putFloat(68, (float) (frame.cameraY() - frame.originY()));
 			constants.putFloat(72, (float) (frame.cameraZ() - frame.originZ()));
-			constants.putFloat(76, 0);
+			constants.putFloat(76, exporting ? 0 : Math.abs(projection.m11()) * h * 0.5f);
 			constants.putFloat(80, frame.originX() - grid.minX()).putFloat(84, frame.originY() - grid.minY())
 					.putFloat(88, frame.originZ() - grid.minZ()).putFloat(92, exporting ? offlineSamples : samples);
 			constants.putInt(96, w).putInt(100, h).putInt(104, (int) frameNumber++).putInt(108, 0);
