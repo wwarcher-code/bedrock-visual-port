@@ -236,6 +236,22 @@ bounce off surfaces in their colours: the underside of an overhang lit by the su
 ceiling lit by the patch of sun on its floor. The bounce adds to Bedrock's own sky and ambient light, which
 stay as they are. `/bv bounce gain <x>` scales it (1 is physical).
 
+**Light from entities** (with the ray-traced light; `/bv light entities on|off`, on by default;
+`raytrace/EntityLights.java`). A glowing block or lava bucket held in either hand, or lying on the ground, a
+falling glowing block, anything on fire, blazes, magma cubes, glow squids, allays, fireballs, spectral arrows
+and experience orbs light the world as they move, with ray-traced shadows. Their light is worked out again
+every frame from where they are, so it moves with them at once; only how much of it each texel sees comes
+from the cache, averaged over a couple of frames. A held torch lights the floor as a placed one does.
+Entities' shadows over the glowing blocks' light are followed the same way, so a mob walking past a lantern
+leaves no trailing shadow.
+
+**Settings.** Everything above has a page in Sodium's video settings (Video Settings, then Bedrock Visuals
+in the list on the left): Quality (Bedrock's preset, temporal anti-aliasing), Ray Tracing (shadows, block
+light, its strength and minimum, light from entities, bounce, rays per pixel) and Exports (sub-frames, rays
+per sub-frame). Changes apply at once and are kept in `config\bedrockvisuals\settings.json` (the preset in
+`quality.json`); the `/bv` commands change and save the same settings. Ray-tracing options are greyed out on
+a GPU without Vulkan ray queries.
+
 ## Distant Horizons
 
 Level 1 uses DH's public API only, no mixins. Before DH composites its LODs onto Minecraft's frame, the

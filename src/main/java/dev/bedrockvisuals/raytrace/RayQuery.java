@@ -54,9 +54,20 @@ public final class RayQuery {
 	/** Whether the device was created with the ray queries. */
 	public static boolean available() {
 		VulkanDevice device = device();
-		return device != null && featureSet != null
-				&& ((VulkanDeviceAccessor) (Object) device).bedrockvisuals$enabledFeatures().contains(featureSet);
+		if (device == null) {
+			return false;
+		}
+		// The device's features don't change: asked once a device (it is asked for every section and entity).
+		if (device != checkedDevice) {
+			checkedDevice = device;
+			checkedAvailable = featureSet != null
+					&& ((VulkanDeviceAccessor) (Object) device).bedrockvisuals$enabledFeatures().contains(featureSet);
+		}
+		return checkedAvailable;
 	}
+
+	private static VulkanDevice checkedDevice;
+	private static boolean checkedAvailable;
 
 	/** A one-line summary for diagnostics. */
 	public static String status() {

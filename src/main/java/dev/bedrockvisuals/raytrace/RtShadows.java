@@ -199,6 +199,10 @@ public final class RtShadows {
 		}
 	}
 
+	public static float sunRadius() {
+		return sunRadius;
+	}
+
 	/** The light's angular radius in degrees (0: hard shadows). */
 	public static void setSunRadius(float degrees) {
 		sunRadius = Math.max(degrees, 0);

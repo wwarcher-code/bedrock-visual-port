@@ -68,6 +68,10 @@ public final class RtEmissive {
 			    vec4 switches;      // x: emissive light on, y: bounce on, z: the bounce's gain, w: the emissive's gain
 			    ivec4 changeCount;  // x: how many places the world changed since the last frame (TexelCache)
 			    ivec4 changes[32]; // per change: the lowest and the highest world block it reaches
+			    ivec4 entityCount;  // x: how many lights entities carry this frame (EntityLights); y: 1 if the scene
+			                        // has entities at all (their shadows over the emitted light are traced apart)
+			    vec4 entityLights[64]; // per light: its position (relative to the scene's origin) and radius; its
+			                           // colour times its strength, and its reach
 			};
 			layout(set = 0, binding = 10, std430) writeonly buffer Output { uvec2 pixels[]; };
 			layout(buffer_reference, scalar, buffer_reference_align = 4) readonly buffer Words { uint w[]; };
@@ -128,10 +132,10 @@ public final class RtEmissive {
 			    return textureLod(Atlas, uv, 0.0).a >= ALPHA_CUTOFF[(material >> 1u) & 3u];
 			}
 
-			// Whether anything stops a ray before tMax.
-			bool occluded(vec3 origin, vec3 direction, float tMax) {
+			// Whether anything among the instances in mask (RtScene's MASK_TERRAIN, MASK_ENTITIES) stops a ray.
+			bool occludedBy(vec3 origin, vec3 direction, float tMax, uint mask) {
 			    rayQueryEXT query;
-			    rayQueryInitializeEXT(query, scene, gl_RayFlagsTerminateOnFirstHitEXT, 0xFF, origin, 0.001, direction, tMax);
+			    rayQueryInitializeEXT(query, scene, gl_RayFlagsTerminateOnFirstHitEXT, mask, origin, 0.001, direction, tMax);
 			    while (rayQueryProceedEXT(query)) {
 			        if (rayQueryGetIntersectionTypeEXT(query, false) == gl_RayQueryCandidateIntersectionTriangleEXT
 			                && blocks(query)) {
@@ -139,6 +143,13 @@ public final class RtEmissive {
 			        }
 			    }
 			    return rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT;
+			}
+
+			bool entitiesNear;
+
+			// Whether anything stops a ray before tMax.
+			bool occluded(vec3 origin, vec3 direction, float tMax) {
+			    return occludedBy(origin, direction, tMax, 0xFFu);
 			}
 
 			uint state;
@@ -180,6 +191,24 @@ public final class RtEmissive {
 			    return true;
 			}
 
+			// The light entity light i gives point p (normal n), unshadowed, from its centre, in the cache's units:
+			// its strength over the distance squared (held off within a quarter block), by the cosine at p, faded
+			// to nothing at its reach.
+			vec3 entityLight(uint i, vec3 p, vec3 n, bool thinSheet) {
+			    vec4 at = entityLights[i * 2u];
+			    vec4 light = entityLights[i * 2u + 1u];
+			    vec3 toLight = at.xyz - p;
+			    float d2 = dot(toLight, toLight);
+			    float reach2 = light.w * light.w;
+			    if (d2 >= reach2) {
+			        return vec3(0.0);
+			    }
+			    float cosReceiver = dot(n, toLight) * inversesqrt(max(d2, 1e-6));
+			    cosReceiver = thinSheet ? abs(cosReceiver) : max(cosReceiver, 0.0);
+			    float fade = 1.0 - d2 / reach2;
+			    return light.rgb * cosReceiver * fade * fade / max(d2, 0.0625) * switches.w / PI;
+			}
+
 			// The light grid cell at g: its first vec4 and first index word, or false outside the grid.
 			bool gridCell(vec3 g, out uint base, out uint indexBase) {
 			    ivec3 cell = ivec3(floor(g / CELL));
@@ -205,9 +234,10 @@ public final class RtEmissive {
 	/** Stage 1, a thread a pixel: samples of the light at the pixel's texel, added to its cache entry. */
 	private static final String TRACE = GROUPS_8X8 + COMMON + """
 			// One sample of the light from emissive texels at point p (normal n), given the cell's lights and their
-			// weights.
+			// weights: as the terrain lets it through (an entity in the way sets shadowed instead, for TexelCache's C).
 			vec3 emissiveSample(vec3 p, vec3 g, vec3 n, bool thinSheet, uint count, uint indexBase,
-			        float weights[PER_CELL], float total, vec3 u) {
+			        float weights[PER_CELL], float total, vec3 u, out bool shadowed) {
+			    shadowed = false;
 			    if (total <= 0.0) {
 			        return vec3(0.0);
 			    }
@@ -247,9 +277,11 @@ public final class RtEmissive {
 			    vec3 lightNormal = cross(light.e1.xyz, light.e2.xyz);
 			    float area = length(lightNormal);
 			    float cosLight = abs(dot(lightNormal / area, direction));
-			    if (cosReceiver <= 0.0 || cosLight <= 0.0 || occluded(p + nRay * 0.01, direction, max(d - 0.03, 0.002))) {
+			    float tMax = max(d - 0.03, 0.002);
+			    if (cosReceiver <= 0.0 || cosLight <= 0.0 || occludedBy(p + nRay * 0.01, direction, tMax, 0x01u)) {
 			        return vec3(0.0);
 			    }
+			    shadowed = entitiesNear && occludedBy(p + nRay * 0.01, direction, tMax, 0x02u);
 			    vec3 glow = pow(texel.rgb, vec3(2.2)) * emissive * 2.0;
 			    return glow * cosReceiver * cosLight * area / max(d * d, 1.0 / 64.0) / probability * switches.w / PI;
 			}
@@ -268,7 +300,7 @@ public final class RtEmissive {
 			    vec3 direction = normalize(side * (r * cos(phi)) + up * (r * sin(phi)) + normal * sqrt(max(1.0 - r * r, 0.0)));
 
 			    rayQueryEXT query;
-			    rayQueryInitializeEXT(query, scene, gl_RayFlagsNoneEXT, 0xFF, p + normal * 0.01, 0.001, direction, 256.0);
+			    rayQueryInitializeEXT(query, scene, gl_RayFlagsNoneEXT, 0x01, p + normal * 0.01, 0.001, direction, 256.0);
 			    while (rayQueryProceedEXT(query)) {
 			        if (rayQueryGetIntersectionTypeEXT(query, false) == gl_RayQueryCandidateIntersectionTriangleEXT
 			                && blocks(query)) {
@@ -316,7 +348,8 @@ public final class RtEmissive {
 			    // The sun or moon on it.
 			    vec3 towards = normalize(towardsLight.xyz);
 			    float nDotL = dot(hitNormal, towards);
-			    if (nDotL > 0.0 && dot(lightColor.rgb, vec3(1.0)) > 0.0 && !occluded(hit + hitNormal * 0.01, towards, 1024.0)) {
+			    if (nDotL > 0.0 && dot(lightColor.rgb, vec3(1.0)) > 0.0
+			            && !occludedBy(hit + hitNormal * 0.01, towards, 1024.0, 0x01u)) {
 			        light += albedo / PI * lightColor.rgb * nDotL;
 			    }
 			    // And the light cached at its texel (emitted and bounced): the cache feeding itself. Its fast average
@@ -332,6 +365,24 @@ public final class RtEmissive {
 			        }
 			    }
 			    return light * switches.z;
+			}
+
+			// Whether a point x of an entity's light is seen from p: through the terrain all the way, and through the
+			// entities short of the light (the one carrying it, with its hand and the item, isn't in the way).
+			bool entityLightReaches(vec3 p, vec3 n, bool thinSheet, vec3 x) {
+			    vec3 toPoint = x - p;
+			    float d = length(toPoint);
+			    if (d < 0.02) {
+			        return true;
+			    }
+			    vec3 direction = toPoint / d;
+			    vec3 nRay = thinSheet && dot(n, direction) < 0.0 ? -n : n;
+			    vec3 origin = p + nRay * 0.01;
+			    if (occludedBy(origin, direction, max(d - 0.03, 0.002), 0x01u)) {
+			        return false;
+			    }
+			    float entityReach = d - 0.7;
+			    return entityReach <= 0.0 || !occludedBy(origin, direction, entityReach, 0x02u);
 			}
 
 			void main() {
@@ -380,11 +431,48 @@ public final class RtEmissive {
 			        weights[i] = w;
 			        total += w;
 			    }
+			    entitiesNear = entityCount.y != 0;
+			    // The lights entities carry: how much each gives the point, unshadowed. Their light itself is worked out
+			    // again every frame where it is shown (GATHER); here only whether they are seen is sampled, a light
+			    // picked by how much it gives, and counted into the share of them the texel sees.
+			    uint carried = uint(entityCount.x);
+			    float entityWeights[32];
+			    float entityTotal = 0.0;
+			    for (uint i = 0u; i < carried; i++) {
+			        float w = dot(entityLight(i, p, n, thinSheet), vec3(1.0));
+			        entityWeights[i] = w;
+			        entityTotal += w;
+			    }
 			    for (int sampleIndex = 0; sampleIndex < samples; sampleIndex++) {
 			        uint stream = uint(sampleIndex) * 2u;
-			        vec3 emitted = emissiveSample(p, g, n, thinSheet, count, indexBase, weights, total, sequence3(stream));
+			        bool shadowed;
+			        vec3 emitted = emissiveSample(p, g, n, thinSheet, count, indexBase, weights, total, sequence3(stream),
+			                shadowed);
 			        vec3 bounced = switches.y > 0.5 ? bounceSample(p, n, thinSheet, sequence3(stream + 1u)) : vec3(0.0);
 			        addSample(slot, emitted, bounced);
+			        bool seen = false;
+			        if (entityTotal > 0.0) {
+			            vec3 u = sequence3(stream + 4096u);
+			            float pick = u.x * entityTotal;
+			            uint chosen = 0u;
+			            for (uint i = 0u; i < carried; i++) {
+			                chosen = i;
+			                pick -= entityWeights[i];
+			                if (pick <= 0.0) {
+			                    break;
+			                }
+			            }
+			            // A point of the light's sphere, on the half facing the point lit.
+			            vec4 at = entityLights[chosen * 2u];
+			            float z = u.y * 2.0 - 1.0;
+			            float phi = u.z * 2.0 * PI;
+			            vec3 offset = vec3(sqrt(max(1.0 - z * z, 0.0)) * vec2(cos(phi), sin(phi)), z);
+			            vec3 towardsPoint = normalize(p - at.xyz);
+			            offset = dot(offset, towardsPoint) < 0.0 ? reflect(offset, towardsPoint) : offset;
+			            seen = entityLightReaches(p, n, thinSheet, at.xyz + offset * at.w);
+			        }
+			        // Always, so a texel's share shadowed goes back to none once the last entity is gone.
+			        addEntitySample(slot, dot(emitted, vec3(0.2126, 0.7152, 0.0722)), shadowed, entityTotal > 0.0, seen);
 			    }
 			}
 			""";
@@ -422,8 +510,48 @@ public final class RtEmissive {
 			        return;
 			    }
 			    int slot = findTexel(texelKey(p, n, thinSheet, originBlock.xyz, level), false);
-			    vec3 emitted = slot >= 0 ? entries[slot].historyA.rgb : vec3(0.0);
+			    // The entity terms, which have only a few frames' samples: the texel's own, weighed twice, with its four
+			    // neighbours' on the same face (those it has): shadowed share and carried lights seen.
+			    vec2 entityTerms = vec2(0.0, 1.0);
+			    if (slot >= 0) {
+			        float shadowSum = 2.0 * entries[slot].fastC.x;
+			        float shadowWeight = 2.0;
+			        float seenSum = entries[slot].fastC.y > 0.0 ? 2.0 * (entries[slot].fastC.y - 1.0) : 0.0;
+			        float seenWeight = entries[slot].fastC.y > 0.0 ? 2.0 : 0.0;
+			        vec3 a = abs(n);
+			        if (!thinSheet && max(a.x, max(a.y, a.z)) >= 0.95) {
+			            float size = float(1 << level) / 16.0;
+			            vec3 axis = round(n);
+			            vec3 u = abs(axis.x) > 0.5 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+			            vec3 v = cross(axis, u);
+			            vec3 steps[4] = vec3[4](u, -u, v, -v);
+			            for (int i = 0; i < 4; i++) {
+			                int near = findTexel(texelKey(p + steps[i] * size, n, false, originBlock.xyz, level), false);
+			                if (near >= 0) {
+			                    shadowSum += entries[near].fastC.x;
+			                    shadowWeight += 1.0;
+			                    if (entries[near].fastC.y > 0.0) {
+			                        seenSum += entries[near].fastC.y - 1.0;
+			                        seenWeight += 1.0;
+			                    }
+			                }
+			            }
+			        }
+			        entityTerms = vec2(shadowSum / shadowWeight, seenWeight > 0.0 ? seenSum / seenWeight : 1.0);
+			    }
+			    // The emitted light as the terrain lets it through, less the share entities shadow lately.
+			    vec3 emitted = slot >= 0 ? entries[slot].historyA.rgb * (1.0 - entityTerms.x) : vec3(0.0);
 			    vec3 bounced = slot >= 0 ? entries[slot].historyB.rgb : vec3(0.0);
+			    // The lights entities carry, from where they are this frame, times the share of them the texel saw
+			    // lately (none measured yet: all of it).
+			    uint carried = uint(entityCount.x);
+			    if (carried > 0u) {
+			        vec3 light = vec3(0.0);
+			        for (uint i = 0u; i < carried; i++) {
+			            light += entityLight(i, p, n, thinSheet);
+			        }
+			        emitted += light * entityTerms.y;
+			    }
 
 			    // A point on a light that only stands in for Bedrock's block light (lava: its own glow comes from block
 			    // light there, not from its texels): marked, so the lighting keeps Bedrock's block light on it.
@@ -475,6 +603,7 @@ public final class RtEmissive {
 	private static int samples = 1;
 	/** Samples a pixel in each of the offline preset's sub-frames. */
 	private static int offlineSamples = 4;
+	private static boolean entityLights = true;
 	/**
 	 * How long a texel's slow average reaches back while playing (TexelCache), in seconds: as many frames as the
 	 * game draws in that time, between {@link #MIN_HISTORY} and {@link #MAX_HISTORY}.
@@ -496,6 +625,8 @@ public final class RtEmissive {
 	 */
 	private static final java.util.List<int[]> CHANGES = new java.util.ArrayList<>();
 	private static final int CHANGE_DISPATCHES = 2;
+	/** Where the frame data's entity lights start: after the light, the switches and the changes. */
+	private static final int ENTITY_LIGHTS_AT = 64 + MAX_CHANGES * 32;
 	/**
 	 * In exports, in sub-frames: 64 is 8 output frames at 8 sub-frames each, which is as far back as a change
 	 * too small to set off the history's reaction (TexelCache) can trail.
@@ -560,6 +691,35 @@ public final class RtEmissive {
 
 	public static boolean bounce() {
 		return bounce;
+	}
+
+	public static float gain() {
+		return gain;
+	}
+
+	public static float bounceGain() {
+		return bounceGain;
+	}
+
+	public static float floor() {
+		return floor;
+	}
+
+	public static int samples() {
+		return samples;
+	}
+
+	public static int offlineSamples() {
+		return offlineSamples;
+	}
+
+	/** Whether entities carrying or giving off light (EntityLights) light the world too. */
+	public static boolean entityLights() {
+		return entityLights;
+	}
+
+	public static void setEntityLights(boolean on) {
+		entityLights = on;
 	}
 
 	public static void setGain(float value) {
@@ -640,7 +800,8 @@ public final class RtEmissive {
 					.putInt(124, history(exporting));
 
 			// This frame's light and switches, freed once the frame has run.
-			RtBuffer params = rt.hostBuffer(64 + MAX_CHANGES * 32, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+			RtBuffer params = rt.hostBuffer(ENTITY_LIGHTS_AT + 16 + EntityLights.MAX * EntityLights.BYTES,
+					VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 			rt.free(params);
 			ByteBuffer frameData = params.bytes();
 			frameData.putFloat(0, towardsLight.x()).putFloat(4, towardsLight.y()).putFloat(8, towardsLight.z())
@@ -656,6 +817,13 @@ public final class RtEmissive {
 						.putInt(at + 16, box[3]).putInt(at + 20, box[4]).putInt(at + 24, box[5]).putInt(at + 28, 0);
 			}
 			CHANGES.removeIf(box -> --box[6] <= 0);
+			// The lights entities carry (EntityLights), with the emitted light.
+			int carried = 0;
+			if (mode != Mode.OFF && entityLights) {
+				carried = EntityLights.write(EntityLights.collect(frame.cameraX(), frame.cameraY(), frame.cameraZ()),
+						frameData, ENTITY_LIGHTS_AT + 16, frame.originX(), frame.originY(), frame.originZ());
+			}
+			frameData.putInt(ENTITY_LIGHTS_AT, carried).putInt(ENTITY_LIGHTS_AT + 4, EntityGeometry.quads() > 0 ? 1 : 0);
 
 			PASS.dispatch(rt, w * 2, h, List.of(new FrameCompute.Structure(frame.tlas()),
 					new FrameCompute.Buffer(frame.instances().buffer()), new FrameCompute.Image(depth),

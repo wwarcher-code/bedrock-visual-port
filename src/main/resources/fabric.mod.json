@@ -8,7 +8,8 @@
 	"license": "All-Rights-Reserved",
 	"environment": "client",
 	"entrypoints": {
-		"client": ["dev.bedrockvisuals.BedrockVisualsClient"]
+		"client": ["dev.bedrockvisuals.BedrockVisualsClient"],
+		"sodium:config_api_user": ["dev.bedrockvisuals.compat.SodiumOptions"]
 	},
 	"mixins": ["bedrockvisuals.mixins.json"],
 	"depends": {

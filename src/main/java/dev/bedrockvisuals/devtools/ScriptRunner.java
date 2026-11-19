@@ -170,6 +170,16 @@ public final class ScriptRunner {
 			case "rtexportsamples" -> dev.bedrockvisuals.raytrace.RtEmissive.setOfflineSamples(Integer.parseInt(argument));
 			case "rtlights" -> dev.bedrockvisuals.raytrace.EmissiveLights.dump(Path.of(argument));
 			case "rtbounce" -> dev.bedrockvisuals.raytrace.RtEmissive.setBounce(argument.equals("on"));
+			case "rtentities" -> dev.bedrockvisuals.raytrace.RtEmissive.setEntityLights(argument.equals("on"));
+			case "settings" -> {
+				// Sodium's video settings at one of this mod's pages ("settings 1"; "settings close" closes them).
+				if (argument.equals("close")) {
+					minecraft.gui.setScreen(null);
+				} else {
+					minecraft.gui.setScreen(dev.bedrockvisuals.compat.SodiumOptions.screen(
+							argument.isEmpty() ? 0 : Integer.parseInt(argument)));
+				}
+			}
 			case "rtbouncegain" -> dev.bedrockvisuals.raytrace.RtEmissive.setBounceGain(Float.parseFloat(argument));
 			case "rtsamples" -> dev.bedrockvisuals.raytrace.RtEmissive.setSamples(Integer.parseInt(argument));
 			case "offline" -> {

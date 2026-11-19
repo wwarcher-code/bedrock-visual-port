@@ -39,6 +39,13 @@ public final class Quality {
 	private Quality() {
 	}
 
+	/** Loads the presets unless they are (Sodium's settings page may ask for them before the mod starts). */
+	public static void ensureLoaded(Path configDir) {
+		if (!loaded) {
+			load(configDir);
+		}
+	}
+
 	/** At startup: reads Bedrock's presets and the chosen one, and applies it. */
 	public static void load(Path configDir) {
 		configFile = configDir.resolve("bedrockvisuals").resolve("quality.json");

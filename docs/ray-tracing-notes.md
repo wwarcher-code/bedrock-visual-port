@@ -369,5 +369,35 @@ Results:
   (noise darkens an average through the tone map). It goes up or down between runs, with or without bounce.
 - the still-scene flicker stays at about 0.5% of pixels changing by more than 8 levels with TAA off.
 
+**Phase 6: light from moving entities, and a settings page (2026-11-19).**
+- **Entity lights** (`EntityLights`). Each frame, up to 32 entities near the camera that give off light, by
+  rule as LambDynamicLights does: held or dropped glowing blocks (their Java light level), lava buckets,
+  burning entities, blazes, magma cubes, glow squids, allays, fireballs, spectral arrows, experience orbs.
+  Each is a small sphere, coloured by the packs' light colour for the block where there is one. A held light
+  sits at the hand (in first person, where the first-person hand is), pulled back out of any block between
+  the eye and it.
+- **Ratio estimator.** A moving light can't go through the texel cache's averages: it would smear. Its
+  unshadowed light is computed analytically per texel every frame (GATHER), and only its visibility is
+  sampled (TRACE: one light picked by its unshadowed contribution, a point on its sphere, a shadow ray through
+  the terrain all the way and through entities short of the last 0.7 block, so the carrier's own hand doesn't
+  block it). The texel keeps the share of those rays that reached it, averaged with weight 0.5 a frame. Light
+  follows the carrier at once; shadows lag a frame or two.
+- **Entity shadows over static light.** Entities moving through the slow average A left trails of shadow
+  for up to a second. Now A and the bounce B trace the terrain only, and entities' occlusion of the emitted
+  light is a separate share (weight 0.3 a frame) subtracted when shown. Both entity terms are averaged
+  with the texel's four neighbours on its face when shown, which took the speckle out of entity shadows.
+- Cache entries grew to 160 bytes (`sumC`, `fastC`): 335 MB for 2^21 entries.
+- **Calibration.** A dropped torch adds the same light around it as the torch placed there (+0.0174 linear
+  luminance in both, `EntityLights.INTENSITY` 0.08). No measurable frame cost at 854x480 (8.40 ms with,
+  8.37 ms without).
+- **Settings** (`config/Settings`, `compat/SodiumOptions`): Sodium 0.9's config API
+  (`sodium:config_api_user`), three pages; saved to `settings.json` and applied at startup. The scene can now
+  be switched on before the Vulkan device exists (it waits for it). With every ray-traced feature off, the
+  scene is freed.
+- Script lines: `rtentities on|off`, `settings <page>` / `settings close`.
+
+**Still to do for entities:** mobs themselves (lit forward) still take Bedrock's block light, not the traced
+light; entity textures' own emissive texels (eyes) aren't lights; the carried light doesn't bounce.
+
 **Still to do for the bounce:** sky light bounced as well, in place of Bedrock's ambient term, as an option;
 entity textures for their bounce colour; glossy (specular) bounce.

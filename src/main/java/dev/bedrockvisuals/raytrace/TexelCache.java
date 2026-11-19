@@ -14,7 +14,7 @@ import static org.lwjgl.vulkan.VK12.*;
  * ambient terms). Both are in the units of Bedrock's indirect light (light arriving over pi: the lighting pass
  * multiplies them by the diffuse colour).
  *
- * <p>A hash table on the GPU of {@link #ENTRIES} entries, 128 bytes each (std430):
+ * <p>A hash table on the GPU of {@link #ENTRIES} entries, 160 bytes each (std430):
  * <pre>
  *   uint key        the texel's check hash (0: empty); claimed with an atomic compare-and-swap
  *   uint lastFrame  the frame its samples last arrived (entries left unseen for EVICT frames are freed)
@@ -22,10 +22,15 @@ import static org.lwjgl.vulkan.VK12.*;
  *   uint wiped      the frame its history was last wiped by a change near it
  *   uvec4 sumA      this frame's samples of A, rgb in 1/1024 fixed point (atomic adds)
  *   uvec4 sumB      of B
+ *   uvec4 sumC      this frame's entity samples (fixed point): x the emitted light entities stood in front of,
+ *                   y all the emitted light the terrain let through; z how many shadow rays reached the lights
+ *                   entities carry (EntityLights), w how many were traced
  *   vec4 historyA   the slow average of A (rgb), shown, and how many frames it holds (w, capped)
  *   vec4 historyB   the slow average of B (rgb), and how much a frame's luminance varies (w: its variance)
  *   vec4 fastA      the fast average of A (rgb), over the last FAST frames, and how many it holds (w)
  *   vec4 fastB      the fast average of B (rgb)
+ *   vec4 fastC      over the last couple of frames: x the share of A that entities shadow, y the share of the
+ *                   entities' lights the texel sees (plus one; 0 before any was measured)
  *   ivec4 position  the texel's world block (xyz) and level (w), for wiping it when the world changes near it
  * </pre>
  * The slow average hides the noise; the fast one notices changes the world doesn't report (see blendTexel). When
@@ -41,16 +46,20 @@ import static org.lwjgl.vulkan.VK12.*;
  * resolution each (8, 4, 2, then 1 a block), so the table stays small and far surfaces gather samples faster. Up
  * to PROBES slots from the hash are tried.
  *
- * <p>Only the G-buffer's terrain is cached (entities are lit forward), so texels don't move.
+ * <p>Only the G-buffer's terrain is cached (entities are lit forward), so texels don't move. Entities do: what they
+ * change is kept apart from the averages A and B, which see the terrain alone, and followed within a couple of
+ * frames (C): their shadows over the emitted light, as a share of it, and how much of the lights they carry each
+ * texel sees. A mob walking past a lantern so leaves no trail of shadow, and a torch carried by moves its light
+ * with it.
  */
 final class TexelCache {
 	static final int ENTRIES = 1 << 21;
-	static final int ENTRY_SIZE = 128;
+	static final int ENTRY_SIZE = 160;
 
 	/** The GLSL for a shader with the cache at binding {@code CACHE_BINDING} (define it first). */
 	static final String GLSL = """
-			struct TexelEntry { uint key; uint lastFrame; uint count; uint wiped; uvec4 sumA; uvec4 sumB;
-			    vec4 historyA; vec4 historyB; vec4 fastA; vec4 fastB; ivec4 position; };
+			struct TexelEntry { uint key; uint lastFrame; uint count; uint wiped; uvec4 sumA; uvec4 sumB; uvec4 sumC;
+			    vec4 historyA; vec4 historyB; vec4 fastA; vec4 fastB; vec4 fastC; ivec4 position; };
 			layout(set = 0, binding = CACHE_BINDING, std430) buffer TexelCache { TexelEntry entries[]; };
 			const uint CACHE_ENTRIES = ENTRIES_HEREu;
 			const uint PROBES = 8u;
@@ -149,6 +158,24 @@ final class TexelCache {
 			    atomicAdd(entries[slot].count, 1u);
 			}
 
+			// One sample's entity terms (TexelCache's C): the emitted light the terrain let through (its luminance),
+			// whether an entity stood in front of it, and, if a light entities carry was tried, whether it was seen.
+			void addEntitySample(int slot, float emitted, bool shadowed, bool triedCarried, bool seenCarried) {
+			    uint fixedLight = uint(clamp(emitted, 0.0, MAX_SAMPLE) * FIXED_POINT + 0.5);
+			    if (fixedLight > 0u) {
+			        atomicAdd(entries[slot].sumC.y, fixedLight);
+			        if (shadowed) {
+			            atomicAdd(entries[slot].sumC.x, fixedLight);
+			        }
+			    }
+			    if (triedCarried) {
+			        atomicAdd(entries[slot].sumC.w, 1u);
+			        if (seenCarried) {
+			            atomicAdd(entries[slot].sumC.z, 1u);
+			        }
+			    }
+			}
+
 			// The blend stage, one thread an entry: this frame's mean into the averages, and entries unseen for EVICT
 			// frames freed. Each frame weighs the same whatever its sample count (a texel near the camera, many
 			// pixels wide, gets many samples a frame; weighing them by count let every frame outweigh the history,
@@ -161,6 +188,11 @@ final class TexelCache {
 			// light really changed: the slow average takes the fast one's value and count, and the change shows in a
 			// few frames instead of the whole slow history.
 			const float FAST = 6.0;
+			// A frame's weight in the entity terms: the lights they carry (one light at a time, little noise) follow
+			// within two frames, their shadows over the emitted light (sampled among all a texel's lights) within
+			// three or four.
+			const float ENTITY_WEIGHT = 0.5;
+			const float ENTITY_SHADOW_WEIGHT = 0.3;
 			const uint WIPED_FRAMES = 24u;
 			const float WIPED_HISTORY = 8.0;
 			void blendTexel(uint slot, uint frame, float cap) {
@@ -197,6 +229,18 @@ final class TexelCache {
 			        fastA = vec4(mix(fastA.rgb, meanA, fastWeight), min(fastA.w + 1.0, FAST));
 			        fastB = vec4(mix(fastB.rgb, meanB, fastWeight), 0.0);
 
+			        // What entities do, over a couple of frames only, as they move: the share of the emitted light they
+			        // shadow, and the share of the lights they carry seen (kept plus one: 0 is never measured).
+			        uvec4 sumC = entries[slot].sumC;
+			        vec4 fastC = entries[slot].fastC;
+			        fastC.x = sumC.y > 0u ? mix(fastC.x, float(sumC.x) / float(sumC.y), ENTITY_SHADOW_WEIGHT) : fastC.x;
+			        if (sumC.w > 0u) {
+			            float seen = float(sumC.z) / float(sumC.w);
+			            fastC.y = fastC.y > 0.0 ? mix(fastC.y - 1.0, seen, ENTITY_WEIGHT) + 1.0 : seen + 1.0;
+			        }
+			        entries[slot].fastC = fastC;
+			        entries[slot].sumC = uvec4(0u);
+
 			        // Held to this frame's cap first: a lowered cap (the world changed) takes effect at once.
 			        float held = min(entries[slot].historyA.w, cap);
 			        float slowWeight = 1.0 / (held + 1.0);
@@ -226,6 +270,8 @@ final class TexelCache {
 			        entries[slot].historyB = vec4(0.0);
 			        entries[slot].fastA = vec4(0.0);
 			        entries[slot].fastB = vec4(0.0);
+			        entries[slot].fastC = vec4(0.0);
+			        entries[slot].sumC = uvec4(0u);
 			        entries[slot].position = ivec4(0);
 			        entries[slot].key = 0u;
 			    }

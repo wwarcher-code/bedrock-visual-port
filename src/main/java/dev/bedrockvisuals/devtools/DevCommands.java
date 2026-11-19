@@ -26,7 +26,8 @@ public final class DevCommands {
 			                      rain), spots, or one spot by name; a sheet-<section>.png set per section
 			  /bv flicker         the flicker test alone (far terrain and reflections), where you stand (about 30 seconds)
 			  /bv quality [tier performance|quality]   show or pick one of Bedrock's graphics presets
-			  /bv status          copy the diagnostics report to the clipboard""";
+			  /bv status          copy the diagnostics report to the clipboard
+			  Settings: Video Settings > Sodium's page list > Bedrock Visuals (quality, ray tracing, exports)""";
 
 	private DevCommands() {
 	}
@@ -54,6 +55,10 @@ public final class DevCommands {
 
 	private static void feedback(net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource source,
 			String message) {
+		if (message.startsWith("Ray-traced")) {
+			// A ray-tracing command changed a setting (or showed it): kept, as the settings page does.
+			dev.bedrockvisuals.config.Settings.save();
+		}
 		source.sendFeedback(Component.literal("[Bedrock Visuals] " + message));
 	}
 
@@ -262,6 +267,15 @@ public final class DevCommands {
 		root.then(ClientCommands.literal("floor").then(ClientCommands.argument("x",
 				com.mojang.brigadier.arguments.FloatArgumentType.floatArg(0, 1)).executes(c -> {
 			dev.bedrockvisuals.raytrace.RtEmissive.setFloor(com.mojang.brigadier.arguments.FloatArgumentType.getFloat(c, "x"));
+			feedback(c.getSource(), "Ray-traced emissive light: " + dev.bedrockvisuals.raytrace.RtEmissive.status());
+			return 1;
+		})));
+		root.then(ClientCommands.literal("entities").then(ClientCommands.literal("on").executes(c -> {
+			dev.bedrockvisuals.raytrace.RtEmissive.setEntityLights(true);
+			feedback(c.getSource(), "Ray-traced emissive light: " + dev.bedrockvisuals.raytrace.RtEmissive.status());
+			return 1;
+		})).then(ClientCommands.literal("off").executes(c -> {
+			dev.bedrockvisuals.raytrace.RtEmissive.setEntityLights(false);
 			feedback(c.getSource(), "Ray-traced emissive light: " + dev.bedrockvisuals.raytrace.RtEmissive.status());
 			return 1;
 		})));

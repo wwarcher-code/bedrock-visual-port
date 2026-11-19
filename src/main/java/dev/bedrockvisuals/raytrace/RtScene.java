@@ -59,7 +59,12 @@ public final class RtScene {
 	}
 
 	public static boolean enabled() {
-		return enabled && !failed;
+		return enabled && !failed && RayQuery.available();
+	}
+
+	/** Whether the scene was asked for (it may still wait for a device with ray queries). */
+	public static boolean requested() {
+		return enabled;
 	}
 
 	/**
@@ -70,7 +75,8 @@ public final class RtScene {
 		if (on == enabled) {
 			return;
 		}
-		if (on && !RayQuery.available()) {
+		// Before the device exists (settings applied at startup) the wish is kept; enabled() waits for the device.
+		if (on && RayQuery.device() != null && !RayQuery.available()) {
 			BedrockVisualsClient.LOGGER.warn("[raytrace] no ray queries on this device: the scene stays off");
 			return;
 		}

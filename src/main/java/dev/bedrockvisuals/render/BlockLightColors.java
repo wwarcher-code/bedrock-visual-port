@@ -81,6 +81,11 @@ public final class BlockLightColors {
 		return declared;
 	}
 
+	/** The packs' light colour for a block (linear, largest channel 1), or null if they give it none. */
+	public static float[] colorOf(Block block) {
+		return declared().get(block);
+	}
+
 	private static float[] linear(Rgba color) {
 		float r = (float) Math.pow(color.r(), 2.2);
 		float g = (float) Math.pow(color.g(), 2.2);

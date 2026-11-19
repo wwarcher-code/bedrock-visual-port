@@ -34,7 +34,8 @@ public class BedrockVisualsClient implements ClientModInitializer {
 				dev.bedrockvisuals.raytrace.RayQuerySmokeTest.runOnce();
 			}
 		});
-		dev.bedrockvisuals.render.Quality.load(FabricLoader.getInstance().getConfigDir());
+		dev.bedrockvisuals.render.Quality.ensureLoaded(FabricLoader.getInstance().getConfigDir());
+		dev.bedrockvisuals.config.Settings.load(FabricLoader.getInstance().getConfigDir());
 		TestCapture.register();
 		DevCommands.register();
 		dev.bedrockvisuals.devtools.ScriptRunner.register();
