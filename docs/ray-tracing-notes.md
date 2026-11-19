@@ -271,4 +271,36 @@ load and crashed the game, so shader constants go in with `replace`.
 - in exports the grid is rebuilt every frame the camera changes cell (up to about 10 ms of CPU near many
   lava faces).
 
-**Next: phase 5.** Bounce light from the sun and moon (and the emissive light) off lit surfaces.
+**Phase 5, bounce light (done, 2026-11-19).** `/bv bounce on|off`, `/bv bounce gain <x>` (script: `rtbounce`,
+`rtbouncegain`), in the same pass as the emitted light (`RtEmissive`, now three stages over `TexelCache`):
+- **The sample.** Each texel sample also casts a cosine-weighted ray. Where it meets terrain or an entity, the
+  surface sends back:
+  - the sun or moon on it: albedo / pi x light x N.L, with its own shadow ray, the lighting pass's direct
+    diffuse;
+  - plus albedo x the light cached at its own texel, emitted and bounced.
+
+  With a cosine-weighted pdf that radiance is the sample itself, in the cache's units. Because the cache feeds
+  itself, more bounces build up over the frames.
+- **Surface colours.** Terrain takes the block atlas colour (linearised) times Sodium's vertex colour (biome
+  tint and ambient occlusion). Entities take their vertex colour x 0.4, since their textures aren't in the
+  block atlas. Translucent terrain lets rays through.
+- **What's left out.** Sky light isn't bounced (a miss adds nothing), since Bedrock's sky ambient term stays and
+  would be counted twice. Rays hitting emissive texels don't add their glow, which the direct sampling already
+  counts.
+- **The cache.** Entries are now 80 bytes, with two channels: emitted (A) and bounced (B). In the lighting
+  pass, A replaces the block light (or sits over its floor), while B adds to the indirect light after
+  Bedrock's max(block + sky, ambient). The output texture is twice the G-buffer's width: A on the left half,
+  B on the right.
+- **Distance levels.** Texels coarsen with distance from the camera: 1/16 block within 32 blocks, then 1/8,
+  1/4, 1/2 and 1 block out from 256. Far texels are smaller than a pixel anyway, so they now gather samples
+  faster and fill less of the table.
+- **Checked on the test platform, morning sun, exposure locked:**
+  - the underside of the platform, seen from below, came out 3.9x brighter, lit warm by the savanna below;
+  - in the roofed room, the ceiling over the sunlit strip of floor came out 24% brighter, the middle of the
+    ceiling 16%, and the walls 3-9%;
+  - the normal frame and the export agree (both converged);
+  - at night with the emitted light on, bounce added 7% over the whole frame;
+  - cost: about 1 ms of GPU at 854x480 with shadows, emitted light and bounce all on.
+
+**Still to do for the bounce:** sky light bounced as well, in place of Bedrock's ambient term, as an option;
+entity textures for their bounce colour; glossy (specular) bounce.

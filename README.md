@@ -231,6 +231,11 @@ by its Java light level.
 - `/bv light samples <n>` sets samples per pixel while playing (1), and `/bv light samples export <n>` per
   export sub-frame (4).
 
+**Ray-traced bounce light** (`/bv bounce on`, off by default). Sunlight, moonlight and the traced emitted light
+bounce off surfaces in their colours: the underside of an overhang lit by the sunny ground below it, a room's
+ceiling lit by the patch of sun on its floor. The bounce adds to Bedrock's own sky and ambient light, which
+stay as they are. `/bv bounce gain <x>` scales it (1 is physical).
+
 ## Distant Horizons
 
 Level 1 uses DH's public API only, no mixins. Before DH composites its LODs onto Minecraft's frame, the

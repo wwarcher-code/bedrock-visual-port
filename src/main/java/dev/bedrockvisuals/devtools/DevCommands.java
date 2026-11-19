@@ -175,6 +175,7 @@ public final class DevCommands {
 							}))))
 						.then(rayTracedShadows())
 						.then(rayTracedLight())
+						.then(rayTracedBounce())
 							.then(ClientCommands.literal("status").executes(c -> {
 							DiagnosticsReport report = new DiagnosticsReport("Bedrock Visuals status");
 							report.lightingAt("now");
@@ -207,6 +208,31 @@ public final class DevCommands {
 			dev.bedrockvisuals.raytrace.RtShadows.setSunRadius(
 					com.mojang.brigadier.arguments.FloatArgumentType.getFloat(c, "degrees"));
 			feedback(c.getSource(), "Ray-traced shadows: " + dev.bedrockvisuals.raytrace.RtShadows.status());
+			return 1;
+		})));
+		return root;
+	}
+
+	/** /bv bounce [on|off] [gain <x>]: ray-traced light bounced off surfaces. */
+	private static com.mojang.brigadier.builder.LiteralArgumentBuilder<net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource> rayTracedBounce() {
+		var root = ClientCommands.literal("bounce").executes(c -> {
+			feedback(c.getSource(), "Ray-traced light: " + dev.bedrockvisuals.raytrace.RtEmissive.status()
+					+ ". /bv bounce on|off; /bv bounce gain <x>.");
+			return 1;
+		});
+		root.then(ClientCommands.literal("on").executes(c -> {
+			dev.bedrockvisuals.raytrace.RtEmissive.setBounce(true);
+			feedback(c.getSource(), "Ray-traced light: " + dev.bedrockvisuals.raytrace.RtEmissive.status());
+			return 1;
+		})).then(ClientCommands.literal("off").executes(c -> {
+			dev.bedrockvisuals.raytrace.RtEmissive.setBounce(false);
+			feedback(c.getSource(), "Ray-traced light: " + dev.bedrockvisuals.raytrace.RtEmissive.status());
+			return 1;
+		})).then(ClientCommands.literal("gain").then(ClientCommands.argument("x",
+				com.mojang.brigadier.arguments.FloatArgumentType.floatArg(0, 10)).executes(c -> {
+			dev.bedrockvisuals.raytrace.RtEmissive.setBounceGain(
+					com.mojang.brigadier.arguments.FloatArgumentType.getFloat(c, "x"));
+			feedback(c.getSource(), "Ray-traced light: " + dev.bedrockvisuals.raytrace.RtEmissive.status());
 			return 1;
 		})));
 		return root;

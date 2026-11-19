@@ -154,9 +154,12 @@ public final class DeferredRenderer {
 			dev.bedrockvisuals.raytrace.RtShadows.trace(gbuffer.depthView(), gbuffer.view(GBuffer.Target.NORMAL),
 					blockAtlas.getTextureView(), GBufferPass.projection(), GBufferPass.modelView(),
 					ShadowPass.fromMoon() ? light.moonDirection() : light.sunDirection());
-			// Ray-traced light from emissive texels, when on, likewise.
+			// Ray-traced diffuse light (from emissive texels, and bounced), when on, likewise.
+			boolean moon = ShadowPass.fromMoon();
 			dev.bedrockvisuals.raytrace.RtEmissive.trace(gbuffer.depthView(), gbuffer.view(GBuffer.Target.NORMAL),
-					blockAtlas.getTextureView(), GBufferPass.projection(), GBufferPass.modelView());
+					blockAtlas.getTextureView(), GBufferPass.projection(), GBufferPass.modelView(),
+					moon ? light.moonDirection() : light.sunDirection(),
+					new org.joml.Vector3f(moon ? light.moon() : light.sun()).mul(ShadowPass.lightShare(light, moon)));
 			LightingPass.render(main, gbuffer, GBufferPass.projection(), GBufferPass.modelView(), light);
 			FrameTimes.section(FrameTimes.Metric.LIGHTING_CPU);
 			RenderSystem.getDevice().createCommandEncoder().copyTextureToTexture(gbuffer.depth(),

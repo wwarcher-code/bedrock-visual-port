@@ -40,7 +40,8 @@ import net.minecraft.client.Screenshot;
  * {@code rtview <file>} saves a picture of the ray-traced scene from the camera (RtDebugView) as PNG;
  * {@code rtshadows off|on|compare} picks the sun and moon shadows (RtShadows), {@code rtsun <degrees>} the light's
  * angular radius for them; {@code rtemissive off|replace|floor}, {@code rtgain <x>}, {@code rtfloor <0..1>} and
- * {@code rtsamples <n>} set the ray-traced emissive light (RtEmissive);</li>
+ * {@code rtsamples <n>} set the ray-traced emissive light (RtEmissive); {@code rtbounce on|off} and
+ * {@code rtbouncegain <x>} its bounce light;</li>
  * <li>{@code exposure lock|unlock} holds the exposure where it is, for comparing frames' brightness;</li>
  * <li>{@code quit} closes the game (saving the world).</li>
  * </ul>
@@ -168,6 +169,8 @@ public final class ScriptRunner {
 			case "exposure" -> dev.bedrockvisuals.render.AutoExposure.lock(argument.equals("lock"));
 			case "rtexportsamples" -> dev.bedrockvisuals.raytrace.RtEmissive.setOfflineSamples(Integer.parseInt(argument));
 			case "rtlights" -> dev.bedrockvisuals.raytrace.EmissiveLights.dump(Path.of(argument));
+			case "rtbounce" -> dev.bedrockvisuals.raytrace.RtEmissive.setBounce(argument.equals("on"));
+			case "rtbouncegain" -> dev.bedrockvisuals.raytrace.RtEmissive.setBounceGain(Float.parseFloat(argument));
 			case "rtsamples" -> dev.bedrockvisuals.raytrace.RtEmissive.setSamples(Integer.parseInt(argument));
 			case "offline" -> {
 				if (argument.equals("on") || argument.equals("off")) {

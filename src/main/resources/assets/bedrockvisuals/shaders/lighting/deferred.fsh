@@ -24,10 +24,12 @@ uniform sampler2D DistantWaterDepth; // DH's final depth, its water surface incl
 uniform sampler2D DistantFinalColor; // DH's final colour, its water included
 uniform sampler2D PreviousScene;   // the previous frame's HDR scene (BloomPass.java), for reflections
 uniform sampler2D RtShadowMap;     // ray-traced sun or moon visibility per pixel, red (RtShadows.java)
-uniform sampler2D RtEmissiveMap;   // ray-traced light from emissive texels over pi, per pixel (RtEmissive.java)
+uniform sampler2D RtEmissiveMap;   // ray-traced diffuse light over pi (RtEmissive.java), twice the width: the light
+                                   // from emissive texels on the left half, the bounced light on the right
 layout(std140) uniform RtShadowData {
     vec4 RtShadowParams;           // x: RtShadowMap holds this frame's, y: show the comparison view
-    vec4 RtEmissiveParams;         // x: RtEmissiveMap holds this frame's, y: the share of block light kept under it
+    vec4 RtEmissiveParams;         // x: RtEmissiveMap's emitted light is this frame's, y: the share of block light
+                                   // kept under it, z: its bounced light is this frame's
 };
 
 #include <bedrockvisuals:common.glsl>
@@ -1117,10 +1119,15 @@ void main() {
     // given share of it (a floor that keeps dark places visible).
     if (RtEmissiveParams.x > 0.5 && distant < 0.0) {
         // Alpha 1: the point is on a light that stands in for block light (lava), which keeps Bedrock's.
-        vec4 traced = texture(RtEmissiveMap, texCoord);
+        vec4 traced = texture(RtEmissiveMap, vec2(texCoord.x * 0.5, texCoord.y));
         blockRadiance = max(traced.rgb, blockRadiance * max(RtEmissiveParams.y, traced.a));
     }
     vec3 indirect = max(blockRadiance + SkyColor.rgb * skyCurve, AmbientColor.rgb);
+    // Ray-traced bounce light (RtEmissive.java): the sun, moon and emitted light off other surfaces, over
+    // Bedrock's indirect terms (its sky ambient isn't bounced, so nothing is counted twice).
+    if (RtEmissiveParams.z > 0.5 && distant < 0.0) {
+        indirect += texture(RtEmissiveMap, vec2(0.5 + texCoord.x * 0.5, texCoord.y)).rgb;
+    }
     color += diffuseColor * indirect * (1.0 - emissive);
 
     // Reflected sky: smooth and metallic surfaces mirror their surroundings. Until there are reflections, the
