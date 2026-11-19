@@ -13,6 +13,13 @@ import net.minecraft.world.entity.ExperienceOrb;
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.animal.allay.Allay;
+import net.minecraft.world.entity.animal.golem.CopperGolem;
+import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
+import net.minecraft.world.entity.monster.Enderman;
+import net.minecraft.world.entity.monster.Phantom;
+import net.minecraft.world.entity.monster.breeze.Breeze;
+import net.minecraft.world.entity.monster.creaking.Creaking;
+import net.minecraft.world.entity.monster.spider.Spider;
 import net.minecraft.world.entity.animal.squid.GlowSquid;
 import net.minecraft.world.entity.decoration.ItemFrame;
 import net.minecraft.world.entity.item.FallingBlockEntity;
@@ -42,7 +49,9 @@ import net.minecraft.world.phys.Vec3;
  * cubes, glow squids, allays, fireballs, spectral arrows and experience orbs. Each is a small sphere of light,
  * its strength its light level (as the block would give off placed) and its colour the mean of the block's
  * glowing texels (EmitterColors; fire's for burning things and blazes, lava's for a lava bucket and magma cubes),
- * or a fitting one for the entities that aren't blocks. The camera's own entity counts in first person too: the light in
+ * or a fitting one for the entities that aren't blocks. Mobs whose eyes glow (their eyes texture drawn
+ * full bright: spiders, endermen, phantoms, the ender dragon, breezes, creakings while theirs glow, copper golems)
+ * give off a little light from their eyes, coloured as the mean of that texture's drawn pixels. The camera's own entity counts in first person too: the light in
  * the player's hand comes from where the hand is drawn.
  *
  * <p>The ray-traced light (RtEmissive) takes their light, unshadowed, straight from these positions every frame,
@@ -71,6 +80,9 @@ public final class EntityLights {
 	}
 
 	private static final List<Light> FOUND = new ArrayList<>();
+	/** Eye textures' colours (eyeColor), until the resources reload. */
+	private static final java.util.Map<String, float[]> EYE_COLORS = new java.util.HashMap<>();
+	private static int eyeGeneration = -1;
 	private static int lastCount;
 
 	private EntityLights() {
@@ -132,6 +144,23 @@ public final class EntityLights {
 			case DragonFireball fireball -> light(at.x, centreY, at.z, 0.4f, 15, new float[] {0.85f, 0.35f, 1.0f});
 			case SpectralArrow arrow -> light(at.x, centreY, at.z, 0.1f, 8, new float[] {1.0f, 0.9f, 0.45f});
 			case ExperienceOrb orb -> light(at.x, centreY, at.z, 0.1f, 6, new float[] {0.7f, 1.0f, 0.35f});
+			// Glowing eyes (the eyes layers' textures): a little light, at the eyes. Before LivingEntity, so these
+			// mobs' hands aren't looked at (none of them holds a light).
+			case Spider spider -> eyes(spider, partial, 3, "spider/spider_eyes");
+			case Enderman enderman -> eyes(enderman, partial, 3, "enderman/enderman_eyes");
+			case Phantom phantom -> eyes(phantom, partial, 3, "phantom/phantom_eyes");
+			case EnderDragon dragon -> {
+				Vec3 head = dragon.head.getPosition(partial);
+				light(head.x, head.y + dragon.head.getBbHeight() * 0.5, head.z, 0.3f, 10,
+						eyeColor("enderdragon/dragon_eyes", new float[] {0.8f, 0.3f, 1.0f}));
+			}
+			case Breeze breeze -> eyes(breeze, partial, 4, "breeze/breeze_eyes");
+			case Creaking creaking -> {
+				if (creaking.hasGlowingEyes()) {
+					eyes(creaking, partial, 4, "creaking/creaking_eyes");
+				}
+			}
+			case CopperGolem golem -> eyes(golem, partial, 2, "copper_golem/copper_golem_eyes");
 			case ItemEntity item -> held(item.getItem(), at.x, at.y + 0.25, at.z, 0.15f);
 			case FallingBlockEntity falling -> {
 				int level = falling.getBlockState().getLightEmission();
@@ -144,6 +173,59 @@ public final class EntityLights {
 			default -> {
 			}
 		}
+	}
+
+	/** Light from a mob's glowing eyes: a small light just in front of its eyes. */
+	private static void eyes(LivingEntity mob, float partial, int level, String texture) {
+		Vec3 eye = mob.getEyePosition(partial);
+		Vec3 look = mob.getViewVector(partial);
+		double forward = mob.getBbWidth() * 0.5 + 0.05;
+		light(eye.x + look.x * forward, eye.y + look.y * forward, eye.z + look.z * forward, 0.08f, level,
+				eyeColor(texture, new float[] {1.0f, 0.4f, 0.4f}));
+	}
+
+	/**
+	 * The mean linear colour of an eyes texture's drawn pixels (textures/entity/&lt;name&gt;.png, weighed by alpha),
+	 * its largest channel 1; the fallback without it.
+	 */
+	private static float[] eyeColor(String name, float[] fallback) {
+		if (eyeGeneration != dev.bedrockvisuals.render.MaterialAtlas.generation()) {
+			eyeGeneration = dev.bedrockvisuals.render.MaterialAtlas.generation();
+			EYE_COLORS.clear();
+		}
+		return EYE_COLORS.computeIfAbsent(name, key -> {
+			var id = net.minecraft.resources.Identifier.withDefaultNamespace("textures/entity/" + key + ".png");
+			try (var stream = Minecraft.getInstance().getResourceManager().open(id);
+					var image = com.mojang.blaze3d.platform.NativeImage.read(stream)) {
+				double r = 0;
+				double g = 0;
+				double b = 0;
+				double w = 0;
+				for (int y = 0; y < image.getHeight(); y++) {
+					for (int x = 0; x < image.getWidth(); x++) {
+						int argb = image.getPixel(x, y);
+						double alpha = (argb >>> 24) / 255.0;
+						if (alpha <= 0) {
+							continue;
+						}
+						r += Math.pow((argb >> 16 & 0xFF) / 255.0, 2.2) * alpha;
+						g += Math.pow((argb >> 8 & 0xFF) / 255.0, 2.2) * alpha;
+						b += Math.pow((argb & 0xFF) / 255.0, 2.2) * alpha;
+						w += alpha;
+					}
+				}
+				double max = Math.max(Math.max(r, g), Math.max(b, 1e-6));
+				if (w <= 0) {
+					return fallback;
+				}
+				float[] color = {(float) (r / max), (float) (g / max), (float) (b / max)};
+				dev.bedrockvisuals.BedrockVisualsClient.LOGGER.info("[raytrace] {} eye light colour {} {} {}", key,
+						color[0], color[1], color[2]);
+				return color;
+			} catch (java.io.IOException | RuntimeException e) {
+				return fallback;
+			}
+		});
 	}
 
 	/** The light of what a living entity holds, at its hands. */
