@@ -639,6 +639,16 @@ off and 17.8 with all of it.
   - The hand and the item in it stay out: in third person they are the player model, which the scene has; in
     first person they are drawn in screen space, not in the world, and Bedrock doesn't shadow them either.
 
+- **Scene: sections compacted; the light grid rebuilt less.**
+  - Section structures are built with compaction allowed and their compacted size queried; once the GPU has run
+    the build (the query ready, read without waiting), each still in use is copied into a structure of that size
+    and the first freed (SectionGeometry.compact). The test world: 74 MB for 809 sections, against 136 MB.
+  - The light grid (EmissiveLights) is rebuilt only once the camera is 2 cells (8 blocks) from where it was built,
+    not at every cell boundary: in exports that was every frame the camera moved, up to 10 ms of CPU near lava.
+    The grid reaches 48 blocks each way and a light at most 32, so it still covers the camera's surroundings.
+  - Particles stay out of the scene: hundreds of tiny quads living a second, a structure rebuilt every frame, for
+    shadows too small to see. Their own lighting is fixed in the lighting itself (dark particles at night).
+
 **Later, outside ray tracing:** particles (lava's smoke) drawn nearly black at night, even beside lava: they are
 vanilla-lit into the graded image and probably need what entities got (EntityPass). And take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.

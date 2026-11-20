@@ -43,6 +43,8 @@ public final class EmissiveLights {
 	/** Below this estimated irradiance (power / distance squared) a light no longer counts. */
 	private static final float CUTOFF = 0.004f;
 	private static final float MAX_REACH = 32;
+	/** Cells the camera may move from where the grid was built before it is built again. */
+	private static final int REBUILD_CELLS = 2;
 	/** How far the shaders' jittered cell lookup can land from the point: half a cell's diagonal. */
 	private static final float LOOKUP_JITTER = CELL * 0.5f * (float) Math.sqrt(3);
 	private static final int MAX_LIGHTS = 1 << 16;
@@ -227,7 +229,12 @@ public final class EmissiveLights {
 		int minX = Math.floorDiv((int) Math.floor(cameraX), CELL) * CELL - CELLS_X / 2 * CELL;
 		int minY = Math.floorDiv((int) Math.floor(cameraY), CELL) * CELL - CELLS_Y / 2 * CELL;
 		int minZ = Math.floorDiv((int) Math.floor(cameraZ), CELL) * CELL - CELLS_Z / 2 * CELL;
-		if (grid != null && !changed && grid.minX() == minX && grid.minY() == minY && grid.minZ() == minZ
+		// Kept while the camera stays within REBUILD_CELLS cells of where it was built: rebuilding at every cell the
+		// camera crossed cost up to 10 ms of CPU a frame near many lava faces, in exports every frame it moved. The
+		// grid reaches 48 blocks each way and a light at most 32 (plus the lookup's jitter), so 8 blocks off centre it
+		// still covers everything the camera's surroundings take light from.
+		if (grid != null && !changed && Math.abs(grid.minX() - minX) <= REBUILD_CELLS * CELL
+				&& Math.abs(grid.minY() - minY) <= REBUILD_CELLS * CELL && Math.abs(grid.minZ() - minZ) <= REBUILD_CELLS * CELL
 				&& grid.materialGeneration() == MaterialAtlas.generation()) {
 			return grid;
 		}

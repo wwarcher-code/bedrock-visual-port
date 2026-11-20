@@ -138,6 +138,12 @@ public final class SectionGeometry {
 	public static void clear() {
 		PENDING.values().forEach(Pending::free);
 		PENDING.clear();
+		RtDevice device = RtDevice.get();
+		for (Compaction batch : COMPACTIONS) {
+			long pool = batch.pool();
+			device.later(() -> vkDestroyQueryPool(device.device, pool, null));
+		}
+		COMPACTIONS.clear();
 		if (RtDevice.get() != null) {
 			BUILT.values().forEach(SectionGeometry::free);
 		}
@@ -160,8 +166,8 @@ public final class SectionGeometry {
 	}
 
 	static String status() {
-		return String.format(java.util.Locale.ROOT, "%d sections (%d MB, %d builds), %d waiting", BUILT.size(),
-				builtBytes >> 20, totalBuilds, PENDING.size());
+		return String.format(java.util.Locale.ROOT, "%d sections (%d MB, %d MB saved by compaction, %d builds), %d waiting",
+				BUILT.size(), builtBytes >> 20, compactedSaving >> 20, totalBuilds, PENDING.size());
 	}
 
 	/**
@@ -169,7 +175,60 @@ public final class SectionGeometry {
 	 * this frame's budget, into {@code commands}. Their
 	 * staging and scratch memory is freed once the submission is done. Returns whether anything was built.
 	 */
+	/**
+	 * Sections built with their compacted size asked for (a query a structure): once the GPU has run the build,
+	 * each structure still in use is copied into one of that size (about half), and the first freed.
+	 */
+	private record Compaction(long pool, long[] keys, long[] structures) {
+	}
+
+	private static final List<Compaction> COMPACTIONS = new ArrayList<>();
+	private static long compactedSaving;
+
+	/** Copies the sections whose compacted size is known into structures of that size (the frame's submission). */
+	private static void compact(RtDevice rt, VkCommandBuffer commands) {
+		Iterator<Compaction> it = COMPACTIONS.iterator();
+		while (it.hasNext()) {
+			Compaction batch = it.next();
+			int n = batch.keys().length;
+			long[] sizes = new long[n];
+			int result = vkGetQueryPoolResults(rt.device, batch.pool(), 0, n, sizes, 8, VK_QUERY_RESULT_64_BIT);
+			if (result == VK_NOT_READY) {
+				continue;
+			}
+			it.remove();
+			long pool = batch.pool();
+			rt.later(() -> vkDestroyQueryPool(rt.device, pool, null));
+			if (result != VK_SUCCESS) {
+				continue;
+			}
+			for (int i = 0; i < n; i++) {
+				Built built = BUILT.get(batch.keys()[i]);
+				if (built == null || built.structure() != batch.structures()[i] || sizes[i] <= 0
+						|| sizes[i] >= built.storage().size()) {
+					continue; // rebuilt or freed since, or nothing to gain
+				}
+				RtBuffer storage = rt.deviceBuffer(sizes[i], VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR);
+				long structure = rt.createStructure(storage, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
+				try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+					vkCmdCopyAccelerationStructureKHR(commands, VkCopyAccelerationStructureInfoKHR.calloc(stack)
+							.sType$Default().src(built.structure()).dst(structure)
+							.mode(VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR));
+				}
+				Built compacted = new Built(built.originX(), built.originY(), built.originZ(), structure,
+						rt.structureAddress(structure), storage, built.vertices(), built.firstVertex(), built.passes(),
+						built.triangles(), built.lights(), built.shape());
+				BUILT.put(batch.keys()[i], compacted);
+				builtBytes += storage.size() - built.storage().size();
+				compactedSaving += built.storage().size() - storage.size();
+				rt.freeStructure(built.structure());
+				rt.free(built.storage());
+			}
+		}
+	}
+
 	static boolean recordBuilds(RtDevice rt, VkCommandBuffer commands, List<Runnable> afterRecord) {
+		compact(rt, commands);
 		List<Long> keys = new ArrayList<>();
 		List<Pending> batch = new ArrayList<>();
 		int vertices = 0;
@@ -293,7 +352,8 @@ public final class SectionGeometry {
 
 				VkAccelerationStructureBuildGeometryInfoKHR info = infos.get(s).sType$Default()
 						.type(VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR)
-						.flags(VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR)
+						.flags(VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR
+								| VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR)
 						.mode(VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR).geometryCount(geometries).pGeometries(geometry);
 				VkAccelerationStructureBuildSizesInfoKHR sizes = VkAccelerationStructureBuildSizesInfoKHR.calloc().sType$Default();
 				vkGetAccelerationStructureBuildSizesKHR(rt.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, info,
@@ -329,6 +389,31 @@ public final class SectionGeometry {
 			infos.get(s).scratchData().deviceAddress(scratch.address() + scratchOffsets[s]);
 		}
 		vkCmdBuildAccelerationStructuresKHR(commands, infos, ranges);
+
+		// Their compacted sizes, read in a later frame (compact).
+		try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+			java.nio.LongBuffer handle = stack.mallocLong(1);
+			RtDevice.check(vkCreateQueryPool(rt.device, VkQueryPoolCreateInfo.calloc(stack).sType$Default()
+					.queryType(VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR).queryCount(n), null, handle),
+					"vkCreateQueryPool");
+			long pool = handle.get(0);
+			vkCmdResetQueryPool(commands, pool, 0, n);
+			vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+					VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, 0, VkMemoryBarrier.calloc(1, stack)
+							.sType$Default().srcAccessMask(VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR)
+							.dstAccessMask(VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR), null, null);
+			java.nio.LongBuffer structures = stack.mallocLong(n);
+			long[] keyArray = new long[n];
+			long[] structureArray = new long[n];
+			for (int s = 0; s < n; s++) {
+				structures.put(s, results[s].structure());
+				keyArray[s] = keys.get(s);
+				structureArray[s] = results[s].structure();
+			}
+			vkCmdWriteAccelerationStructuresPropertiesKHR(commands, structures,
+					VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR, pool, 0);
+			COMPACTIONS.add(new Compaction(pool, keyArray, structureArray));
+		}
 
 		for (int s = 0; s < n; s++) {
 			Built old = BUILT.put((long) keys.get(s), results[s]);
