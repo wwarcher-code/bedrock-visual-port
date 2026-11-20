@@ -625,6 +625,20 @@ off and 17.8 with all of it.
   glass shape it), and sea lanterns on the seabed at night. The water surface shader itself uses no block light
   (what's under it comes from the lit scene behind).
 
+- **Shadows: exports trace them; far terrain in the scene.**
+  - Exports trace the sun's and moon's shadows even with the shadow maps chosen for play ("Ray-traced shadows"
+    under Exports on the options page, on by default, saved); the scene is switched on when an export starts.
+  - Distant Horizons' terrain past the loaded chunks is in the scene (raytrace/DistantField): the height map the
+    shadow march uses (render/DistantHeights, a height every 8 blocks) as columns, a top and walls down to lower
+    neighbours, 128 cells (1 km) around the camera, leaving out the loaded chunks. An instance of kind 2 under the
+    terrain mask, in the entities' vertex layout, so the shaders take it as opaque with its top block's colour as
+    the bounce's albedo: far hills shade the near terrain from a low sun, and bounce rays meet them. 167 424 quads
+    in the test world. The columns are made on a worker (40 to 90 ms on the render thread made a hitch); the
+    upload and build take about 13 ms on the render thread, after the camera moves 128 blocks or every 30 s while
+    the map fills in. DH's own pixels are still shaded by the height-map march, not by rays.
+  - The hand and the item in it stay out: in third person they are the player model, which the scene has; in
+    first person they are drawn in screen space, not in the world, and Bedrock doesn't shadow them either.
+
 **Later, outside ray tracing:** particles (lava's smoke) drawn nearly black at night, even beside lava: they are
 vanilla-lit into the graded image and probably need what entities got (EntityPass). And take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.

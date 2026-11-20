@@ -42,6 +42,7 @@ public final class SodiumOptions implements ConfigEntryPoint {
 	private static final Identifier SAMPLES = id("rt_samples");
 	private static final Identifier EXPORT_SUBFRAMES = id("export_subframes");
 	private static final Identifier EXPORT_SAMPLES = id("export_rt_samples");
+	private static final Identifier EXPORT_SHADOWS = id("export_rt_shadows");
 
 	/** The shadow choices shown (the comparison view stays a /bv command). */
 	public enum Shadows {
@@ -248,6 +249,14 @@ public final class SodiumOptions implements ConfigEntryPoint {
 
 	private static OptionGroupBuilder exports(ConfigBuilder builder) {
 		return builder.createOptionGroup().setName(text("Exports (Flashback)"))
+				.addOption(builder.createBooleanOption(EXPORT_SHADOWS)
+						.setName(text("Ray-traced shadows"))
+						.setTooltip(text("Exports trace the sun's and moon's shadows even when the shadow maps are "
+								+ "chosen for play: soft and exact, at an export's pace." + rayTracingNote()))
+						.setEnabledProvider(SodiumOptions::rayTracing)
+						.setDefaultValue(true)
+						.setBinding(RtShadows::setInExports, RtShadows::inExports)
+						.setStorageHandler(SAVE))
 				.addOption(builder.createIntegerOption(EXPORT_SUBFRAMES)
 						.setName(text("Sub-frames"))
 						.setTooltip(text("While Flashback exports, each frame is drawn this many times and averaged: "

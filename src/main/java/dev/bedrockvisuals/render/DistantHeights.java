@@ -254,7 +254,7 @@ public final class DistantHeights {
 	 * world column x, z, as a world y; {@link Integer#MIN_VALUE} where it has none yet or the map is off. Read on
 	 * the render thread while the worker writes: a cell read mid-update is one frame stale at worst.
 	 */
-	static int topAt(int x, int z) {
+	public static int topAt(int x, int z) {
 		if (failed || !any || worker == null || !DeferredRenderer.ownsDistantComposite()) {
 			return Integer.MIN_VALUE;
 		}
@@ -289,6 +289,16 @@ public final class DistantHeights {
 	static int epoch() {
 		boolean on = !failed && any && worker != null && DeferredRenderer.ownsDistantComposite();
 		return generation * 2 + (on ? 1 : 0);
+	}
+
+	/** The top block's colour for the cell around world column x, z: 0xRRGGBB in sRGB, 0 unknown. */
+	public static int colourAt(int x, int z) {
+		return colours[Math.floorMod(Math.floorDiv(z, CELL), SIZE) * SIZE + Math.floorMod(Math.floorDiv(x, CELL), SIZE)];
+	}
+
+	/** {@link #epoch()} for the ray-traced scene's far terrain (raytrace/DistantField): odd while the map is on. */
+	public static int epochForScene() {
+		return epoch();
 	}
 
 	/** The map, or null before there is one. */

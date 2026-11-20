@@ -36,6 +36,7 @@ public final class Settings {
 		boolean bounce;
 		float bounceGain = 1f;
 		boolean skyBounce;
+		boolean exportTracedShadows = true;
 		int samples = 1;
 		int exportSamples = 16;
 		int exportSubframes = 0;
@@ -74,6 +75,7 @@ public final class Settings {
 		RtEmissive.setBounce(stored.bounce);
 		RtEmissive.setBounceGain(stored.bounceGain);
 		RtEmissive.setSkyBounce(stored.skyBounce);
+		RtShadows.setInExports(stored.exportTracedShadows);
 		RtEmissive.setSamples(stored.samples);
 		RtEmissive.setOfflineSamples(stored.exportSamples);
 		if (stored.exportSubframes > 0) {
@@ -101,6 +103,7 @@ public final class Settings {
 		stored.bounce = RtEmissive.bounce();
 		stored.bounceGain = RtEmissive.bounceGain();
 		stored.skyBounce = RtEmissive.skyBounce();
+		stored.exportTracedShadows = RtShadows.inExports();
 		stored.samples = RtEmissive.samples();
 		stored.exportSamples = RtEmissive.offlineSamples();
 		stored.exportSubframes = OfflineRender.samples();

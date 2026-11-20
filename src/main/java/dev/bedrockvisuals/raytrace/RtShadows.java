@@ -217,6 +217,9 @@ public final class RtShadows {
 			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER}, 112, 4, GpuFormat.RGBA8_UNORM);
 
 	private static Mode mode = Mode.OFF;
+	/** Exports (the offline preset) trace the shadows even with the shadow maps chosen for play. */
+	private static boolean inExports = true;
+	private static boolean exportingBefore;
 	/** The light's angular radius (degrees): the real sun's by default; 0 for hard shadows. */
 	private static float sunRadius = 0.27f;
 	private static boolean failed;
@@ -239,6 +242,15 @@ public final class RtShadows {
 		if (newMode != Mode.OFF) {
 			RtScene.setEnabled(true);
 		}
+	}
+
+	/** Whether exports trace the shadows whatever is chosen for play (on by default). */
+	public static boolean inExports() {
+		return inExports;
+	}
+
+	public static void setInExports(boolean on) {
+		inExports = on;
 	}
 
 	public static float sunRadius() {
@@ -273,7 +285,13 @@ public final class RtShadows {
 	public static void trace(GpuTextureView depth, GpuTextureView normal, GpuTextureView atlas, Matrix4fc projection,
 			Matrix4fc modelView, Vector3fc towardsLight) {
 		tracedThisFrame = false;
-		if (mode == Mode.OFF || failed) {
+		boolean exporting = dev.bedrockvisuals.render.OfflineRender.active();
+		if (exporting && !exportingBefore && inExports) {
+			RtScene.setEnabled(true); // its build starts with the export
+		}
+		exportingBefore = exporting;
+		Mode effective = mode == Mode.OFF && exporting && inExports ? Mode.ON : mode;
+		if (effective == Mode.OFF || failed) {
 			return;
 		}
 		RtScene.Frame frame = RtScene.ensureBuilt();

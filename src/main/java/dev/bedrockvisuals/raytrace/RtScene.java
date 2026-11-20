@@ -210,13 +210,17 @@ public final class RtScene {
 					entityAddress = rt.structureAddress(blas);
 				}
 
+				// Distant Horizons' terrain past the loaded chunks (DistantField), kept between frames.
+				boolean far = DistantField.record(rt, commands, stack, cam.x, cam.z, Minecraft.getInstance().level != null
+						? Minecraft.getInstance().level.getMinY() : 0);
+
 				// The bottom levels (and the copies of the sections' vertices) are done before the top level is built.
 				barrier(commands, stack, VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_TRANSFER_WRITE_BIT,
 						VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR,
 						VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR | VK_PIPELINE_STAGE_TRANSFER_BIT,
 						VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR);
 
-				int count = SectionGeometry.builtCount() + (entityAddress != 0 ? 1 : 0);
+				int count = SectionGeometry.builtCount() + (entityAddress != 0 ? 1 : 0) + (far ? 1 : 0);
 				RtBuffer instances = rt.hostBuffer((long) Math.max(count, 1) * 64,
 						VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
 				rt.free(instances);
@@ -238,6 +242,13 @@ public final class RtScene {
 					instance(out, i, (float) (cam.x - ox), (float) (cam.y - oy), (float) (cam.z - oz), i, MASK_ENTITIES,
 							entityAddress);
 					info(table, i, entityVertices.address(), 1, EntityGeometry.VERTEX_STRIDE, new int[3], 0);
+				}
+				if (far) {
+					int i = index[0]++;
+					instance(out, i, DistantField.originX() - ox, DistantField.originY() - oy, DistantField.originZ() - oz,
+							i, MASK_TERRAIN, DistantField.structureAddress());
+					// Kind 2: opaque, its vertices in the entities' layout (the shaders take it as they take entities).
+					info(table, i, DistantField.verticesAddress(), 2, EntityGeometry.VERTEX_STRIDE, new int[3], 0);
 				}
 
 				VkAccelerationStructureGeometryKHR.Buffer geometry = VkAccelerationStructureGeometryKHR.calloc(1, stack);
@@ -263,7 +274,7 @@ public final class RtScene {
 	}
 
 	/** Builds an acceleration structure over {@code geometry}; its memory is freed with {@code release}. */
-	private static long buildStructure(RtDevice rt, VkCommandBuffer commands, MemoryStack stack, int type, int flags,
+	static long buildStructure(RtDevice rt, VkCommandBuffer commands, MemoryStack stack, int type, int flags,
 			VkAccelerationStructureGeometryKHR.Buffer geometry, int primitives, List<Runnable> release) {
 		VkAccelerationStructureBuildGeometryInfoKHR.Buffer info = VkAccelerationStructureBuildGeometryInfoKHR.calloc(1, stack);
 		info.get(0).sType$Default().type(type).flags(flags).mode(VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR)
@@ -330,7 +341,7 @@ public final class RtScene {
 		if (!enabled) {
 			return "off";
 		}
-		return String.format(Locale.ROOT, "on: %s; %d entity quads; %d instances; built in %.2f ms of CPU a frame",
-				SectionGeometry.status(), lastEntityQuads, current == null ? 0 : current.instanceCount(), buildMillis);
+		return String.format(Locale.ROOT, "on: %s; %d entity quads; %s; %d instances; built in %.2f ms of CPU a frame",
+				SectionGeometry.status(), lastEntityQuads, DistantField.status(), current == null ? 0 : current.instanceCount(), buildMillis);
 	}
 }
