@@ -35,6 +35,7 @@ public final class Settings {
 		boolean entityLights = true;
 		boolean bounce;
 		float bounceGain = 1f;
+		boolean skyBounce;
 		int samples = 1;
 		int exportSamples = 16;
 		int exportSubframes = 0;
@@ -72,6 +73,7 @@ public final class Settings {
 		RtEmissive.setEntityLights(stored.entityLights);
 		RtEmissive.setBounce(stored.bounce);
 		RtEmissive.setBounceGain(stored.bounceGain);
+		RtEmissive.setSkyBounce(stored.skyBounce);
 		RtEmissive.setSamples(stored.samples);
 		RtEmissive.setOfflineSamples(stored.exportSamples);
 		if (stored.exportSubframes > 0) {
@@ -98,6 +100,7 @@ public final class Settings {
 		stored.entityLights = RtEmissive.entityLights();
 		stored.bounce = RtEmissive.bounce();
 		stored.bounceGain = RtEmissive.bounceGain();
+		stored.skyBounce = RtEmissive.skyBounce();
 		stored.samples = RtEmissive.samples();
 		stored.exportSamples = RtEmissive.offlineSamples();
 		stored.exportSubframes = OfflineRender.samples();

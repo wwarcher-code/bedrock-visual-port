@@ -29,7 +29,8 @@ uniform sampler2D RtEmissiveMap;   // ray-traced diffuse light over pi (RtEmissi
 layout(std140) uniform RtShadowData {
     vec4 RtShadowParams;           // x: RtShadowMap holds this frame's, y: show the comparison view
     vec4 RtEmissiveParams;         // x: RtEmissiveMap's emitted light is this frame's, y: the share of block light
-                                   // kept under it, z: its bounced light is this frame's
+                                   // kept under it, z: its bounced light is this frame's, w: and brings the
+                                   // sky's light back (Bedrock's sky ambient term left out)
 };
 
 #include <bedrockvisuals:common.glsl>
@@ -1146,7 +1147,9 @@ void main() {
             blockRadiance = max(traced.rgb, blockRadiance * RtEmissiveParams.y);
         }
     }
-    vec3 indirect = max(blockRadiance + SkyColor.rgb * skyCurve, AmbientColor.rgb);
+    // With the sky's light bounced (RtEmissive's skyBounce), the traced bounce has it in place of this term.
+    float skyKept = RtEmissiveParams.z > 0.5 && RtEmissiveParams.w > 0.5 && distant < 0.0 ? 0.0 : 1.0;
+    vec3 indirect = max(blockRadiance + SkyColor.rgb * skyCurve * skyKept, AmbientColor.rgb);
     // Ray-traced bounce light (RtEmissive.java): the sun, moon and emitted light off other surfaces, over
     // Bedrock's indirect terms (its sky ambient isn't bounced, so nothing is counted twice).
     if (RtEmissiveParams.z > 0.5 && distant < 0.0) {

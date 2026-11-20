@@ -185,6 +185,7 @@ public final class ScriptRunner {
 							argument.isEmpty() ? 0 : Integer.parseInt(argument)));
 				}
 			}
+			case "rtsky" -> dev.bedrockvisuals.raytrace.RtEmissive.setSkyBounce(argument.equals("on"));
 			case "rtbouncegain" -> dev.bedrockvisuals.raytrace.RtEmissive.setBounceGain(Float.parseFloat(argument));
 			case "rtsamples" -> dev.bedrockvisuals.raytrace.RtEmissive.setSamples(Integer.parseInt(argument));
 			case "offline" -> {

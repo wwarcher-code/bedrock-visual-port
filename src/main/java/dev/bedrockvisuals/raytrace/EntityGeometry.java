@@ -30,6 +30,13 @@ public final class EntityGeometry {
 	private static final Identifier ENTITY_SHADER = Identifier.withDefaultNamespace("core/entity");
 
 	private static final Set<Object> TAGGED = Collections.newSetFromMap(new IdentityHashMap<>());
+	/** Per tagged draw, its texture's mean colour (linear), for the bounce (null: unknown, a middling grey). */
+	private static final java.util.Map<Object, float[]> DRAW_COLORS = new IdentityHashMap<>();
+	/** Per render type, its texture (reflection: RenderType.state, RenderSetup.textures); empty if none. */
+	private static final java.util.Map<RenderType, java.util.Optional<Identifier>> TEXTURES = new IdentityHashMap<>();
+	private static final java.util.Map<Identifier, float[]> MEANS = new java.util.HashMap<>();
+	private static int meansGeneration = -1;
+	private static final float[] UNKNOWN = {0.4f, 0.4f, 0.4f};
 	private static boolean capturing;
 	private static ByteBuffer raw = MemoryUtil.memAlloc(1 << 20);
 	private static ByteBuffer positions = MemoryUtil.memAlloc(1 << 20);
@@ -41,6 +48,7 @@ public final class EntityGeometry {
 	/** The level starts rendering: a new frame of entities. */
 	public static void beginLevel() {
 		TAGGED.clear();
+		DRAW_COLORS.clear();
 		raw.clear();
 		positions.clear();
 		quads = 0;
@@ -51,6 +59,7 @@ public final class EntityGeometry {
 	public static void endLevel() {
 		capturing = false;
 		TAGGED.clear();
+		DRAW_COLORS.clear();
 	}
 
 	/** Minecraft made a staged draw for this render type (RenderTypeGroupMixin). */
@@ -60,7 +69,66 @@ public final class EntityGeometry {
 				&& type.primitiveTopology() == PrimitiveTopology.QUADS
 				&& ENTITY_SHADER.equals(type.pipeline().getShaders().get(ShaderType.FRAGMENT))) {
 			TAGGED.add(draw);
+			DRAW_COLORS.put(draw, meanColor(type));
 		}
+	}
+
+	/**
+	 * The mean linear colour of a render type's texture's drawn pixels (weighed by alpha), for the bounce off
+	 * entities (RtEmissive's bounceRadiance: their vertex colour times it); a middling grey when it can't be read
+	 * (a downloaded skin, say).
+	 */
+	private static float[] meanColor(RenderType type) {
+		if (meansGeneration != dev.bedrockvisuals.render.MaterialAtlas.generation()) {
+			meansGeneration = dev.bedrockvisuals.render.MaterialAtlas.generation();
+			MEANS.clear();
+		}
+		java.util.Optional<Identifier> texture = TEXTURES.computeIfAbsent(type, EntityGeometry::textureOf);
+		if (texture.isEmpty()) {
+			return UNKNOWN;
+		}
+		return MEANS.computeIfAbsent(texture.get(), id -> {
+			try (var stream = net.minecraft.client.Minecraft.getInstance().getResourceManager().open(id);
+					var image = com.mojang.blaze3d.platform.NativeImage.read(stream)) {
+				double r = 0;
+				double g = 0;
+				double b = 0;
+				double w = 0;
+				for (int y = 0; y < image.getHeight(); y++) {
+					for (int x = 0; x < image.getWidth(); x++) {
+						int argb = image.getPixel(x, y);
+						double alpha = (argb >>> 24) / 255.0;
+						if (alpha > 0) {
+							r += Math.pow((argb >> 16 & 0xFF) / 255.0, 2.2) * alpha;
+							g += Math.pow((argb >> 8 & 0xFF) / 255.0, 2.2) * alpha;
+							b += Math.pow((argb & 0xFF) / 255.0, 2.2) * alpha;
+							w += alpha;
+						}
+					}
+				}
+				return w > 0 ? new float[] {(float) (r / w), (float) (g / w), (float) (b / w)} : UNKNOWN;
+			} catch (java.io.IOException | RuntimeException e) {
+				return UNKNOWN;
+			}
+		});
+	}
+
+	private static java.util.Optional<Identifier> textureOf(RenderType type) {
+		try {
+			java.lang.reflect.Field state = RenderType.class.getDeclaredField("state");
+			state.setAccessible(true);
+			Object setup = state.get(type);
+			java.lang.reflect.Field textures = setup.getClass().getDeclaredField("textures");
+			textures.setAccessible(true);
+			for (Object binding : ((java.util.Map<?, ?>) textures.get(setup)).values()) {
+				java.lang.reflect.Method location = binding.getClass().getDeclaredMethod("location");
+				location.setAccessible(true);
+				return java.util.Optional.ofNullable((Identifier) location.invoke(binding));
+			}
+		} catch (ReflectiveOperationException | RuntimeException e) {
+			// no texture known
+		}
+		return java.util.Optional.empty();
 	}
 
 	/** Vertices arrive in a staged draw (StagedDrawMixin). */
@@ -77,6 +145,16 @@ public final class EntityGeometry {
 		raw = ensure(raw, count * VERTEX_STRIDE);
 		MemoryUtil.memCopy(MemoryUtil.memAddress(vertices), MemoryUtil.memAddress(raw),
 				(long) count * VERTEX_STRIDE);
+		// The copy's vertex colours times the texture's mean colour: the bounce's albedo off entities.
+		float[] mean = DRAW_COLORS.getOrDefault(draw, UNKNOWN);
+		int start = raw.position();
+		for (int v = 0; v < count; v++) {
+			int at = start + v * VERTEX_STRIDE + 12;
+			for (int c = 0; c < 3; c++) {
+				int value = raw.get(at + c) & 0xFF;
+				raw.put(at + c, (byte) Math.min(255, Math.round(value * mean[c])));
+			}
+		}
 		raw.position(raw.position() + count * VERTEX_STRIDE);
 		positions = ensure(positions, count / 4 * 6 * 12);
 		for (int quad = 0; quad < count / 4; quad++) {

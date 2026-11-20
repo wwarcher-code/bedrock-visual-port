@@ -75,6 +75,8 @@ public final class RtEmissive {
 			                        // z: 1 if the light volume is there (EntityProbes' solid blocks)
 			    vec4 entityLights[64]; // per light: its position (relative to the scene's origin) and radius; its
 			                           // colour times its strength, and its reach
+			    vec4 skyBounceLight;   // rgb: the sky's light (Bedrock's sky ambient, LightingState.sky); w: 1 when
+			                           // bounce rays that reach the sky bring it back (in place of Bedrock's term)
 			};
 			layout(set = 0, binding = OUTPUT_BINDING, std430) writeonly buffer Output { uvec2 pixels[]; };
 			layout(buffer_reference, scalar, buffer_reference_align = 4) readonly buffer Words { uint w[]; };
@@ -248,21 +250,58 @@ public final class RtEmissive {
 			            * switches.w / PI;
 			}
 
+			// What a bounce ray that reaches the sky brings back: nothing, as Bedrock's sky ambient term has the sky's
+			// light; or, with the sky bounce on, the sky's light (Bedrock's sky ambient colour, as radiance: a surface
+			// open to the whole sky gets what Bedrock's term gives it), from above the horizon, through any glass.
+			// Sky light brought back through water fades by this a block (TUNE: about Bedrock's water fog).
+			const float WATER_SKY_EXTINCTION = 0.15;
+			// Whether a candidate is a water face (translucent terrain Sodium tints by biome: TRANSLUCENT_TINT).
+			bool waterFace(rayQueryEXT query) {
+			    InstanceInfo info = instances[rayQueryGetIntersectionInstanceCustomIndexEXT(query, false)];
+			    uint geometry = uint(rayQueryGetIntersectionGeometryIndexEXT(query, false));
+			    if (info.kind != 0u || ((info.passes >> (2u * geometry)) & 3u) != 2u) {
+			        return false;
+			    }
+			    uint primitive = uint(rayQueryGetIntersectionPrimitiveIndexEXT(query, false));
+			    uint first = info.firstVertex[geometry] + (primitive >> 1u) * 4u;
+			    vec3 tint = unpackUnorm4x8(Words(info.vertices).w[first * 5u + 2u]).rgb;
+			    return max(tint.r, max(tint.g, tint.b)) - min(tint.r, min(tint.g, tint.b)) > 0.06;
+			}
+
+			vec3 skyBounce(vec3 direction, vec3 tint) {
+			    return skyBounceLight.w > 0.5 && direction.y > 0.0 ? skyBounceLight.rgb * tint : vec3(0.0);
+			}
+
 			// The light a bounce ray from origin sends back from the surface it meets: the sun or moon on it (its own
 			// shadow ray) and the light cached at its texel, times its colour; none for the sky (Bedrock's ambient
 			// term has it). In the cache's units (light over pi).
 			vec3 bounceRadiance(vec3 origin, vec3 direction) {
 			    rayQueryEXT query;
 			    rayQueryInitializeEXT(query, scene, gl_RayFlagsNoneEXT, 0x01, origin, 0.001, direction, 256.0);
+			    // Whether the ray crossed translucent terrain on the way (stained glass): then its light is tinted.
+			    bool crossed = false;
+			    // How far the ray went before leaving water (its surface from below; 0 if it met none): sky light
+			    // brought back through water is dimmed by it.
+			    float inWater = 0.0;
 			    while (rayQueryProceedEXT(query)) {
-			        if (rayQueryGetIntersectionTypeEXT(query, false) == gl_RayQueryCandidateIntersectionTriangleEXT
-			                && blocks(query)) {
-			            rayQueryConfirmIntersectionEXT(query);
+			        if (rayQueryGetIntersectionTypeEXT(query, false) == gl_RayQueryCandidateIntersectionTriangleEXT) {
+			            if (blocks(query)) {
+			                rayQueryConfirmIntersectionEXT(query);
+			            } else {
+			                crossed = true;
+			                if (waterFace(query)) {
+			                    inWater = max(inWater, rayQueryGetIntersectionTEXT(query, false));
+			                }
+			            }
 			        }
 			    }
 			    if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
-			        return vec3(0.0); // the sky: its light is Bedrock's ambient term already
+			        vec3 tint = crossed ? transmittance(origin, direction, 1024.0, 0x01u) : vec3(1.0);
+			        return skyBounce(direction, tint * exp(-WATER_SKY_EXTINCTION * inWater));
 			    }
+			    // The glass between: the colour it lets through to the surface met (a second ray, only when crossed).
+			    vec3 through = crossed ? transmittance(origin, direction,
+			            max(rayQueryGetIntersectionTEXT(query, true) - 0.01, 0.002), 0x01u) : vec3(1.0);
 			    // The surface met: its position, facing normal and colour.
 			    InstanceInfo info = instances[rayQueryGetIntersectionInstanceCustomIndexEXT(query, true)];
 			    uint geometry = uint(rayQueryGetIntersectionGeometryIndexEXT(query, true));
@@ -290,8 +329,9 @@ public final class RtEmissive {
 			        v0 = entityPosition(words, first + corners.x);
 			        v1 = entityPosition(words, first + corners.y);
 			        v2 = entityPosition(words, first + corners.z);
-			        // Entity textures aren't in the block atlas: their vertex colour, at a middling albedo.
-			        albedo = unpackUnorm4x8(words.w[first * 9u + 3u]).rgb * 0.4;
+			        // Entity textures aren't in the block atlas: the vertex colour, which EntityGeometry multiplied by the
+			        // texture's mean linear colour (a middling grey where the texture couldn't be read).
+			        albedo = unpackUnorm4x8(words.w[first * 9u + 3u]).rgb;
 			    }
 			    vec3 hitNormal = normalize(cross(v1 - v0, v2 - v0));
 			    if (dot(hitNormal, direction) > 0.0) {
@@ -322,7 +362,7 @@ public final class RtEmissive {
 			    for (uint i = 0u; i < carriedLights; i++) {
 			        light += albedo * entityLight(i, hit, hitNormal, false);
 			    }
-			    return light * switches.z;
+			    return light * through * switches.z;
 			}
 
 			// The light grid cell at g: its first vec4 and first index word, or false outside the grid.
@@ -815,6 +855,8 @@ public final class RtEmissive {
 
 	private static Mode mode = Mode.OFF;
 	private static boolean bounce;
+	/** Bounce rays that reach the sky bring its light back, in place of Bedrock's sky ambient term (off: Bedrock's). */
+	private static boolean skyBounce;
 	/**
 	 * Scales the emitted light (1: the emissive texels' glow as the lighting pass draws them). 10 matches Bedrock's
 	 * block light a block or two from glowstone (test scene, same exposure); larger glowing faces (sea lanterns,
@@ -852,6 +894,8 @@ public final class RtEmissive {
 	private static final int CHANGE_DISPATCHES = 2;
 	/** Where the frame data's entity lights start: after the light, the switches and the changes. */
 	private static final int ENTITY_LIGHTS_AT = 64 + MAX_CHANGES * 32;
+	/** The frame data's skyBounceLight, after the entity lights. */
+	private static final int SKY_AT = ENTITY_LIGHTS_AT + 16 + EntityLights.MAX * EntityLights.BYTES;
 	/**
 	 * In exports, in sub-frames: 64 is 8 output frames at 8 sub-frames each, which is as far back as a change
 	 * too small to set off the history's reaction (TexelCache) can trail.
@@ -975,6 +1019,20 @@ public final class RtEmissive {
 	}
 
 	/** Whether the lighting pass adds the bounced light from {@link #view()} this frame. */
+	public static void setSkyBounce(boolean on) {
+		skyBounce = on;
+		BedrockVisualsClient.LOGGER.info("[raytrace] sky light bounced: {}", on);
+	}
+
+	public static boolean skyBounce() {
+		return skyBounce;
+	}
+
+	/** Whether this frame's bounce brings the sky's light back (the lighting then leaves out Bedrock's sky term). */
+	public static boolean skyBounceActive() {
+		return skyBounce && bounceActive();
+	}
+
 	public static boolean bounceActive() {
 		return tracedThisFrame && bounce;
 	}
@@ -1026,7 +1084,7 @@ public final class RtEmissive {
 					.putInt(124, history(exporting));
 
 			// This frame's light and switches, freed once the frame has run.
-			RtBuffer params = rt.hostBuffer(ENTITY_LIGHTS_AT + 16 + EntityLights.MAX * EntityLights.BYTES,
+			RtBuffer params = rt.hostBuffer(SKY_AT + 16,
 					VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 			rt.free(params);
 			ByteBuffer frameData = params.bytes();
@@ -1050,6 +1108,9 @@ public final class RtEmissive {
 						frameData, ENTITY_LIGHTS_AT + 16, frame.originX(), frame.originY(), frame.originZ());
 			}
 			com.mojang.renderpearl.api.textures.GpuTextureView lightVolume = dev.bedrockvisuals.render.LightVolume.view();
+			org.joml.Vector3f skyLight = dev.bedrockvisuals.render.LightingState.current().sky();
+			frameData.putFloat(SKY_AT, skyLight.x()).putFloat(SKY_AT + 4, skyLight.y()).putFloat(SKY_AT + 8, skyLight.z())
+					.putFloat(SKY_AT + 12, skyBounce && bounce ? 1 : 0);
 			frameData.putInt(ENTITY_LIGHTS_AT, carried).putInt(ENTITY_LIGHTS_AT + 4, EntityGeometry.quads() > 0 ? 1 : 0)
 					.putInt(ENTITY_LIGHTS_AT + 8, lightVolume != null ? 1 : 0);
 

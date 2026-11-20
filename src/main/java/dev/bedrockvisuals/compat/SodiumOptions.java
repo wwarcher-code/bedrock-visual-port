@@ -38,6 +38,7 @@ public final class SodiumOptions implements ConfigEntryPoint {
 	private static final Identifier ENTITY_LIGHTS = id("rt_entity_lights");
 	private static final Identifier BOUNCE = id("rt_bounce");
 	private static final Identifier BOUNCE_GAIN = id("rt_bounce_gain");
+	private static final Identifier SKY_BOUNCE = id("rt_sky_bounce");
 	private static final Identifier SAMPLES = id("rt_samples");
 	private static final Identifier EXPORT_SUBFRAMES = id("export_subframes");
 	private static final Identifier EXPORT_SAMPLES = id("export_rt_samples");
@@ -221,6 +222,16 @@ public final class SodiumOptions implements ConfigEntryPoint {
 						.setValueFormatter(value -> text(value + "%"))
 						.setBinding(value -> RtEmissive.setBounceGain(value / 100f),
 								() -> Math.round(RtEmissive.bounceGain() * 100))
+						.setStorageHandler(SAVE))
+				.addOption(builder.createBooleanOption(SKY_BOUNCE)
+						.setName(text("Sky light bounced"))
+						.setTooltip(text("The sky's light comes in through openings and bounces off what it reaches, "
+								+ "in place of Bedrock's even sky light: rooms with windows are lit from them, darker "
+								+ "away from them."))
+						.setImpact(OptionImpact.LOW)
+						.setEnabledProvider(state -> rayTracing(state) && state.readBooleanOption(BOUNCE), BOUNCE)
+						.setDefaultValue(false)
+						.setBinding(RtEmissive::setSkyBounce, RtEmissive::skyBounce)
 						.setStorageHandler(SAVE))
 				.addOption(builder.createIntegerOption(SAMPLES)
 						.setName(text("Rays per pixel"))

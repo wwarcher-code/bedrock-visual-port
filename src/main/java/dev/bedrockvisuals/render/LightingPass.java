@@ -161,7 +161,8 @@ public final class LightingPass {
 			encoder.writeToBuffer(rtShadowData.slice(), Std140Builder.onStack(stack, 32)
 					.putVec4(traced ? 1 : 0, dev.bedrockvisuals.raytrace.RtShadows.comparing() ? 1 : 0, 0, 0)
 					.putVec4(emissive ? 1 : 0, dev.bedrockvisuals.raytrace.RtEmissive.floorShare(),
-							dev.bedrockvisuals.raytrace.RtEmissive.bounceActive() ? 1 : 0, 0).get());
+							dev.bedrockvisuals.raytrace.RtEmissive.bounceActive() ? 1 : 0,
+							dev.bedrockvisuals.raytrace.RtEmissive.skyBounceActive() ? 1 : 0).get());
 		}
 		if (rtEntityData == null) {
 			rtEntityData = RenderSystem.getDevice().createBuffer(() -> "Bedrock Visuals entities' ray-traced light data",
@@ -181,7 +182,8 @@ public final class LightingPass {
 							probes && dev.bedrockvisuals.raytrace.RtEmissive.active() ? 1 : 0)
 					.putVec4(dev.bedrockvisuals.raytrace.RtEmissive.floorShare(), carried,
 							dev.bedrockvisuals.raytrace.RtEmissive.gain(),
-							probes && dev.bedrockvisuals.raytrace.RtEmissive.bounceActive() ? 1 : 0);
+							probes && dev.bedrockvisuals.raytrace.RtEmissive.bounceActive()
+									? (dev.bedrockvisuals.raytrace.RtEmissive.skyBounceActive() ? 2 : 1) : 0);
 			for (int i = 0; i < ENTITY_LIGHTS * 2; i++) {
 				int o = i * 4;
 				builder.putVec4(CARRIED[o], CARRIED[o + 1], CARRIED[o + 2], CARRIED[o + 3]);

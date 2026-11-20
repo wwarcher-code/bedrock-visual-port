@@ -592,6 +592,20 @@ off and 17.8 with all of it.
   - A first version blended the share into alphas the face loop had just overwritten with the frames held: every
     probe read as seeing the light. Found by drawing the share on the entities.
 
+- **Bounce: through glass, entity colours, sky light (option).**
+  - A bounce ray that crosses translucent terrain (stained glass) takes its colour: the first ray notes the
+    crossing, and only then a second (`transmittance`) to the surface met.
+  - Entities bounce their texture's colour: EntityGeometry reads each tagged draw's texture (reflection on
+    RenderType.state and RenderSetup.textures), averages its drawn pixels (linear, by alpha, cached until the
+    resources reload), and multiplies the copied vertex colours by it. A texture it can't read (a downloaded
+    skin) counts as a middling grey, as every entity did before.
+  - Sky light bounced (off by default; `rtsky on|off`, "Sky light bounced" on the options page, saved): bounce
+    rays that reach the sky bring back Bedrock's sky ambient colour as radiance, so a surface open to the whole
+    sky gets what Bedrock's term gives it; the lighting pass and entity.fsh then leave Bedrock's sky term out.
+    Rays leaving through water lose e^(-0.15 a block). Checked by day: the open landscape is unchanged (mean
+    146.3 off, 143.5 on; walls a little darker, seeing half the sky), the closed test box unchanged, the seabed
+    close to before (69.7, 62.3). Without the water loss the seabed went flat cyan.
+
 **Later, outside ray tracing:** particles (lava's smoke) drawn nearly black at night, even beside lava: they are
 vanilla-lit into the graded image and probably need what entities got (EntityPass). And take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.

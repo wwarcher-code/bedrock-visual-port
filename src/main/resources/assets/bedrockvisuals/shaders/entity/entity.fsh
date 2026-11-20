@@ -38,7 +38,7 @@ layout(std140) uniform RtEntityData {
     vec4 RtProbeCorner;  // xyz: the probe grid's lowest corner relative to the camera; w: 1 when the emitted
                          // light is on this frame
     vec4 RtEntityParams; // x: the share of Bedrock's block light kept under it; y: lights carried; z: the gain;
-                         // w: 1 when the bounced light is on this frame
+                         // w: 1 when the bounced light is on this frame, 2 when it brings the sky's light back
     vec4 RtCarried[64];  // per light: position relative to the camera and radius; colour x strength, reach
 };
 const ivec3 RT_PROBES = ivec3(48, 24, 48); // EntityProbes.X, Y, Z
@@ -287,7 +287,9 @@ vec3 bvLit(vec3 albedo, vec3 n, vec3 v) {
             blockTerm = max(traced, blockTerm * RtEntityParams.x);
         }
     }
-    vec3 indirect = max(blockTerm + SkyColor.rgb * skyCurve, AmbientColor.rgb);
+    // With the sky's light bounced (RtEntityParams.w 2), the probes' bounce has it in place of this term.
+    float skyKept = RtEntityParams.w > 1.5 ? 0.0 : 1.0;
+    vec3 indirect = max(blockTerm + SkyColor.rgb * skyCurve * skyKept, AmbientColor.rgb);
     // The bounced light (the sun, moon and emitted light off the surfaces around), over Bedrock's terms as the
     // terrain has it (deferred.fsh).
     if (RtEntityParams.w > 0.5) {
