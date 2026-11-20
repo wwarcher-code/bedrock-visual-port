@@ -577,6 +577,21 @@ off and 17.8 with all of it.
   - Checked in a dark box (z 30 to 60): phantom (green), copper golem (amber), dragon (purple). The creaking's
     eyes glow only while it is active, so a creaking without AI showed none, as expected.
 
+- **Carried light: through glass, bounced, and shadowed on entities.**
+  - Through stained glass: the rays testing whether a texel sees a carried light (`entityLightReaches`) take the
+    glass's colour (`transmittance`). The colour of the rays that got through is kept per texel (TexelCache's new
+    D: `sumD`, `fastD`; entries 160 to 192 bytes, 402 MB for 2^21) and tints the carried light when shown.
+    Checked: an armor stand holding a torch behind purple glass casts a purple pool on the floor in front.
+  - Bounced: bounce rays add the carried lights at the surface they meet (`bounceRadiance`, unshadowed there), for
+    the texels and the entity probes.
+  - Shadowed on entities: each probe measures how much of each of the first 8 carried lights it sees through the
+    terrain (2 rays a frame, averaged at half weight), kept in the probe atlas's alphas that entities didn't read
+    (faces 2 to 5 and 8 to 11). entity.fsh blends them as it blends the light (`rtCarriedSeen`). Checked: a
+    zombie behind a stone wall from the torch is no longer lit (22.5 against 20.6 with carried lights off), one on
+    the glass side is (29.8). Entities lit through glass get the light untinted (one value a light per probe).
+  - A first version blended the share into alphas the face loop had just overwritten with the frames held: every
+    probe read as seeing the light. Found by drawing the share on the entities.
+
 **Later, outside ray tracing:** particles (lava's smoke) drawn nearly black at night, even beside lava: they are
 vanilla-lit into the graded image and probably need what entities got (EntityPass). And take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.

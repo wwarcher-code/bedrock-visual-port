@@ -317,6 +317,11 @@ public final class RtEmissive {
 			            light += albedo * (entries[slot].fastA.rgb * switches.x + entries[slot].fastB.rgb);
 			        }
 			    }
+			    // The lights entities carry on it too (unshadowed: a bounce of a carried torch off the floor around it).
+			    uint carriedLights = uint(entityCount.x);
+			    for (uint i = 0u; i < carriedLights; i++) {
+			        light += albedo * entityLight(i, hit, hitNormal, false);
+			    }
 			    return light * switches.z;
 			}
 
@@ -484,7 +489,9 @@ public final class RtEmissive {
 
 			// Whether a point x of an entity's light is seen from p: through the terrain all the way, and through the
 			// entities short of the light (the one carrying it, with its hand and the item, isn't in the way).
-			bool entityLightReaches(vec3 p, vec3 n, bool thinSheet, vec3 x) {
+			// through: the colour the stained glass on the way lets through.
+			bool entityLightReaches(vec3 p, vec3 n, bool thinSheet, vec3 x, out vec3 through) {
+			    through = vec3(1.0);
 			    vec3 toPoint = x - p;
 			    float d = length(toPoint);
 			    if (d < 0.02) {
@@ -493,7 +500,8 @@ public final class RtEmissive {
 			    vec3 direction = toPoint / d;
 			    vec3 nRay = thinSheet && dot(n, direction) < 0.0 ? -n : n;
 			    vec3 origin = p + nRay * 0.01;
-			    if (occludedBy(origin, direction, max(d - 0.03, 0.002), 0x01u)) {
+			    through = transmittance(origin, direction, max(d - 0.03, 0.002), 0x01u);
+			    if (dot(through, vec3(1.0)) <= 0.0) {
 			        return false;
 			    }
 			    float entityReach = d - 0.7;
@@ -614,6 +622,7 @@ public final class RtEmissive {
 			        addSample(slot, emitted, bounced);
 			        bouncedSum += min(bounced, vec3(MAX_SAMPLE));
 			        bool seen = false;
+			        vec3 seenColor = vec3(1.0);
 			        if (entityTotal > 0.0) {
 			            vec3 u = sequence3(stream + 4096u);
 			            float pick = u.x * entityTotal;
@@ -632,10 +641,10 @@ public final class RtEmissive {
 			            vec3 offset = vec3(sqrt(max(1.0 - z * z, 0.0)) * vec2(cos(phi), sin(phi)), z);
 			            vec3 towardsPoint = normalize(p - at.xyz);
 			            offset = dot(offset, towardsPoint) < 0.0 ? reflect(offset, towardsPoint) : offset;
-			            seen = entityLightReaches(p, n, thinSheet, at.xyz + offset * at.w);
+			            seen = entityLightReaches(p, n, thinSheet, at.xyz + offset * at.w, seenColor);
 			        }
 			        // Always, so a texel's share shadowed goes back to none once the last entity is gone.
-			        addEntitySample(slot, dot(emitted, vec3(0.2126, 0.7152, 0.0722)), shadowed, entityTotal > 0.0, seen);
+			        addEntitySample(slot, dot(emitted, vec3(0.2126, 0.7152, 0.0722)), shadowed, entityTotal > 0.0, seen, seenColor);
 			    }
 			    if (bounceCell >= 0) {
 			        addBounceSamples(bounceCell, bouncedSum, uint(samples));
@@ -783,7 +792,9 @@ public final class RtEmissive {
 			        for (uint i = 0u; i < carried; i++) {
 			            light += entityLight(i, p, n, thinSheet);
 			        }
-			        emitted += light * entityTerms.y;
+			        // Tinted by the stained glass the rays to them crossed (TexelCache's D).
+			        vec3 tint = slot >= 0 && entries[slot].fastD.w > 0.0 ? entries[slot].fastD.rgb : vec3(1.0);
+			        emitted += light * entityTerms.y * tint;
 			    }
 
 			    // Alpha: 0. Points on blocks that glow all over (lava) are found by the lighting pass from the light

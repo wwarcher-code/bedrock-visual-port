@@ -34,6 +34,8 @@ import static org.lwjgl.vulkan.VK12.*;
  *                   entities' lights the texel sees (plus one; 0 before any was measured); z the slow average
  *                   of x's share, shown, and how many frames it holds (w)
  *   ivec4 position  the texel's world block (xyz) and level (w), for wiping it when the world changes near it
+ *   uvec4 sumD      this frame's carried-light rays that got through: their colour (stained glass; xyz), how many
+ *   vec4 fastD      its average over the last couple of frames (rgb; w 1 once measured)
  * </pre>
  * The slow average hides the noise; the fast one notices changes the world doesn't report (see blendTexel). When
  * the world reports one (a section built again: a block placed or broken), every texel near it, on screen or not,
@@ -56,12 +58,12 @@ import static org.lwjgl.vulkan.VK12.*;
  */
 final class TexelCache {
 	static final int ENTRIES = 1 << 21;
-	static final int ENTRY_SIZE = 160;
+	static final int ENTRY_SIZE = 192;
 
 	/** The GLSL for a shader with the cache at binding {@code CACHE_BINDING} (define it first). */
 	static final String GLSL = """
 			struct TexelEntry { uint key; uint lastFrame; uint count; uint wiped; uvec4 sumA; uvec4 sumB; uvec4 sumC;
-			    vec4 historyA; vec4 historyB; vec4 fastA; vec4 fastB; vec4 fastC; ivec4 position; };
+			    vec4 historyA; vec4 historyB; vec4 fastA; vec4 fastB; vec4 fastC; ivec4 position; uvec4 sumD; vec4 fastD; };
 			layout(set = 0, binding = CACHE_BINDING, std430) buffer TexelCache { TexelEntry entries[]; };
 			const uint CACHE_ENTRIES = ENTRIES_HEREu;
 			const uint PROBES = 8u;
@@ -176,6 +178,8 @@ final class TexelCache {
 			                entries[oldest].fastA = vec4(0.0);
 			                entries[oldest].fastB = vec4(0.0);
 			                entries[oldest].fastC = vec4(0.0);
+			                entries[oldest].sumD = uvec4(0u);
+			                entries[oldest].fastD = vec4(0.0);
 			                return int(oldest);
 			            }
 			        }
@@ -227,7 +231,9 @@ final class TexelCache {
 
 			// One sample's entity terms (TexelCache's C): the emitted light the terrain let through (its luminance),
 			// whether an entity stood in front of it, and, if a light entities carry was tried, whether it was seen.
-			void addEntitySample(int slot, float emitted, bool shadowed, bool triedCarried, bool seenCarried) {
+			// seenColor: the colour the stained glass on the way let through (white without any).
+			void addEntitySample(int slot, float emitted, bool shadowed, bool triedCarried, bool seenCarried,
+			        vec3 seenColor) {
 			    uint fixedLight = uint(clamp(emitted, 0.0, MAX_SAMPLE) * FIXED_POINT + 0.5);
 			    if (fixedLight > 0u) {
 			        atomicAdd(entries[slot].sumC.y, fixedLight);
@@ -239,6 +245,11 @@ final class TexelCache {
 			        atomicAdd(entries[slot].sumC.w, 1u);
 			        if (seenCarried) {
 			            atomicAdd(entries[slot].sumC.z, 1u);
+			            uvec3 fixedColor = uvec3(clamp(seenColor, 0.0, 1.0) * FIXED_POINT + 0.5);
+			            atomicAdd(entries[slot].sumD.x, fixedColor.x);
+			            atomicAdd(entries[slot].sumD.y, fixedColor.y);
+			            atomicAdd(entries[slot].sumD.z, fixedColor.z);
+			            atomicAdd(entries[slot].sumD.w, 1u);
 			        }
 			    }
 			}
@@ -331,6 +342,14 @@ final class TexelCache {
 			        }
 			        entries[slot].fastC = fastC;
 			        entries[slot].sumC = uvec4(0u);
+			        // The colour of the carried lights' rays that got through (stained glass): D, w 1 once measured.
+			        uvec4 sumD = entries[slot].sumD;
+			        if (sumD.w > 0u) {
+			            vec3 color = vec3(sumD.xyz) / FIXED_POINT / float(sumD.w);
+			            vec4 fastD = entries[slot].fastD;
+			            entries[slot].fastD = vec4(fastD.w > 0.0 ? mix(fastD.rgb, color, ENTITY_WEIGHT) : color, 1.0);
+			        }
+			        entries[slot].sumD = uvec4(0u);
 
 			        // Held to this frame's cap first: a lowered cap (the world changed) takes effect at once.
 			        float held = min(entries[slot].historyA.w, cap);
@@ -363,6 +382,8 @@ final class TexelCache {
 			        entries[slot].fastB = vec4(0.0);
 			        entries[slot].fastC = vec4(0.0);
 			        entries[slot].sumC = uvec4(0u);
+			        entries[slot].sumD = uvec4(0u);
+			        entries[slot].fastD = vec4(0.0);
 			        entries[slot].position = ivec4(0);
 			        entries[slot].key = 0u;
 			    }

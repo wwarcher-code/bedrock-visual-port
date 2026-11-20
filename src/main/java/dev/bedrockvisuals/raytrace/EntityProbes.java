@@ -58,6 +58,11 @@ public final class EntityProbes {
 			// Bounce rays a probe a frame, in directions over the whole sphere (RtEmissive's bounceRadiance).
 			const int BOUNCE_SAMPLES = 4;
 			const float HISTORY = 24.0;
+			// Carried lights each probe measures the share of it sees (entity.fsh's RT_CARRIED_SEEN).
+			const int CARRIED_SEEN = 8;
+			int seenFace(int i) {
+			    return i < 4 ? 2 + i : 4 + i;
+			}
 
 			// Whether the block at a world position is solid and opaque (the light volume's blue, LightVolume).
 			bool solidAt(ivec3 world) {
@@ -185,18 +190,59 @@ public final class EntityProbes {
 			                bounced[5] += light * max(-direction.z, 0.0);
 			            }
 			        }
+			        // How much of each of the first CARRIED_SEEN lights entities carry the probe sees, through the
+			        // terrain (2 rays to points of its sphere, averaged with the last frames at half weight): entity.fsh
+			        // shades entities by it, so a torch carried behind a wall no longer lights a mob through it. Kept in
+			        // the alphas the entities don't read (faces 2 to 5 and 8 to 11).
+			        float seenNow[CARRIED_SEEN];
+			        uint carriedHere = min(uint(entityCount.x), uint(CARRIED_SEEN));
+			        for (int i = 0; i < CARRIED_SEEN; i++) {
+			            seenNow[i] = 1.0;
+			            if (uint(i) < carriedHere) {
+			                vec4 at = entityLights[i * 2];
+			                vec4 carriedLight = entityLights[i * 2 + 1];
+			                float d = length(at.xyz - p);
+			                if (d < carriedLight.w + 1.0 && d > 0.05) {
+			                    float hits = 0.0;
+			                    for (int s = 0; s < 2; s++) {
+			                        float z = random() * 2.0 - 1.0;
+			                        float phi = random() * 2.0 * PI;
+			                        vec3 x = at.xyz + vec3(sqrt(max(1.0 - z * z, 0.0)) * vec2(cos(phi), sin(phi)), z) * at.w;
+			                        vec3 toPoint = x - p;
+			                        float dist = length(toPoint);
+			                        if (dist < 0.05 || !occludedBy(p, toPoint / dist, max(dist - 0.05, 0.002), 0x01u)) {
+			                            hits += 1.0;
+			                        }
+			                    }
+			                    seenNow[i] = hits * 0.5;
+			                }
+			            }
+			        }
 			        float held = probe.face[0].w;
 			        float weight = 1.0 / (held + 1.0);
+			        // The shares kept last frame, read before the faces below overwrite their alphas.
+			        float seenBefore[CARRIED_SEEN];
+			        for (int i = 0; i < CARRIED_SEEN; i++) {
+			            seenBefore[i] = probe.face[seenFace(i)].w;
+			        }
 			        for (int i = 0; i < 6; i++) {
 			            probe.face[i] = vec4(mix(probe.face[i].rgb, min(sum[i] / float(SAMPLES), vec3(MAX_SAMPLE)), weight),
 			                    min(held + 1.0, HISTORY));
 			            probe.face[6 + i] = vec4(mix(probe.face[6 + i].rgb, bounced[i] / float(BOUNCE_SAMPLES), weight), 0.0);
 			        }
+			        for (int i = 0; i < CARRIED_SEEN; i++) {
+			            int f = seenFace(i);
+			            probe.face[f].w = held < 0.5 ? seenNow[i] : mix(clamp(seenBefore[i], 0.0, 1.0), seenNow[i], 0.5);
+			        }
 			    }
 			    probes[slot] = probe;
 			    for (int i = 0; i < 12; i++) {
 			        vec3 light = solid ? vec3(0.0) : probe.face[i].rgb;
-			        pixels[out0 + uint(i)] = uvec2(packHalf2x16(light.rg), packHalf2x16(vec2(light.b, solid ? 0.0 : 1.0)));
+			        // Alpha: faces 0, 1, 6 and 7 whether the probe is in the open (what entity.fsh weighs by); the
+			        // others the share of a carried light it sees.
+			        bool flag = i == 0 || i == 1 || i == 6 || i == 7;
+			        float alpha = flag ? (solid ? 0.0 : 1.0) : (probe.cell.w == 0 ? 1.0 : probe.face[i].w);
+			        pixels[out0 + uint(i)] = uvec2(packHalf2x16(light.rg), packHalf2x16(vec2(light.b, alpha)));
 			    }
 			}
 			""".replace("PROBES_X", Integer.toString(X)).replace("PROBES_Y", Integer.toString(Y))

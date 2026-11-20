@@ -75,8 +75,34 @@ vec3 rtProbes(vec3 p, vec3 n, int face) {
     return weight > 1e-3 ? sum / weight : vec3(0.0);
 }
 
+// How much of carried light i the probes around p see through the terrain (raytrace/EntityProbes: kept in the
+// alphas of faces 2 to 5 and 8 to 11), blended as rtProbes blends the light; 1 past the first RT_CARRIED_SEEN.
+const int RT_CARRIED_SEEN = 8;
+float rtCarriedSeen(vec3 p, vec3 n, int i) {
+    vec3 q = p + n * 0.3 - RtProbeCorner.xyz - 0.5;
+    ivec3 base = ivec3(floor(q));
+    if (i >= RT_CARRIED_SEEN || any(lessThan(base, ivec3(0))) || any(greaterThanEqual(base + 1, RT_PROBES))) {
+        return 1.0;
+    }
+    int face = i < 4 ? 2 + i : 4 + i;
+    vec3 f = q - vec3(base);
+    float sum = 0.0;
+    float weight = 0.0;
+    for (int c = 0; c < 8; c++) {
+        ivec3 corner = ivec3(c & 1, (c >> 1) & 1, (c >> 2) & 1);
+        ivec3 cell = base + corner;
+        ivec2 at = ivec2(cell.x * 12, cell.z + cell.y * RT_PROBES.z);
+        vec3 w3 = mix(1.0 - f, f, vec3(corner));
+        float w = w3.x * w3.y * w3.z * texelFetch(RtProbeMap, at, 0).a;
+        sum += texelFetch(RtProbeMap, at + ivec2(face, 0), 0).a * w;
+        weight += w;
+    }
+    return weight > 1e-3 ? sum / weight : 1.0;
+}
+
 // The traced light at the camera-relative point p on a surface facing n: the probes' emitted light, then the
-// lights entities carry, unshadowed. Negative outside the grid (Bedrock's block light then).
+// lights entities carry, by the share of each the probes there see. Negative outside the grid (Bedrock's block
+// light then).
 vec3 rtEntityLight(vec3 p, vec3 n) {
     vec3 light = rtProbes(p, n, 0);
     if (light.x < 0.0) {
@@ -95,7 +121,7 @@ vec3 rtEntityLight(vec3 p, vec3 n) {
             float cosine = max(dot(n, toLight) * inversesqrt(max(d2, 1e-6)), 0.0);
             // Held off within the light's radius (eyes: the mob's half width, so they don't light their own face).
             light += strength.rgb * cosine * fade * fade / max(d2, max(0.0625, at.w * at.w)) * RtEntityParams.z
-                    / 3.14159265;
+                    / 3.14159265 * rtCarriedSeen(p, n, i);
         }
     }
     return light;
