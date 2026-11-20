@@ -663,5 +663,18 @@ off and 17.8 with all of it.
   (EntityPass.isBlobShadow, as Vibrant Visuals draws none); the one seen in a test was on the OpenGL fallback,
   without shadow maps.
 
+- **Falling water, looked at (2026-11-20), left as it is.** A waterfall down a stone pillar, by day and by night:
+  the falling sheets carry water_flow's streaked normals, and their reflections break up on the texel grid as
+  Bedrock's notes say they should (bedrock-renderer-notes.md, water texture set). At night next to a glowstone the
+  sheet looked teal: that is the glowstone-lit stone behind it seen through the water (water takes the red out).
+  The lip where the water spills over shows a dark wedge: the sloped surface's underside seen from below,
+  reflecting the ground. A path capped at a block for side faces changed nothing visible and was dropped.
+  What the developer finds wrong with falling water is still to be described.
+- **Render scale (TAAU's upscaling), left out.** The PC presets ask for 720p (low), 1080p, 1440p and 2160p
+  (ultra) as the render target; on a 1080p screen every preset but low renders at native resolution, as this
+  renderer does. Rendering below native would mean resizing Minecraft's main target under every pass, Distant
+  Horizons, Flashback and the GUI, for no difference at the developer's settings. The TAA pass itself is
+  Bedrock's TAAU at native resolution.
+
 **Later, outside ray tracing:** take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.
