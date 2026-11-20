@@ -242,8 +242,10 @@ public final class RtEmissive {
 			    }
 			    float cosReceiver = dot(n, toLight) * inversesqrt(max(d2, 1e-6));
 			    cosReceiver = thinSheet ? abs(cosReceiver) : max(cosReceiver, 0.0);
-			    float fade = 1.0 - d2 / reach2;
-			    return light.rgb * cosReceiver * fade * fade / max(d2, 0.0625) * switches.w / PI;
+			    // The same fade as the block lights' (reachWindow), so a dropped torch lights as the placed one does.
+			    // Held off within the light's radius (at least a quarter block).
+			    return light.rgb * cosReceiver * reachWindow(sqrt(d2), light.w) / max(d2, max(0.0625, at.w * at.w))
+			            * switches.w / PI;
 			}
 
 			// The light a bounce ray from origin sends back from the surface it meets: the sun or moon on it (its own

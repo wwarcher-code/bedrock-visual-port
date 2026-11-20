@@ -564,6 +564,19 @@ off and 17.8 with all of it.
     GPU timers jumped by about 1 ms partway through some runs while frame times didn't change, so compare frame
     times (`frametimes`), not the stage timers alone.
 
+- **Carried lights fade like block lights; eye lights checked in game.**
+  - The calibration (gain matched Bedrock a block from glowstone) is unaffected by the reach fade: at a block from
+    an 18.7-block light the fade is 1.0000. Lights carried by entities now fade with the same curve (`reachWindow`,
+    and in entity.fsh), so a dropped torch and a placed one fall off alike.
+  - A dropped item's light sat a quarter block up: the floor took it at a grazing angle, a small hot pool. It is
+    now at a placed torch's flame height (0.55).
+  - Eye lights are held off within the mob's half width (+0.15): the phantom glowed green all over and the copper
+    golem lit itself up. The shaders hold every carried light off within its radius (at least a quarter block).
+  - The ender dragon's head part isn't moved without AI; when it is far from the dragon (or at the origin) the
+    eye light goes 6 blocks in front of it instead. Checked: purple glow around the dragon.
+  - Checked in a dark box (z 30 to 60): phantom (green), copper golem (amber), dragon (purple). The creaking's
+    eyes glow only while it is active, so a creaking without AI showed none, as expected.
+
 **Later, outside ray tracing:** particles (lava's smoke) drawn nearly black at night, even beside lava: they are
 vanilla-lit into the graded image and probably need what entities got (EntityPass). And take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.

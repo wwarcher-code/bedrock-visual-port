@@ -89,9 +89,13 @@ vec3 rtEntityLight(vec3 p, vec3 n) {
         vec3 toLight = at.xyz - p;
         float d2 = dot(toLight, toLight);
         if (d2 < strength.w * strength.w) {
-            float fade = 1.0 - d2 / (strength.w * strength.w);
+            // The ray-traced light's fade at its reach, (1 - (d / reach)^4)^2 (RtEmissive's reachWindow).
+            float r2 = d2 / (strength.w * strength.w);
+            float fade = 1.0 - r2 * r2;
             float cosine = max(dot(n, toLight) * inversesqrt(max(d2, 1e-6)), 0.0);
-            light += strength.rgb * cosine * fade * fade / max(d2, 0.0625) * RtEntityParams.z / 3.14159265;
+            // Held off within the light's radius (eyes: the mob's half width, so they don't light their own face).
+            light += strength.rgb * cosine * fade * fade / max(d2, max(0.0625, at.w * at.w)) * RtEntityParams.z
+                    / 3.14159265;
         }
     }
     return light;

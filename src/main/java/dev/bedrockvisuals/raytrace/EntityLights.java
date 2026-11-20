@@ -150,8 +150,14 @@ public final class EntityLights {
 			case Enderman enderman -> eyes(enderman, partial, 1, "enderman/enderman_eyes");
 			case Phantom phantom -> eyes(phantom, partial, 1, "phantom/phantom_eyes");
 			case EnderDragon dragon -> {
+				// Its head part, kept where the dragon's AI last put it (without AI, never moved): when that is far
+				// from the dragon, in front of the dragon instead.
 				Vec3 head = dragon.head.getPosition(partial);
-				light(head.x, head.y + dragon.head.getBbHeight() * 0.5, head.z, 0.3f, 8,
+				if (head.distanceToSqr(at) > 20 * 20 || head.lengthSqr() < 1) {
+					Vec3 look = Vec3.directionFromRotation(0, dragon.getYRot(partial) + 180);
+					head = at.add(look.scale(6)).add(0, 1, 0);
+				}
+				light(head.x, head.y + dragon.head.getBbHeight() * 0.5, head.z, 1.0f, 8,
 						eyeColor("enderdragon/dragon_eyes", new float[] {0.8f, 0.3f, 1.0f}));
 			}
 			case Breeze breeze -> eyes(breeze, partial, 2, "breeze/breeze_eyes");
@@ -161,7 +167,9 @@ public final class EntityLights {
 				}
 			}
 			case CopperGolem golem -> eyes(golem, partial, 1, "copper_golem/copper_golem_eyes");
-			case ItemEntity item -> held(item.getItem(), at.x, at.y + 0.25, at.z, 0.15f);
+			// At a placed torch's flame height: from a quarter block up, the floor around took the light at a
+			// grazing angle, a small hot pool instead of the placed torch's wide one.
+			case ItemEntity item -> held(item.getItem(), at.x, at.y + 0.55, at.z, 0.15f);
 			case FallingBlockEntity falling -> {
 				int level = falling.getBlockState().getLightEmission();
 				if (level > 0) {
@@ -180,7 +188,10 @@ public final class EntityLights {
 		Vec3 eye = mob.getEyePosition(partial);
 		Vec3 look = mob.getViewVector(partial);
 		double forward = mob.getBbWidth() * 0.5 + 0.05;
-		light(eye.x + look.x * forward, eye.y + look.y * forward, eye.z + look.z * forward, 0.08f, level,
+		// Its radius about the mob's half width: no surface nearer than that takes more light than at it (the
+		// shaders hold the distance off at the radius), so the eyes don't light up their own mob's face.
+		light(eye.x + look.x * forward, eye.y + look.y * forward, eye.z + look.z * forward,
+				(float) (mob.getBbWidth() * 0.5 + 0.15), level,
 				eyeColor(texture, new float[] {1.0f, 0.4f, 0.4f}));
 	}
 
