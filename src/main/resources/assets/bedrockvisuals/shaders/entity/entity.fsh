@@ -216,6 +216,12 @@ vec3 bvLit(vec3 albedo, vec3 n, vec3 v) {
     #ifdef EMISSIVE
     return albedo * 2.0;
     #else
+    #ifdef PARTICLE
+    // Particles Minecraft draws full bright (flames, lava's embers, sparks: block and sky light 15) glow as they are.
+    if (min(bvLight.x, bvLight.y) > 0.99) {
+        return albedo * 2.0;
+    }
+    #endif
     float blockLight = bvLight.x;
     float skyLight = bvLight.y;
     // Entities are two-sided in places (leaves on a model, banners): light the side facing the camera.
@@ -242,6 +248,11 @@ vec3 bvLit(vec3 albedo, vec3 n, vec3 v) {
     if (RtProbeCorner.w > 0.5) {
         vec3 traced = rtEntityLight(bvPosition, n);
         if (traced.x >= 0.0) {
+            #ifdef PARTICLE
+            // Held to twice Bedrock's term, as for the light the air scatters (rt_probes.glsl): beside a lava
+            // pool the traced light is many times it, and smoke by day came out orange in full sun.
+            traced = min(traced, BlockLightColor.rgb * blockLightColor(blockLight) * 2.0);
+            #endif
             blockTerm = max(traced, blockTerm * RtEntityParams.x);
         }
     }

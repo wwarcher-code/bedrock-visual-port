@@ -649,6 +649,19 @@ off and 17.8 with all of it.
   - Particles stay out of the scene: hundreds of tiny quads living a second, a structure rebuilt every frame, for
     shadows too small to see. Their own lighting is fixed in the lighting itself (dark particles at night).
 
-**Later, outside ray tracing:** particles (lava's smoke) drawn nearly black at night, even beside lava: they are
-vanilla-lit into the graded image and probably need what entities got (EntityPass). And take a look at vertical (falling) water. The player asked for this on
+- **Particles lit as entities are (no longer black at night).** Minecraft drew particles with its lightmap into
+  the graded image: smoke over lava at night came out nearly black against the lava our lighting and exposure
+  make bright. Each particle pipeline drawn in the level's main pass now gets a variant (render/ParticlePass,
+  QuadParticleFeatureRendererMixin's drawLayers hooks): Minecraft's vertex (particle/particle.vsh) feeding the
+  entities' fragment shader built with PARTICLE (normal towards the camera, no overlay, alpha cutout 0.1). Lit by
+  the sun and moon, the sky, and the block light or the traced light (held to twice Bedrock's term: by day smoke
+  beside lava came out orange in full sun), through water and fog, exposed and graded with the frame. Particles
+  Minecraft draws full bright (block and sky light 15: flames, embers) glow as they are; smoke beside lava under
+  open sky is 15 and 15 too, and glows light grey. Checked over a lava pool: smoke amber at night, light warm grey
+  by day.
+- Minecraft's round blob shadow under entities was already dropped while entities cast real shadows
+  (EntityPass.isBlobShadow, as Vibrant Visuals draws none); the one seen in a test was on the OpenGL fallback,
+  without shadow maps.
+
+**Later, outside ray tracing:** take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.

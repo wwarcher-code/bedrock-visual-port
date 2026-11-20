@@ -56,6 +56,13 @@ public final class EntityPass {
 		inLevelPass = inLevel;
 	}
 
+	/** Whether the lighting inputs are there to light a draw in the level's main pass right now. */
+	public static boolean lightingReady() {
+		return !failed && inLevelPass && DeferredRenderer.replacesSky() && LightingPass.lightingData() != null
+				&& LightingPass.atmosphereData() != null && LightingPass.gradingData() != null
+				&& LightingPass.distantData() != null && LightingPass.rtEntityData() != null;
+	}
+
 	/** Whether this draw's pipeline is one this pass replaces right now. */
 	public static boolean appliesTo(RenderPipeline pipeline) {
 		return !failed && inLevelPass && DeferredRenderer.replacesSky() && LightingPass.lightingData() != null
