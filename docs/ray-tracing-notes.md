@@ -676,5 +676,14 @@ off and 17.8 with all of it.
   Horizons, Flashback and the GUI, for no difference at the developer's settings. The TAA pass itself is
   Bedrock's TAAU at native resolution.
 
+- **A real Flashback export, scripted.** Script lines `replay <file>` (Flashback.openReplayWorld) and
+  `export <folder> <start tick> <end tick> <width> <height>` (an ExportSettings for a PNG sequence at 20 fps, no
+  audio, from the camera where it is, run as Flashback's export window runs it), both by reflection since
+  Flashback is runtime only; `wait`, `replay` and `quit` lines now also run at the title screen. The sample
+  recording (run/flashback/replays/Sample_Recording.zip, 74 ticks) exported to 73 frames at 960x540 in about 6 s
+  with the offline preset: Bedrock's lighting, traced shadows (on in exports by default), the moving player
+  motion-blurred by the sub-frames. With an audio codec set, the image muxer wrote the audio packets as .png files
+  among the frames. The developer's own replays are still to be exported.
+
 **Later, outside ray tracing:** take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.

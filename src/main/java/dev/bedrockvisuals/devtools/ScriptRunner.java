@@ -47,6 +47,48 @@ import net.minecraft.client.Screenshot;
  * </ul>
  */
 public final class ScriptRunner {
+	private static Object flashback(String type, String method, Class<?>[] types, Object... args) {
+		try {
+			return Class.forName(type).getMethod(method, types).invoke(null, args);
+		} catch (ReflectiveOperationException e) {
+			throw new IllegalStateException("Flashback " + type + "." + method + " failed", e);
+		}
+	}
+
+	/**
+	 * export &lt;folder&gt; &lt;start tick&gt; &lt;end tick&gt; &lt;width&gt; &lt;height&gt;: a PNG sequence of the open replay
+	 * at 20 frames a second, from the camera where it is, as Flashback's export window would start it (the
+	 * renderer's offline preset then runs: sub-frames, traced shadows and light).
+	 */
+	@SuppressWarnings({"unchecked", "rawtypes"})
+	private static void startExport(Minecraft minecraft, String[] args) {
+		try {
+			Path folder = Path.of(args[0]);
+			Files.createDirectories(folder);
+			Class<?> settingsType = Class.forName("com.moulberry.flashback.exporting.ExportSettings");
+			Object editor = Class.forName("com.moulberry.flashback.state.EditorStateManager").getMethod("getCurrent")
+					.invoke(null);
+			Class enumProjection = Class.forName("com.moulberry.flashback.combo_options.ExportProjection");
+			Class enumContainer = Class.forName("com.moulberry.flashback.combo_options.VideoContainer");
+			Class enumCodec = Class.forName("com.moulberry.flashback.combo_options.VideoCodec");
+			var camera = minecraft.gameRenderer.mainCamera();
+			Object settings = settingsType.getConstructors()[0].newInstance("bv-test", editor, camera.position(),
+					camera.yRot(), camera.xRot(), Integer.parseInt(args[3]), Integer.parseInt(args[4]),
+					Integer.parseInt(args[1]), Integer.parseInt(args[2]), Enum.valueOf(enumProjection, "PERSPECTIVE"),
+					1f, 20.0, true, false, Enum.valueOf(enumContainer, "PNG_SEQUENCE"), Enum.valueOf(enumCodec, "H264"),
+					"png", 20_000_000, false, false, true, false, null, folder, "%04d"); // no audio: a PNG sequence got its packets as files
+			Class<?> jobType = Class.forName("com.moulberry.flashback.exporting.ExportJob");
+			Object job = jobType.getConstructor(settingsType).newInstance(settings);
+			Class.forName("com.moulberry.flashback.Flashback").getField("EXPORT_JOB").set(null, job);
+			BedrockVisualsClient.LOGGER.info("[script] exporting ticks {} to {} to {}", args[1], args[2], folder);
+			jobType.getMethod("run").invoke(job);
+			Class.forName("com.moulberry.flashback.Flashback").getField("EXPORT_JOB").set(null, null);
+			BedrockVisualsClient.LOGGER.info("[script] export done");
+		} catch (ReflectiveOperationException | IOException | RuntimeException e) {
+			BedrockVisualsClient.LOGGER.error("[script] export failed", e);
+		}
+	}
+
 	private static Path script;
 	/** Bytes of the file already taken in. */
 	private static long position;
@@ -74,6 +116,21 @@ public final class ScriptRunner {
 	private static void tick(Minecraft minecraft) {
 		FrameTimes.tickEnd();
 		if (minecraft.player == null) {
+			// Before a world (the title screen): only the lines that need none, so a script can open a replay.
+			readAppended();
+			while (!queued.isEmpty() && System.nanoTime() >= waitUntil) {
+				String next = queued.peek().trim();
+				String verb = next.split("\\s+", 2)[0];
+				if (!verb.equals("wait") && !verb.equals("replay") && !verb.equals("quit") && !next.isEmpty()) {
+					break;
+				}
+				queued.poll();
+				try {
+					run(minecraft, next);
+				} catch (RuntimeException e) {
+					BedrockVisualsClient.LOGGER.error("[script] line failed: {}", next, e);
+				}
+			}
 			return;
 		}
 		// A scripted run keeps playing when the window loses focus: the pause menu Minecraft opens then covered
@@ -185,6 +242,10 @@ public final class ScriptRunner {
 							argument.isEmpty() ? 0 : Integer.parseInt(argument)));
 				}
 			}
+			// Flashback, by reflection (it is a runtime-only dependency): open a replay, export a range of it.
+			case "replay" -> flashback("com.moulberry.flashback.Flashback", "openReplayWorld",
+					new Class<?>[] {Path.class}, Path.of(argument));
+			case "export" -> startExport(minecraft, argument.split("\s+"));
 			case "rtsky" -> dev.bedrockvisuals.raytrace.RtEmissive.setSkyBounce(argument.equals("on"));
 			case "rtbouncegain" -> dev.bedrockvisuals.raytrace.RtEmissive.setBounceGain(Float.parseFloat(argument));
 			case "rtsamples" -> dev.bedrockvisuals.raytrace.RtEmissive.setSamples(Integer.parseInt(argument));
