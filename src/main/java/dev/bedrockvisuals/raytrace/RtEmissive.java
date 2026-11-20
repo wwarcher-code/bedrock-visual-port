@@ -580,6 +580,12 @@ public final class RtEmissive {
 			        return;
 			    }
 			    placeTexel(slot, block, level);
+			    // The bounce also goes to the texel's bounce cell (TexelCache's bounceKey), which is what is shown.
+			    int bounceCell = findTexel(bounceKey(p, n, thinSheet, originBlock.xyz, level), true);
+			    if (bounceCell >= 0) {
+			        placeTexel(bounceCell, block, bounceLevel(level));
+			    }
+			    vec3 bouncedSum = vec3(0.0);
 			    entitiesNear = entityCount.y != 0;
 			    // The lights entities carry: how much each gives the point, unshadowed. Their light itself is worked out
 			    // again every frame where it is shown (GATHER); here only whether they are seen is sampled, a light
@@ -602,7 +608,9 @@ public final class RtEmissive {
 			        bool bounces = switches.y > 0.5 && (camera.w <= 0.0 || random() < 0.5);
 			        vec3 bounced = bounces ? bounceSample(p, n, thinSheet, sequence3(stream + 1u)) * (camera.w > 0.0 ? 2.0 : 1.0)
 			                : vec3(0.0);
+			        // The bounce goes to the texel too, for bounce rays meeting it (bounceRadiance: one lookup).
 			        addSample(slot, emitted, bounced);
+			        bouncedSum += min(bounced, vec3(MAX_SAMPLE));
 			        bool seen = false;
 			        if (entityTotal > 0.0) {
 			            vec3 u = sequence3(stream + 4096u);
@@ -626,6 +634,9 @@ public final class RtEmissive {
 			        }
 			        // Always, so a texel's share shadowed goes back to none once the last entity is gone.
 			        addEntitySample(slot, dot(emitted, vec3(0.2126, 0.7152, 0.0722)), shadowed, entityTotal > 0.0, seen);
+			    }
+			    if (bounceCell >= 0) {
+			        addBounceSamples(bounceCell, bouncedSum, uint(samples));
 			    }
 			}
 			""";
@@ -708,35 +719,38 @@ public final class RtEmissive {
 			    }
 			    // The emitted light as the terrain lets it through, less the share entities shadow lately.
 			    vec3 emitted = slot >= 0 ? entries[slot].historyA.rgb * (1.0 - entityTerms.x) : vec3(0.0);
-			    vec3 bounced = slot >= 0 ? entries[slot].historyB.rgb : vec3(0.0);
-			    // The bounce varies slowly over a surface but is sampled noisily (where it comes from a small bright
-			    // patch, say a dark room's far side lit by a glowstone's surroundings, few rays find it): each texel
-			    // its own speckle, for seconds after it came into view, made bright by auto exposure in the dark. It
-			    // is averaged with up to BOUNCE_TAPS texels around it on the same face, out to four texels, each
-			    // weighed by the frames it holds (a texel just seen counts little).
+			    // The bounce from the bounce cells (TexelCache's bounceKey), blended between the four nearest on an
+			    // axis-aligned face (bilinear, each weighed by the frames it holds, so a cell just seen counts little),
+			    // else the one there.
+			    vec3 bounced = vec3(0.0);
 			    vec3 axisN = abs(n);
-			    if (slot >= 0 && !thinSheet && max(axisN.x, max(axisN.y, axisN.z)) >= 0.95) {
-			        float size = float(1 << level) / 16.0;
+			    if (!thinSheet && max(axisN.x, max(axisN.y, axisN.z)) >= 0.95) {
+			        float cellSize = float(1 << bounceLevel(level)) / 16.0;
 			        vec3 axis = round(n);
 			        vec3 u = abs(axis.x) > 0.5 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
 			        vec3 v = cross(axis, u);
-			        const int BOUNCE_TAPS = 12;
-			        vec2 taps[BOUNCE_TAPS] = vec2[BOUNCE_TAPS](vec2(2.0, 0.0), vec2(-2.0, 0.0), vec2(0.0, 2.0),
-			                vec2(0.0, -2.0), vec2(2.0, 2.0), vec2(2.0, -2.0), vec2(-2.0, 2.0), vec2(-2.0, -2.0),
-			                vec2(4.0, 0.0), vec2(-4.0, 0.0), vec2(0.0, 4.0), vec2(0.0, -4.0));
-			        float ownWeight = max(min(entries[slot].historyA.w, 16.0), 1.0);
-			        vec3 sum = bounced * ownWeight;
-			        float weight = ownWeight;
-			        for (int i = 0; i < BOUNCE_TAPS; i++) {
-			            vec3 at = p + (u * taps[i].x + v * taps[i].y) * size;
-			            int near = findTexel(texelKey(at, n, false, originBlock.xyz, level), false);
-			            if (near >= 0) {
-			                float w = min(entries[near].historyA.w, 16.0);
-			                sum += entries[near].historyB.rgb * w;
+			        vec2 at = vec2(dot(p, u), dot(p, v));
+			        vec2 q = at / cellSize - 0.5;
+			        vec2 low = floor(q);
+			        vec2 f = q - low;
+			        vec3 sum = vec3(0.0);
+			        float weight = 0.0;
+			        for (int i = 0; i < 4; i++) {
+			            vec2 corner = vec2(float(i & 1), float(i >> 1));
+			            vec2 centre = (low + corner + 0.5) * cellSize;
+			            vec3 point = p + u * (centre.x - at.x) + v * (centre.y - at.y);
+			            int cell = findTexel(bounceKey(point, n, false, originBlock.xyz, level), false);
+			            if (cell >= 0) {
+			                vec2 b = mix(1.0 - f, f, corner);
+			                float w = b.x * b.y * min(entries[cell].historyA.w + 0.25, 8.0);
+			                sum += entries[cell].historyB.rgb * w;
 			                weight += w;
 			            }
 			        }
-			        bounced = sum / weight;
+			        bounced = weight > 0.0 ? sum / weight : vec3(0.0);
+			    } else {
+			        int cell = findTexel(bounceKey(p, n, thinSheet, originBlock.xyz, level), false);
+			        bounced = cell >= 0 ? entries[cell].historyB.rgb : vec3(0.0);
 			    }
 			    // A texel without light of its own yet (no entry, or fewer than FILL frames: just come into view, or
 			    // nearer than before, at a finer level) shows the texel of the next coarser level over the same spot
@@ -757,7 +771,6 @@ public final class RtEmissive {
 			        if (other >= 0) {
 			            float own = held / FILL;
 			            emitted = mix(entries[other].historyA.rgb * (1.0 - entries[other].fastC.z), emitted, own);
-			            bounced = mix(entries[other].historyB.rgb, bounced, own);
 			        }
 			    }
 			    // The lights entities carry, from where they are this frame, times the share of them the texel saw

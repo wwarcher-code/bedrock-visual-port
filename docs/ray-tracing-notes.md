@@ -550,6 +550,20 @@ off and 17.8 with all of it.
   turning, 5.1 to 3.2 after 2.65 s (what's left is the stone texture). Cost: GATHER from about 0.15 ms to
   0.4 ms at 1080p. The test turns in small yaw steps with auto exposure on (no `exposure lock`).
 
+- **Bounce cells replace the neighbour average.** The 12-tap average above traded the speckle for a fixed
+  pattern (a grid and cross-hatching on the floor, a brushed look on the walls): sparse fixed taps over
+  independent noisy texels. The noise is now fixed where it starts. The bounce is gathered in cells two levels
+  coarser than the texels (`bounceKey`: a quarter of a block for level 0 texels, at most a block), entries of
+  their own fed by every pixel inside (each pixel's samples added at once, `addBounceSamples`), so a cell gets
+  about 16 times a texel's samples. GATHER blends the four nearest cells bilinearly on axis-aligned faces, each
+  weighed by the frames it holds (one cell on other surfaces). Texels still keep their own bounce for bounce
+  rays to read (one lookup in `bounceRadiance`; reading the cells there cost a second hash lookup per ray).
+  Same turn: no pattern, speckle (high-pass std) 2.1 just after turning and 2.8 after 2.65 s (4.7 and 5.1 before
+  any fix). Bounce detail finer than a quarter of a block (right into corners) is lost.
+  - Cost: whole frames 13.09 ms against 12.94 ms (60 s at the developer's spot, 1080p, uncapped). The per-stage
+    GPU timers jumped by about 1 ms partway through some runs while frame times didn't change, so compare frame
+    times (`frametimes`), not the stage timers alone.
+
 **Later, outside ray tracing:** particles (lava's smoke) drawn nearly black at night, even beside lava: they are
 vanilla-lit into the graded image and probably need what entities got (EntityPass). And take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.

@@ -116,6 +116,20 @@ final class TexelCache {
 			    return uvec2(h, texelHash(h ^ 0x85ebca6bu) | 1u);
 			}
 
+			// Bounce cells: the bounced light (B) is gathered in cells two levels coarser than the texels (a quarter
+			// of a block for level 0 texels), entries of their own, which every pixel inside feeds: some 16 times a
+			// texel's samples. Kept per texel, a bounce found by few rays (a dark room lit by one bright patch)
+			// left each texel its own speckle for seconds; averaging neighbours when shown left a fixed pattern.
+			int bounceLevel(int level) {
+			    return min(level + 2, 4);
+			}
+
+			uvec2 bounceKey(vec3 p, vec3 n, bool thinSheet, ivec3 originBlock, int level) {
+			    uvec2 key = texelKey(p, n, thinSheet, originBlock, bounceLevel(level));
+			    uint h = texelHash(key.x ^ 0x6a09e667u);
+			    return uvec2(h, texelHash(h ^ 0x85ebca6bu) | 1u);
+			}
+
 			// The entry of a texel, claiming a free one if asked; -1 if there is none.
 			int findTexel(uvec2 key, bool claim) {
 			    for (uint i = 0u; i < PROBES; i++) {
@@ -187,6 +201,16 @@ final class TexelCache {
 			        }
 			    }
 			    return false;
+			}
+
+			// A pixel's bounce samples added at once (count of them): a bounce cell takes a hundred pixels' samples
+			// a frame, and adding each apart crowded its atomics.
+			void addBounceSamples(int slot, vec3 sum, uint count) {
+			    uvec3 fixedB = uvec3(clamp(sum, vec3(0.0), vec3(MAX_SAMPLE * float(count))) * FIXED_POINT + 0.5);
+			    atomicAdd(entries[slot].sumB.x, fixedB.x);
+			    atomicAdd(entries[slot].sumB.y, fixedB.y);
+			    atomicAdd(entries[slot].sumB.z, fixedB.z);
+			    atomicAdd(entries[slot].count, count);
 			}
 
 			void addSample(int slot, vec3 a, vec3 b) {
