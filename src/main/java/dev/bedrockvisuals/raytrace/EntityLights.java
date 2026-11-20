@@ -146,21 +146,21 @@ public final class EntityLights {
 			case ExperienceOrb orb -> light(at.x, centreY, at.z, 0.1f, 6, new float[] {0.7f, 1.0f, 0.35f});
 			// Glowing eyes (the eyes layers' textures): a little light, at the eyes. Before LivingEntity, so these
 			// mobs' hands aren't looked at (none of them holds a light).
-			case Spider spider -> eyes(spider, partial, 3, "spider/spider_eyes");
-			case Enderman enderman -> eyes(enderman, partial, 3, "enderman/enderman_eyes");
-			case Phantom phantom -> eyes(phantom, partial, 3, "phantom/phantom_eyes");
+			case Spider spider -> eyes(spider, partial, 1, "spider/spider_eyes");
+			case Enderman enderman -> eyes(enderman, partial, 1, "enderman/enderman_eyes");
+			case Phantom phantom -> eyes(phantom, partial, 1, "phantom/phantom_eyes");
 			case EnderDragon dragon -> {
 				Vec3 head = dragon.head.getPosition(partial);
-				light(head.x, head.y + dragon.head.getBbHeight() * 0.5, head.z, 0.3f, 10,
+				light(head.x, head.y + dragon.head.getBbHeight() * 0.5, head.z, 0.3f, 8,
 						eyeColor("enderdragon/dragon_eyes", new float[] {0.8f, 0.3f, 1.0f}));
 			}
-			case Breeze breeze -> eyes(breeze, partial, 4, "breeze/breeze_eyes");
+			case Breeze breeze -> eyes(breeze, partial, 2, "breeze/breeze_eyes");
 			case Creaking creaking -> {
 				if (creaking.hasGlowingEyes()) {
-					eyes(creaking, partial, 4, "creaking/creaking_eyes");
+					eyes(creaking, partial, 2, "creaking/creaking_eyes");
 				}
 			}
-			case CopperGolem golem -> eyes(golem, partial, 2, "copper_golem/copper_golem_eyes");
+			case CopperGolem golem -> eyes(golem, partial, 0, "copper_golem/copper_golem_eyes");
 			case ItemEntity item -> held(item.getItem(), at.x, at.y + 0.25, at.z, 0.15f);
 			case FallingBlockEntity falling -> {
 				int level = falling.getBlockState().getLightEmission();
@@ -307,6 +307,9 @@ public final class EntityLights {
 	}
 
 	private static void light(double x, double y, double z, float radius, int level, float[] color) {
+		if (level <= 0) {
+			return; // e.g. a copper golem's eyes, set to level 0
+		}
 		FOUND.add(new Light(x, y, z, radius, level / 15f, color));
 	}
 
