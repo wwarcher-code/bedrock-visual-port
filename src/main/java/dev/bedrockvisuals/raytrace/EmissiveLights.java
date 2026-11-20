@@ -43,6 +43,8 @@ public final class EmissiveLights {
 	/** Below this estimated irradiance (power / distance squared) a light no longer counts. */
 	private static final float CUTOFF = 0.004f;
 	private static final float MAX_REACH = 32;
+	/** How far the shaders' jittered cell lookup can land from the point: half a cell's diagonal. */
+	private static final float LOOKUP_JITTER = CELL * 0.5f * (float) Math.sqrt(3);
 	private static final int MAX_LIGHTS = 1 << 16;
 	/** Mean emissive below this (a stray texel) doesn't make a quad a light. */
 	private static final float MIN_EMISSIVE = 0.002f;
@@ -249,10 +251,10 @@ public final class EmissiveLights {
 		float[][] all = {new float[FLOATS * 256]};
 		int[] count = {0};
 		SectionGeometry.forEachBuilt(section -> {
-			if (section.lightCount() == 0 || section.originX() + 16 + MAX_REACH < minX
-					|| section.originX() - MAX_REACH > maxX || section.originY() + 16 + MAX_REACH < minY
-					|| section.originY() - MAX_REACH > maxY || section.originZ() + 16 + MAX_REACH < minZ
-					|| section.originZ() - MAX_REACH > maxZ) {
+			float pad = MAX_REACH + LOOKUP_JITTER;
+			if (section.lightCount() == 0 || section.originX() + 16 + pad < minX || section.originX() - pad > maxX
+					|| section.originY() + 16 + pad < minY || section.originY() - pad > maxY
+					|| section.originZ() + 16 + pad < minZ || section.originZ() - pad > maxZ) {
 				return;
 			}
 			float[] lights = section.lights();
@@ -282,7 +284,10 @@ public final class EmissiveLights {
 			float cy = lights[o + 1] + (lights[o + 5] + lights[o + 9]) * 0.5f;
 			float cz = lights[o + 2] + (lights[o + 6] + lights[o + 10]) * 0.5f;
 			float power = lights[o + 3];
-			float reach = lights[o + 7];
+			// Listed out to its reach plus the jitter of the shaders' cell lookup (up to half a cell on each axis),
+			// so every point the light reaches finds it whichever cell it looks in (the shaders fade it to nothing
+			// at its reach).
+			float reach = lights[o + 7] + LOOKUP_JITTER;
 			int x0 = Math.max((int) Math.floor((cx - reach) / CELL), 0);
 			int x1 = Math.min((int) Math.floor((cx + reach) / CELL), CELLS_X - 1);
 			int y0 = Math.max((int) Math.floor((cy - reach) / CELL), 0);

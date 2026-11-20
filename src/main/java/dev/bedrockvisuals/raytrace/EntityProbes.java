@@ -99,7 +99,8 @@ public final class EntityProbes {
 			    }
 			    vec3 toPoint = x - g;
 			    float d = length(toPoint);
-			    if (d < 0.05) {
+			    float window = reachWindow(d, light.e1.w);
+			    if (d < 0.05 || window <= 0.0) {
 			        return vec3(0.0);
 			    }
 			    direction = toPoint / d;
@@ -110,7 +111,7 @@ public final class EntityProbes {
 			    if (dot(through, vec3(1.0)) <= 0.0) {
 			        return vec3(0.0);
 			    }
-			    vec3 glow = pow(texel.rgb, vec3(2.2)) * emissive * 2.0 * through;
+			    vec3 glow = pow(texel.rgb, vec3(2.2)) * emissive * 2.0 * through * window;
 			    return glow * cosLight * area / max(d * d, 1.0 / 64.0) / probability * switches.w / PI;
 			}
 
@@ -148,7 +149,8 @@ public final class EntityProbes {
 			        for (uint i = 0u; i < count; i++) {
 			            vec4 entry = cells[base + 1u + i];
 			            vec3 toLight = entry.xyz - g;
-			            total += entry.w / max(dot(toLight, toLight), 0.25);
+			            float d2 = max(dot(toLight, toLight), 0.25);
+			            total += entry.w / d2 * reachWindow(sqrt(d2), reachOf(entry.w));
 			            cumulative[i] = total;
 			        }
 			        sequencePixel = uint(index) + 0x51ed27u;

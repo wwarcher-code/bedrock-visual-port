@@ -94,6 +94,20 @@ public final class RtEmissive {
 			const float CELL = 4.0;
 			const float ALPHA_CUTOFF[4] = float[4](0.0, 0.1, 0.5, 1.0);
 			const float PI = 3.14159265;
+			// EmissiveLights' CUTOFF and MAX_REACH: a light's reach from its power.
+			const float LIGHT_CUTOFF = 0.004;
+			const float LIGHT_MAX_REACH = 32.0;
+			float reachOf(float power) {
+			    return min(sqrt(power / LIGHT_CUTOFF), LIGHT_MAX_REACH);
+			}
+			// A light fades smoothly to nothing at its reach, (1 - (d / reach)^4)^2: its light used to stop there,
+			// and where the jittered cell lookup only sometimes listed it, the edge was a big spotted patch
+			// (bright under auto exposure in a dark room).
+			float reachWindow(float d, float reach) {
+			    float r = d / max(reach, 0.001);
+			    float f = clamp(1.0 - r * r * r * r, 0.0, 1.0);
+			    return f * f;
+			}
 
 			vec2 sodiumUv(Words words, uint vertex) {
 			    uint packed = words.w[vertex * 5u + 3u];
@@ -369,7 +383,8 @@ public final class RtEmissive {
 			    }
 			    vec3 toPoint = x - g;
 			    float d = length(toPoint);
-			    if (d < 0.05) {
+			    float window = reachWindow(d, light.e1.w);
+			    if (d < 0.05 || window <= 0.0) {
 			        return vec3(0.0);
 			    }
 			    vec3 direction = toPoint / d;
@@ -392,8 +407,8 @@ public final class RtEmissive {
 			    }
 			    shadowed = entitiesNear && occludedBy(p + nRay * 0.01, direction, tMax, 0x02u);
 			    vec3 glow = pow(texel.rgb, vec3(2.2)) * emissive * 2.0;
-			    return glow * through * cosReceiver * cosLight * area / max(d * d, 1.0 / 64.0) / probability * switches.w
-			            / PI;
+			    return glow * through * window * cosReceiver * cosLight * area / max(d * d, 1.0 / 64.0) / probability
+			            * switches.w / PI;
 			}
 
 			// Shadow samples for the share of the emitted light entities stop at p, traced by every pixel of a texel
@@ -550,7 +565,7 @@ public final class RtEmissive {
 			        float d2 = max(dot(toLight, toLight), 0.25);
 			        float facing = dot(n, toLight) * inversesqrt(d2);
 			        facing = thinSheet ? abs(facing) : facing;
-			        float w = entry.w * clamp(facing * 0.8 + 0.2, 0.0, 1.0) / d2;
+			        float w = entry.w * clamp(facing * 0.8 + 0.2, 0.0, 1.0) / d2 * reachWindow(sqrt(d2), reachOf(entry.w));
 			        total += w;
 			        weights[i] = total; // running total, for emissiveSample's pick
 			    }

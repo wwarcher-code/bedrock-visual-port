@@ -526,6 +526,20 @@ off and 17.8 with all of it.
   graphics API to Default, which picks OpenGL: no ray tracing, and the ray-traced settings can't be turned on.
   Set `preferredGraphicsBackend:"vulkan"` in `run\options.txt` (or Video Settings) to get it back.
 
+- **Lights end smoothly at their reach (the "big spotted area").** A glowstone placed in one corner of the dark
+  test room lit the opposite corner, 26 blocks away, in big shifting blotches, worst when walking toward or away
+  from it. Its faces reach 18.7 blocks (reach = sqrt(power / 0.004)); its light stopped there abruptly, and the
+  light grid listed it only in cells whose nearest point was within reach. The shaders look up a cell up to half a
+  cell away at random, so near the edge some samples saw the light and some didn't: blotches that reshuffled as
+  texels changed level while walking, made bright by auto exposure in the dark. Now:
+  - each light fades as (1 - (d / reach)^4)^2 (`reachWindow`), for its samples and its pick weights, in the
+    texels' trace and the entity probes: 12% less at half its reach, half at three quarters, none at the reach;
+  - cells list a light out to its reach plus half a cell's diagonal (3.5 blocks), so every point it reaches finds
+    it whichever cell it looks in.
+  Checked walking toward that corner with TAA on: the blotches and the hard dark band in the corner are gone, and
+  that end of the room is now dark, as the glowstone no longer reaches it. Light near lights is slightly lower
+  than before (the fade); the torch calibration (EntityLights.INTENSITY) wasn't redone.
+
 **Later, outside ray tracing:** particles (lava's smoke) drawn nearly black at night, even beside lava: they are
 vanilla-lit into the graded image and probably need what entities got (EntityPass). And take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.
