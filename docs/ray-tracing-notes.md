@@ -540,6 +540,16 @@ off and 17.8 with all of it.
   that end of the room is now dark, as the glowstone no longer reaches it. Light near lights is slightly lower
   than before (the fade); the torch calibration (EntityLights.INTENSITY) wasn't redone.
 
+- **Bounce speckle on turning into the dark.** Turning from a glowstone to the dark far side of the test room,
+  the walls sparkled texel by texel (the developer's screenshot), still visibly 2.65 s later. There the bounce is
+  the only light, and it comes mostly from the bright patch around the glowstone, which few bounce rays find.
+  Each texel's average stayed noisy, worst for texels just come into view, and auto exposure brightened it in the
+  dark. With bounce off it was clean. Now GATHER averages a texel's bounce with up to 12 texels around it on the
+  same face (2 texels out, the diagonals, and 4 out), each weighed by the frames it holds (up to 16), so a texel
+  just seen counts little. Same turn, TAA on: speckle (high-pass std over the walls) 4.7 to 2.5 levels just after
+  turning, 5.1 to 3.2 after 2.65 s (what's left is the stone texture). Cost: GATHER from about 0.15 ms to
+  0.4 ms at 1080p. The test turns in small yaw steps with auto exposure on (no `exposure lock`).
+
 **Later, outside ray tracing:** particles (lava's smoke) drawn nearly black at night, even beside lava: they are
 vanilla-lit into the graded image and probably need what entities got (EntityPass). And take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.

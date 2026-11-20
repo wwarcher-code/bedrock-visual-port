@@ -709,6 +709,35 @@ public final class RtEmissive {
 			    // The emitted light as the terrain lets it through, less the share entities shadow lately.
 			    vec3 emitted = slot >= 0 ? entries[slot].historyA.rgb * (1.0 - entityTerms.x) : vec3(0.0);
 			    vec3 bounced = slot >= 0 ? entries[slot].historyB.rgb : vec3(0.0);
+			    // The bounce varies slowly over a surface but is sampled noisily (where it comes from a small bright
+			    // patch, say a dark room's far side lit by a glowstone's surroundings, few rays find it): each texel
+			    // its own speckle, for seconds after it came into view, made bright by auto exposure in the dark. It
+			    // is averaged with up to BOUNCE_TAPS texels around it on the same face, out to four texels, each
+			    // weighed by the frames it holds (a texel just seen counts little).
+			    vec3 axisN = abs(n);
+			    if (slot >= 0 && !thinSheet && max(axisN.x, max(axisN.y, axisN.z)) >= 0.95) {
+			        float size = float(1 << level) / 16.0;
+			        vec3 axis = round(n);
+			        vec3 u = abs(axis.x) > 0.5 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+			        vec3 v = cross(axis, u);
+			        const int BOUNCE_TAPS = 12;
+			        vec2 taps[BOUNCE_TAPS] = vec2[BOUNCE_TAPS](vec2(2.0, 0.0), vec2(-2.0, 0.0), vec2(0.0, 2.0),
+			                vec2(0.0, -2.0), vec2(2.0, 2.0), vec2(2.0, -2.0), vec2(-2.0, 2.0), vec2(-2.0, -2.0),
+			                vec2(4.0, 0.0), vec2(-4.0, 0.0), vec2(0.0, 4.0), vec2(0.0, -4.0));
+			        float ownWeight = max(min(entries[slot].historyA.w, 16.0), 1.0);
+			        vec3 sum = bounced * ownWeight;
+			        float weight = ownWeight;
+			        for (int i = 0; i < BOUNCE_TAPS; i++) {
+			            vec3 at = p + (u * taps[i].x + v * taps[i].y) * size;
+			            int near = findTexel(texelKey(at, n, false, originBlock.xyz, level), false);
+			            if (near >= 0) {
+			                float w = min(entries[near].historyA.w, 16.0);
+			                sum += entries[near].historyB.rgb * w;
+			                weight += w;
+			            }
+			        }
+			        bounced = sum / weight;
+			    }
 			    // A texel without light of its own yet (no entry, or fewer than FILL frames: just come into view, or
 			    // nearer than before, at a finer level) shows the texel of the next coarser level over the same spot
 			    // that has some (the one it was seen as from farther away, kept a while), and fades to its own over
