@@ -508,6 +508,24 @@ off and 17.8 with all of it.
   person) crashed. `GlCommandEncoderMixin` sets the active unit back to 0 after each draw's bindings when it
   is past 11. It crashed on every start in "New World (1)" with an empty hand selected; it no longer does.
 
+- **Entity shadows under block lights: the static, fixed properly.** The two-average change above wasn't
+  enough. A player idling in F5 moves its shadow a little every frame, so the share ran on the noisy fast average
+  most of the time. In the developer's room (six lights, white concrete), pixels in the player's shadow that
+  varied by more than 2 levels across 6 frames 0.05 s apart: 19% with TAA off, 10% with it on. The cause is too
+  few samples. A texel got about 16 light samples a frame, each picking one light, and only those gave the
+  shadowed share. Now, in texels where an entity shadow is about (share above 2%), up to 64 of the texel's pixels
+  each trace 4 shadow samples of their own (`shadowSamples`: lights picked by their unshadowed weight,
+  stratified, terrain then entity ray), counted in `sumA.w` / `sumB.w`. That is about 250 a frame for a texel
+  near the camera, and the share comes from those. Result: 1.5% with TAA off, 4% with TAA on (what's left is
+  mostly the player's own edges and a torch flame).
+  - Cost: the trace stage went from 1.90 ms to 1.96 ms at 1080p in that room. A first version passed the cell's
+    96 weights to the new function as an array argument and cost 1.5 ms more; the weights are now a global.
+  - Tried first and dropped: tracing the share per pixel in GATHER (8 samples a pixel), which gave black
+    speckle that TAA couldn't hide.
+- **Don't stop the game during startup.** Minecraft then marks the startup unclean and resets the preferred
+  graphics API to Default, which picks OpenGL: no ray tracing, and the ray-traced settings can't be turned on.
+  Set `preferredGraphicsBackend:"vulkan"` in `run\options.txt` (or Video Settings) to get it back.
+
 **Later, outside ray tracing:** particles (lava's smoke) drawn nearly black at night, even beside lava: they are
 vanilla-lit into the graded image and probably need what entities got (EntityPass). And take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.

@@ -396,6 +396,60 @@ public final class RtEmissive {
 			            / PI;
 			}
 
+			// Shadow samples for the share of the emitted light entities stop at p, traced by every pixel of a texel
+			// where an entity shadow is about (TexelCache's sumA.w, sumB.w): SHADOW_SAMPLES of the cell's lights,
+			// picked by how much each gives the point unshadowed (stratified, the cell's running totals as for
+			// emissiveSample), a random point of each. x: how many
+			// the terrain let through; y: how many of those an entity stopped.
+			const uint SHADOW_SAMPLES = 4u;
+			const float SHADOW_PIXELS = 64.0;
+			// The cell's lights' running totals of weight (main's), read in place: an array argument cost the whole
+			// stage 1.5 ms (copied, or held in registers, for every pixel).
+			float weights[PER_CELL];
+			uvec2 shadowSamples(vec3 p, vec3 g, vec3 n, bool thinSheet, uint count, uint indexBase, float total) {
+			    if (total <= 0.0) {
+			        return uvec2(0u);
+			    }
+			    uvec2 counts = uvec2(0u);
+			    float offset = random();
+			    for (uint k = 0u; k < SHADOW_SAMPLES; k++) {
+			        float pick = (float(k) + offset) / float(SHADOW_SAMPLES) * total;
+			        uint low = 0u;
+			        uint high = count - 1u;
+			        while (low < high) {
+			            uint middle = (low + high) / 2u;
+			            if (weights[middle] < pick) {
+			                low = middle + 1u;
+			            } else {
+			                high = middle;
+			            }
+			        }
+			        Light light = lights[cellWords[indexBase + low] & 0x7FFFFFFFu];
+			        vec3 x = light.p0.xyz + light.e1.xyz * random() + light.e2.xyz * random();
+			        vec3 toPoint = x - g;
+			        float d = length(toPoint);
+			        if (d < 0.05) {
+			            continue;
+			        }
+			        vec3 direction = toPoint / d;
+			        float cosReceiver = dot(n, direction);
+			        vec3 nRay = thinSheet && cosReceiver < 0.0 ? -n : n;
+			        if (cosReceiver <= 0.0 && !thinSheet) {
+			            continue;
+			        }
+			        vec3 origin = p + nRay * 0.01;
+			        float tMax = max(d - 0.03, 0.002);
+			        if (occludedBy(origin, direction, tMax, 0x01u)) {
+			            continue;
+			        }
+			        counts.x++;
+			        if (occludedBy(origin, direction, tMax, 0x02u)) {
+			            counts.y++;
+			        }
+			    }
+			    return counts;
+			}
+
 			// One sample of the light bounced to point p (normal n): a cosine-weighted ray, and the light the surface
 			// it meets sends back (in the cache's units: with a cosine-weighted pdf, the radiance itself).
 			vec3 bounceSample(vec3 p, vec3 n, bool thinSheet, vec3 u) {
@@ -450,6 +504,10 @@ public final class RtEmissive {
 			    // for its first frames, so its light is right and clean at once: 12, then 6, 4, 3 and 2.
 			    bool fresh = changeCount.x > 0 && changedNear(block);
 			    float held = fresh ? 0.0 : entries[slot].historyA.w;
+			    // Where an entity shadow is about (the texel's shares say so), every pixel adds shadow samples, the
+			    // thinned ones too (shadowSamples).
+			    bool shadowAbout = entityCount.y != 0 && max(entries[slot].fastC.x, entries[slot].fastC.z) > 0.02;
+			    bool thinned = false;
 			    // A texel near the camera covers many pixels, each of which traced its own samples into it: some 140
 			    // at four blocks at 1080p. Each pixel now traces with the chance that gives its texel about
 			    // TEXEL_SAMPLES a frame (all of them for texels a few pixels wide, and while a texel is new). Not in
@@ -460,11 +518,14 @@ public final class RtEmissive {
 			        float side = camera.w * float(1 << level) / 16.0 / distance;
 			        float pixels = side * side * max(abs(dot(n, toCamera / distance)), 0.2);
 			        uint h = texelHash((pixel.y * size.x + pixel.x) ^ texelHash(size.z + 0x2545f491u));
-			        if (float(h) / 4294967296.0 * pixels > TEXEL_SAMPLES) {
+			        float chance = float(h) / 4294967296.0 * pixels;
+			        thinned = chance > TEXEL_SAMPLES;
+			        // Shadow samples: from about SHADOW_PIXELS of the texel's pixels (some 250 samples a frame).
+			        shadowAbout = shadowAbout && chance <= SHADOW_PIXELS;
+			        if (thinned && !shadowAbout) {
 			            return;
 			        }
 			    }
-			    placeTexel(slot, block, level);
 			    int samples = max(int(grid.w), 1);
 			    if (held < 5.0) {
 			        samples = max(samples, int(12.0 / (held + 1.0)));
@@ -482,7 +543,6 @@ public final class RtEmissive {
 			    uint tile = texelHash(gl_WorkGroupID.y * 4096u + gl_WorkGroupID.x ^ texelHash(size.z * 0x9e3779b9u));
 			    vec3 cellJitter = (vec3(tile & 0x3FFu, (tile >> 10u) & 0x3FFu, (tile >> 20u) & 0x3FFu) / 1024.0 - 0.5) * CELL;
 			    uint count = switches.x > 0.5 && gridCell(g + cellJitter, base, indexBase) ? floatBitsToUint(cells[base].x) : 0u;
-			    float weights[PER_CELL];
 			    float total = 0.0;
 			    for (uint i = 0u; i < count; i++) {
 			        vec4 entry = cells[base + 1u + i];
@@ -494,6 +554,17 @@ public final class RtEmissive {
 			        total += w;
 			        weights[i] = total; // running total, for emissiveSample's pick
 			    }
+			    if (shadowAbout) {
+			        uvec2 counts = shadowSamples(p, g, n, thinSheet, count, indexBase, total);
+			        if (counts.x > 0u) {
+			            atomicAdd(entries[slot].sumB.w, counts.x);
+			            atomicAdd(entries[slot].sumA.w, counts.y);
+			        }
+			    }
+			    if (thinned) {
+			        return;
+			    }
+			    placeTexel(slot, block, level);
 			    entitiesNear = entityCount.y != 0;
 			    // The lights entities carry: how much each gives the point, unshadowed. Their light itself is worked out
 			    // again every frame where it is shown (GATHER); here only whether they are seen is sampled, a light

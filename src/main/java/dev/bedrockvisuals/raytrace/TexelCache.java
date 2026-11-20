@@ -20,8 +20,9 @@ import static org.lwjgl.vulkan.VK12.*;
  *   uint lastFrame  the frame its samples last arrived (entries left unseen for EVICT frames are freed)
  *   uint count      this frame's samples so far
  *   uint wiped      the frame its history was last wiped by a change near it
- *   uvec4 sumA      this frame's samples of A, rgb in 1/1024 fixed point (atomic adds)
- *   uvec4 sumB      of B
+ *   uvec4 sumA      this frame's samples of A, rgb in 1/1024 fixed point (atomic adds); w: of this frame's
+ *                   shadow samples that reached the terrain's light, how many an entity stopped
+ *   uvec4 sumB      of B; w: how many shadow samples reached the terrain's light
  *   uvec4 sumC      this frame's entity samples (fixed point): x the emitted light entities stood in front of,
  *                   y all the emitted light the terrain let through; z how many shadow rays reached the lights
  *                   entities carry (EntityLights), w how many were traced
@@ -283,8 +284,14 @@ final class TexelCache {
 			        // a few frames but is too noisy to show (blotches of texels, TV static, worst under several
 			        // lights); the slow one (z, w frames held) is shown. Where the fast one strays further from it
 			        // than its noise, the shadow moved: the slow one takes the fast one's value and a short history.
-			        if (sumC.y > 0u) {
-			            float share = float(sumC.x) / float(sumC.y);
+			        // Where an entity shadow is about, every pixel of the texel traces shadow samples of its own
+			        // (RtEmissive's shadowSamples: sumB.w reached the terrain's light, sumA.w of those an entity
+			        // stopped), hundreds a frame for a texel near the camera: the share from those, else from the
+			        // light samples' (a few a frame, too noisy alone: it flickered like static).
+			        uint shadowSeen = entries[slot].sumB.w;
+			        if (shadowSeen > 0u || sumC.y > 0u) {
+			            float share = shadowSeen > 0u ? float(entries[slot].sumA.w) / float(shadowSeen)
+			                    : float(sumC.x) / float(sumC.y);
 			            fastC.x = mix(fastC.x, share, ENTITY_SHADOW_WEIGHT);
 			            float held = min(fastC.w + 1.0, ENTITY_SHADOW_FRAMES);
 			            fastC.z = mix(fastC.z, share, 1.0 / held);
