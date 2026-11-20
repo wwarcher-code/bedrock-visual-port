@@ -685,5 +685,15 @@ off and 17.8 with all of it.
   motion-blurred by the sub-frames. With an audio codec set, the image muxer wrote the audio packets as .png files
   among the frames. The developer's own replays are still to be exported.
 
+- **The haze's traced light, precomputed (10 ms a frame).** A final check of the day's work found whole frames at
+  24.5 ms against 12.9 ms (the developer's spot, 1080p, uncapped; the ray-traced passes themselves unchanged).
+  The fog volume's every step averaged eight probes' twelve faces (96 reads). The probe pass now writes each
+  probe's light from every direction as a thirteenth texel (the atlas 13 texels a probe), read once a probe:
+  15.0 ms. The day's additions together (glossy highlights, carried light's shadows and bounce, the haze, the
+  particles, the far terrain) cost about 2 ms a frame. Same checks after it: the shadow flicker in the
+  developer's spot 4.5% (TAA off) and 5.3% (on) of pixels, the turn's speckle 2.4 and 3.0, the carried-light test
+  unchanged. (With the room full of mobs spawned in the dark, the first run read 17% and 25 ms: the test now
+  clears them and turns mob spawning off in the test world.)
+
 **Later, outside ray tracing:** take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.

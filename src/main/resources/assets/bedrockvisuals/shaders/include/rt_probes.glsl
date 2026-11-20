@@ -14,11 +14,12 @@ layout(std140) uniform RtEntityData {
     vec4 RtCarried[64];  // per light: position relative to the camera and radius; colour x strength, reach
 };
 const ivec3 RT_PROBES = ivec3(48, 24, 48); // EntityProbes.X, Y, Z
+const int RT_PROBE_TEXELS = 13;             // a probe's texels: twelve faces, then the light from every direction
 
 // One probe's light on a surface facing n (its ambient cube at face 0 or 6), or alpha 0 for a probe inside a
 // solid block.
 vec4 rtProbe(ivec3 cell, vec3 n, int face) {
-    ivec2 at = ivec2(cell.x * 12 + face, cell.z + cell.y * RT_PROBES.z);
+    ivec2 at = ivec2(cell.x * RT_PROBE_TEXELS + face, cell.z + cell.y * RT_PROBES.z);
     vec4 x = texelFetch(RtProbeMap, at + ivec2(n.x >= 0.0 ? 0 : 1, 0), 0);
     vec4 y = texelFetch(RtProbeMap, at + ivec2(n.y >= 0.0 ? 2 : 3, 0), 0);
     vec4 z = texelFetch(RtProbeMap, at + ivec2(n.z >= 0.0 ? 4 : 5, 0), 0);
@@ -59,24 +60,17 @@ vec3 rtProbesAverage(vec3 p) {
     if (any(lessThan(base, ivec3(0))) || any(greaterThanEqual(base + 1, RT_PROBES))) {
         return vec3(-1.0);
     }
-    bool bounced = RtEntityParams.w > 0.5;
+    // Each probe's thirteenth texel holds it (EntityProbes): one read a probe.
     vec3 f = q - vec3(base);
     vec3 sum = vec3(0.0);
     float weight = 0.0;
     for (int i = 0; i < 8; i++) {
         ivec3 corner = ivec3(i & 1, (i >> 1) & 1, (i >> 2) & 1);
         ivec3 cell = base + corner;
-        ivec2 at = ivec2(cell.x * 12, cell.z + cell.y * RT_PROBES.z);
+        vec4 around = texelFetch(RtProbeMap, ivec2(cell.x * RT_PROBE_TEXELS + 12, cell.z + cell.y * RT_PROBES.z), 0);
         vec3 w3 = mix(1.0 - f, f, vec3(corner));
-        float w = w3.x * w3.y * w3.z * texelFetch(RtProbeMap, at, 0).a;
-        vec3 light = vec3(0.0);
-        for (int face = 0; face < 6; face++) {
-            light += texelFetch(RtProbeMap, at + ivec2(face, 0), 0).rgb;
-            if (bounced) {
-                light += texelFetch(RtProbeMap, at + ivec2(6 + face, 0), 0).rgb;
-            }
-        }
-        sum += light / 6.0 * w;
+        float w = w3.x * w3.y * w3.z * around.a;
+        sum += around.rgb * w;
         weight += w;
     }
     return weight > 1e-3 ? sum / weight : vec3(0.0);

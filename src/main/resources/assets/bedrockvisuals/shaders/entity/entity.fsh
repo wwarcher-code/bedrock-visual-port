@@ -49,7 +49,7 @@ float rtCarriedSeen(vec3 p, vec3 n, int i) {
     for (int c = 0; c < 8; c++) {
         ivec3 corner = ivec3(c & 1, (c >> 1) & 1, (c >> 2) & 1);
         ivec3 cell = base + corner;
-        ivec2 at = ivec2(cell.x * 12, cell.z + cell.y * RT_PROBES.z);
+        ivec2 at = ivec2(cell.x * RT_PROBE_TEXELS, cell.z + cell.y * RT_PROBES.z);
         vec3 w3 = mix(1.0 - f, f, vec3(corner));
         float w = w3.x * w3.y * w3.z * texelFetch(RtProbeMap, at, 0).a;
         sum += texelFetch(RtProbeMap, at + ivec2(face, 0), 0).a * w;

@@ -27,7 +27,7 @@ import java.util.List;
  * second ambient cube: entities in a sunlit room get the light its floor and walls send back, as the terrain does.
  *
  * <p>The output is an atlas of {@link #ATLAS_WIDTH} x {@link #ATLAS_HEIGHT} texels (RGBA16F): the probe at grid
- * cell (x, y, z) at texel (x * 12 + face, z + y * Z), faces +x, -x, +y, -y, +z, -z of the emitted light, then the
+ * cell (x, y, z) at texel (x * 13 + face, z + y * Z), faces +x, -x, +y, -y, +z, -z of the emitted light, then the
  * same six of the bounced light; alpha 1 for a probe in the open, 0 inside a solid block. Entities sample it by their position relative to {@link #cornerX} and so on;
  * the lights entities carry they add themselves (unshadowed), from EntityLights' list.
  */
@@ -38,7 +38,8 @@ public final class EntityProbes {
 	static final int COUNT = X * Y * Z;
 	static final int PROBE_SIZE = 16 + 12 * 16;
 	static final long BYTES = (long) COUNT * PROBE_SIZE;
-	static final int ATLAS_WIDTH = X * 12;
+	/** Texels a probe: its twelve faces, then the light from every direction (for the air and water's haze). */
+	static final int ATLAS_WIDTH = X * 13;
 	static final int ATLAS_HEIGHT = Y * Z;
 
 	private static final String SOURCE = """
@@ -129,7 +130,7 @@ public final class EntityProbes {
 			    ivec3 world = originBlock.xyz - GRID / 2 + local;
 			    ivec3 wrapped = world - GRID * ivec3(floor(vec3(world) / vec3(GRID)));
 			    uint slot = uint((wrapped.z * GRID.y + wrapped.y) * GRID.x + wrapped.x);
-			    uint out0 = uint((local.z + local.y * GRID.z) * GRID.x * 12 + local.x * 12);
+			    uint out0 = uint((local.z + local.y * GRID.z) * GRID.x * 13 + local.x * 13);
 
 			    Probe probe = probes[slot];
 			    if (probe.cell.xyz != world || probe.cell.w == 0 || (changeCount.x > 0 && changedNear(world))) {
@@ -244,6 +245,15 @@ public final class EntityProbes {
 			        float alpha = flag ? (solid ? 0.0 : 1.0) : (probe.cell.w == 0 ? 1.0 : probe.face[i].w);
 			        pixels[out0 + uint(i)] = uvec2(packHalf2x16(light.rg), packHalf2x16(vec2(light.b, alpha)));
 			    }
+			    // The thirteenth: the mean of the six faces, emitted and (when on) bounced, for the light the air and
+			    // water scatter (rt_probes.glsl's rtProbesAverage): read there by every step of the fog, the 96 reads
+			    // it took from the faces cost 10 ms a frame. Alpha: in the open.
+			    vec3 around = vec3(0.0);
+			    for (int i = 0; i < 6; i++) {
+			        around += probe.face[i].rgb + (switches.y > 0.5 ? probe.face[6 + i].rgb : vec3(0.0));
+			    }
+			    around = solid ? vec3(0.0) : around / 6.0;
+			    pixels[out0 + 12u] = uvec2(packHalf2x16(around.rg), packHalf2x16(vec2(around.b, solid ? 0.0 : 1.0)));
 			}
 			""".replace("PROBES_X", Integer.toString(X)).replace("PROBES_Y", Integer.toString(Y))
 			.replace("PROBES_Z", Integer.toString(Z));
