@@ -30,7 +30,8 @@ import static org.lwjgl.vulkan.VK12.*;
  *   vec4 fastA      the fast average of A (rgb), over the last FAST frames, and how many it holds (w)
  *   vec4 fastB      the fast average of B (rgb)
  *   vec4 fastC      over the last couple of frames: x the share of A that entities shadow, y the share of the
- *                   entities' lights the texel sees (plus one; 0 before any was measured)
+ *                   entities' lights the texel sees (plus one; 0 before any was measured); z the slow average
+ *                   of x's share, shown, and how many frames it holds (w)
  *   ivec4 position  the texel's world block (xyz) and level (w), for wiping it when the world changes near it
  * </pre>
  * The slow average hides the noise; the fast one notices changes the world doesn't report (see blendTexel). When
@@ -234,6 +235,10 @@ final class TexelCache {
 			// three or four.
 			const float ENTITY_WEIGHT = 0.5;
 			const float ENTITY_SHADOW_WEIGHT = 0.3;
+			// The slow shadowed share's frames held at most, and how far the fast one may stray from it before the
+			// shadow counts as moved (TUNE).
+			const float ENTITY_SHADOW_FRAMES = 24.0;
+			const float ENTITY_SHADOW_MOVED = 0.1;
 			const uint WIPED_FRAMES = 24u;
 			const float WIPED_HISTORY = 8.0;
 			void blendTexel(uint slot, uint frame, float cap) {
@@ -274,7 +279,21 @@ final class TexelCache {
 			        // shadow, and the share of the lights they carry seen (kept plus one: 0 is never measured).
 			        uvec4 sumC = entries[slot].sumC;
 			        vec4 fastC = entries[slot].fastC;
-			        fastC.x = sumC.y > 0u ? mix(fastC.x, float(sumC.x) / float(sumC.y), ENTITY_SHADOW_WEIGHT) : fastC.x;
+			        // The shadowed share has two averages, as A does: the fast one (x) follows a moving shadow within
+			        // a few frames but is too noisy to show (blotches of texels, TV static, worst under several
+			        // lights); the slow one (z, w frames held) is shown. Where the fast one strays further from it
+			        // than its noise, the shadow moved: the slow one takes the fast one's value and a short history.
+			        if (sumC.y > 0u) {
+			            float share = float(sumC.x) / float(sumC.y);
+			            fastC.x = mix(fastC.x, share, ENTITY_SHADOW_WEIGHT);
+			            float held = min(fastC.w + 1.0, ENTITY_SHADOW_FRAMES);
+			            fastC.z = mix(fastC.z, share, 1.0 / held);
+			            fastC.w = held;
+			            if (abs(fastC.x - fastC.z) > ENTITY_SHADOW_MOVED) {
+			                fastC.z = fastC.x;
+			                fastC.w = 1.0 / ENTITY_SHADOW_WEIGHT;
+			            }
+			        }
 			        if (sumC.w > 0u) {
 			            float seen = float(sumC.z) / float(sumC.w);
 			            fastC.y = fastC.y > 0.0 ? mix(fastC.y - 1.0, seen, ENTITY_WEIGHT) + 1.0 : seen + 1.0;

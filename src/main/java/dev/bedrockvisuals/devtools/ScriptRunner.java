@@ -154,6 +154,11 @@ public final class ScriptRunner {
 					minecraft.gui.hud.toggle();
 				}
 			}
+			case "perspective" -> minecraft.options.setCameraType(switch (argument) {
+				case "back" -> net.minecraft.client.CameraType.THIRD_PERSON_BACK;
+				case "front" -> net.minecraft.client.CameraType.THIRD_PERSON_FRONT;
+				default -> net.minecraft.client.CameraType.FIRST_PERSON;
+			});
 			case "lighting" -> DeferredRenderer.setEnabled(argument.equals("on"));
 			case "taa" -> dev.bedrockvisuals.render.TemporalAA.setEnabled(argument.equals("on"));
 			case "raytest" -> dev.bedrockvisuals.raytrace.RayQuerySmokeTest.rerun();

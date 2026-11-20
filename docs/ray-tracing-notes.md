@@ -488,7 +488,19 @@ off and 17.8 with all of it.
 
 - **Bounce light on entities.** Entities only had the emitted light from the probes, so with the bounce on a mob in a sunlit room stayed darker than the walls around it. Each probe now also traces 4 bounce rays a frame over the whole sphere (RtEmissive's bounceRadiance, shared with the texels: the sun or moon on the surface met, and its cached light), kept as a second ambient cube (estimate 4 x radiance x cosine, the pdf being 1 / 4 pi); the entity shader adds it to the indirect light as the lighting pass does for terrain. The probes now run with either the emitted light or the bounce on. Checked with the bounce at 300% in a closed room lit by a hole in the roof: walls +4 to +5 (8-bit), a villager facing away from the sunlit patch +1, and +9 with its bounce x 10 (so it arrives, at the strength its facing gives). Probes cost 0.59 ms with the bounce on, against 0.34.
 
-- **Glowing eyes as lights.** Mobs whose eyes texture is drawn full bright give off a little light from just in front of their eyes (EntityLights): spiders and cave spiders and endermen at level 1, phantoms 1, breezes 2, creakings 2 while their eyes glow, the ender dragon 8 at its head (lowered by 2 each from 3, 3, 4, 4 and 10 at the developer's request; copper golems went from 2 to 0, so they give off none). Each is coloured as the mean of its eyes texture's drawn pixels (alpha-weighted, linear): spider 1.0 0.0 0.0, enderman 0.74 0.14 1.0, breeze 1.0 0.97 0.96. Checked at night in the dark test room: a red pool under a spider, purple around an enderman's head.
+- **Glowing eyes as lights.** Mobs whose eyes texture is drawn full bright give off a little light from just in front of their eyes (EntityLights): spiders and cave spiders and endermen at level 1, phantoms 1, breezes 2, creakings 2 while their eyes glow, the ender dragon 8 at its head (lowered by 2 each from 3, 3, 4, 4 and 10 at the developer's request; copper golems 1, raised back from 0). Each is coloured as the mean of its eyes texture's drawn pixels (alpha-weighted, linear): spider 1.0 0.0 0.0, enderman 0.74 0.14 1.0, breeze 1.0 0.97 0.96. Checked at night in the dark test room: a red pool under a spider, purple around an enderman's head.
+
+- **Entity shadows under several block lights: static fixed.** In F5 the player's shadow on the floor of a room
+  with several block lights was blotchy, texel by texel (TV static). The shadowed share was averaged over about
+  three frames (weight 0.3) so it could follow moving entities. Each frame's share is noisy, since every sample
+  picks one of the lights. With the average kept over 50 frames instead, the blotches went away, which showed
+  they were noise. Now the share keeps two averages, like the texel's light: the fast one (weight 0.3) and a slow
+  one of up to 24 frames, which is the one shown. When they differ by more than 0.1, the shadow has moved, and
+  the slow one jumps to the fast one. Texels whose shadow moved lately (fewer than 8 frames held) are averaged
+  with 12 neighbours out to two texels when shown, instead of 4. Checked on a white concrete floor with six
+  lights around the player: clean standing still, much less blotchy while moving, and no trail 0.1 s after
+  stopping. Script line `perspective back|front|first` added for F5 tests.
+- Copper golems' eye light is back at level 1.
 
 **Later, outside ray tracing:** particles (lava's smoke) drawn nearly black at night, even beside lava: they are
 vanilla-lit into the graded image and probably need what entities got (EntityPass). And take a look at vertical (falling) water. The player asked for this on

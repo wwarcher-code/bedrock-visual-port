@@ -585,13 +585,13 @@ public final class RtEmissive {
 			    vec2 entityTerms = vec2(0.0, 1.0);
 			    // Only where an entity left a mark (a shadow, or a carried light partly hidden): elsewhere the
 			    // neighbours' four lookups a pixel would only average nothing.
-			    bool marked = slot >= 0 && (entries[slot].fastC.x > 0.001
+			    bool marked = slot >= 0 && (entries[slot].fastC.z > 0.001
 			            || (entries[slot].fastC.y > 0.0 && entries[slot].fastC.y < 1.999));
 			    if (slot >= 0 && !marked) {
-			        entityTerms = vec2(entries[slot].fastC.x, entries[slot].fastC.y > 0.0 ? entries[slot].fastC.y - 1.0 : 1.0);
+			        entityTerms = vec2(entries[slot].fastC.z, entries[slot].fastC.y > 0.0 ? entries[slot].fastC.y - 1.0 : 1.0);
 			    }
 			    if (marked) {
-			        float shadowSum = 2.0 * entries[slot].fastC.x;
+			        float shadowSum = 2.0 * entries[slot].fastC.z;
 			        float shadowWeight = 2.0;
 			        float seenSum = entries[slot].fastC.y > 0.0 ? 2.0 * (entries[slot].fastC.y - 1.0) : 0.0;
 			        float seenWeight = entries[slot].fastC.y > 0.0 ? 2.0 : 0.0;
@@ -601,13 +601,17 @@ public final class RtEmissive {
 			            vec3 axis = round(n);
 			            vec3 u = abs(axis.x) > 0.5 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
 			            vec3 v = cross(axis, u);
-			            vec3 steps[4] = vec3[4](u, -u, v, -v);
-			            for (int i = 0; i < 4; i++) {
+			            // A shadow that moved lately (its slow share holds few frames: the fast one's noise) is averaged
+			            // over twelve neighbours, out to two texels, instead of four.
+			            vec3 steps[12] = vec3[12](u, -u, v, -v, u + v, u - v, v - u, -u - v, 2.0 * u, -2.0 * u, 2.0 * v,
+			                    -2.0 * v);
+			            int reach = entries[slot].fastC.w < 8.0 ? 12 : 4;
+			            for (int i = 0; i < reach; i++) {
 			                int near = findTexel(texelKey(p + steps[i] * size, n, false, originBlock.xyz, level), false);
 			                if (near >= 0) {
-			                    shadowSum += entries[near].fastC.x;
+			                    shadowSum += entries[near].fastC.z;
 			                    shadowWeight += 1.0;
-			                    if (entries[near].fastC.y > 0.0) {
+			                    if (i < 4 && entries[near].fastC.y > 0.0) {
 			                        seenSum += entries[near].fastC.y - 1.0;
 			                        seenWeight += 1.0;
 			                    }
@@ -637,7 +641,7 @@ public final class RtEmissive {
 			        }
 			        if (other >= 0) {
 			            float own = held / FILL;
-			            emitted = mix(entries[other].historyA.rgb * (1.0 - entries[other].fastC.x), emitted, own);
+			            emitted = mix(entries[other].historyA.rgb * (1.0 - entries[other].fastC.z), emitted, own);
 			            bounced = mix(entries[other].historyB.rgb, bounced, own);
 			        }
 			    }

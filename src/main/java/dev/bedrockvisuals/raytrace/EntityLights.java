@@ -160,7 +160,7 @@ public final class EntityLights {
 					eyes(creaking, partial, 2, "creaking/creaking_eyes");
 				}
 			}
-			case CopperGolem golem -> eyes(golem, partial, 0, "copper_golem/copper_golem_eyes");
+			case CopperGolem golem -> eyes(golem, partial, 1, "copper_golem/copper_golem_eyes");
 			case ItemEntity item -> held(item.getItem(), at.x, at.y + 0.25, at.z, 0.15f);
 			case FallingBlockEntity falling -> {
 				int level = falling.getBlockState().getLightEmission();
@@ -308,7 +308,7 @@ public final class EntityLights {
 
 	private static void light(double x, double y, double z, float radius, int level, float[] color) {
 		if (level <= 0) {
-			return; // e.g. a copper golem's eyes, set to level 0
+			return;
 		}
 		FOUND.add(new Light(x, y, z, radius, level / 15f, color));
 	}
