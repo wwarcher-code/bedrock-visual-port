@@ -616,6 +616,15 @@ off and 17.8 with all of it.
   the torch's light on the iron toward the camera, a sheen around the lantern on the gold. One direction a texel:
   two lights on opposite sides blur into a weaker highlight between them.
 
+- **Fog and water haze lit by the traced light.** The light the air (lighting/volume.fsh) and the water haze
+  (the lighting pass's waterHaze) scatter used Bedrock's block light. They now take the entity probes' light
+  averaged over all directions there (include/rt_probes.glsl, shared with entity.fsh: `rtProbesAverage`,
+  `rtScatteredBlockLight`), emitted and bounced, in place of it or over the share kept, held to twice Bedrock's
+  term. Uncapped, with the camera 3 blocks over a lava pool at night, the haze tinted the whole screen, the far
+  sky too. Checked: a soft orange glow in the air over lava, as before but from the traced light (so walls and
+  glass shape it), and sea lanterns on the seabed at night. The water surface shader itself uses no block light
+  (what's under it comes from the lit scene behind).
+
 **Later, outside ray tracing:** particles (lava's smoke) drawn nearly black at night, even beside lava: they are
 vanilla-lit into the graded image and probably need what entities got (EntityPass). And take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.

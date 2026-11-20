@@ -24,6 +24,7 @@ uniform sampler2D DistantWaterDepth; // DH's final depth, its water surface incl
 uniform sampler2D DistantFinalColor; // DH's final colour, its water included
 uniform sampler2D PreviousScene;   // the previous frame's HDR scene (BloomPass.java), for reflections
 uniform sampler2D RtShadowMap;     // ray-traced sun or moon visibility per pixel, red (RtShadows.java)
+#include <bedrockvisuals:rt_probes.glsl>
 uniform sampler2D RtEmissiveMap;   // ray-traced diffuse light over pi (RtEmissive.java), three times the width: the
                                    // light from emissive texels, the bounced light, and where the light comes from
                                    // (xyz: towards it, as long as it comes from one way)
@@ -434,7 +435,8 @@ vec3 waterHaze(vec3 dir, float tIn, float tOut, out vec3 transmittance) {
         // draws, so in a cave at noon the haze was sunlit everywhere but under the pillars' own shadows.
         float sun = sky > 0.0001 && !underTerrain(p) ? volumeShadow(p, l) * cloudShadow(p, l) : 0.0;
         vec3 source = UnderwaterScattering.rgb * ((SkyColor.rgb * waterSkyAccess(sky)
-                + BlockLightColor.rgb * blockLightColor(max(here.y, 0.0))) * 0.07957747 + light * phase * sun);
+                + rtScatteredBlockLight(p, BlockLightColor.rgb * blockLightColor(max(here.y, 0.0)))) * 0.07957747
+                + light * phase * sun);
         scattered += source * exp(-sigma * (float(i) * stepLength)) * stepShare;
     }
     return scattered;

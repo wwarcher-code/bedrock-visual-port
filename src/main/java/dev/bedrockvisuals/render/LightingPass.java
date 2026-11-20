@@ -67,6 +67,8 @@ public final class LightingPass {
 			.withUniform("RtShadowMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("RtShadowData", UniformType.UNIFORM_BUFFER)
 			.withUniform("RtEmissiveMap", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("RtProbeMap", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("RtEntityData", UniformType.UNIFORM_BUFFER)
 			.withUniform("DistantHeightMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("SkyProbe", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("SunTexture", UniformType.COMBINED_IMAGE_SAMPLER)
@@ -339,6 +341,11 @@ public final class LightingPass {
 					|| dev.bedrockvisuals.raytrace.RtEmissive.bounceActive()
 					? dev.bedrockvisuals.raytrace.RtEmissive.view() : null;
 			pass.setUniform("RtEmissiveMap", emissiveLight != null ? emissiveLight : gbuffer.depthView(), nearest);
+			// The ray-traced light the water haze scatters (rt_probes.glsl), when on.
+			var probes = dev.bedrockvisuals.raytrace.EntityProbes.active()
+					? dev.bedrockvisuals.raytrace.EntityProbes.view() : null;
+			pass.setUniform("RtProbeMap", probes != null ? probes : gbuffer.depthView(), nearest);
+			pass.setUniform("RtEntityData", rtEntityData);
 			GpuSampler linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
 			pass.setUniform("SkyProbe", SkyProbe.view() != null ? SkyProbe.view() : gbuffer.depthView(),
 					RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR, true));

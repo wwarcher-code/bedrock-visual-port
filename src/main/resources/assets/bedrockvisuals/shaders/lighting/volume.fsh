@@ -18,6 +18,7 @@ uniform sampler2D LightVolumeMap;  // sky and block light around the camera (Lig
 #include <bedrockvisuals:froxels.glsl>
 #define LIGHT_VOLUME LightVolumeMap
 #include <bedrockvisuals:light_volume.glsl>
+#include <bedrockvisuals:rt_probes.glsl>
 uniform sampler2D WaterColumnMap;
 #define WATER_COLUMNS WaterColumnMap
 #include <bedrockvisuals:water_columns.glsl>
@@ -103,7 +104,9 @@ void main() {
         float stepSun = 1.0;
         vec2 here = lightVolumeAt(p);
         if (here.x >= 0.0) {
-            stepAmbient = (SkyColor.rgb * here.x * here.x + BlockLightColor.rgb * blockLightColor(here.y)) * 0.07957747;
+            // The block light: the ray-traced light where it is on (rt_probes.glsl).
+            stepAmbient = (SkyColor.rgb * here.x * here.x
+                    + rtScatteredBlockLight(p, BlockLightColor.rgb * blockLightColor(here.y))) * 0.07957747;
             stepSun = here.x > 0.0001 ? 1.0 : 0.0;
             // As on the surfaces (deferred.fsh): where the sky light isn't full, the blocks towards the light
             // stand in for casters missing from the shadow map (Sodium's cave culling), or caves' air glowed.
@@ -120,7 +123,8 @@ void main() {
             if (here.x >= 0.0) {
                 // As from above: the level per block of water above the point that Minecraft took is given back.
                 float sky = min(here.x + (UnderwaterMedium.w - p.y) / 15.0, 1.0);
-                stepAmbient = (SkyColor.rgb * sky * sky + BlockLightColor.rgb * blockLightColor(here.y)) * 0.07957747;
+                stepAmbient = (SkyColor.rgb * sky * sky
+                        + rtScatteredBlockLight(p, BlockLightColor.rgb * blockLightColor(here.y))) * 0.07957747;
                 stepSun = sky > 0.0001 ? 1.0 : 0.0;
             }
         } else {
