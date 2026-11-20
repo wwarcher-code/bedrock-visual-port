@@ -502,6 +502,12 @@ off and 17.8 with all of it.
   stopping. Script line `perspective back|front|first` added for F5 tests.
 - Copper golems' eye light is back at level 1.
 
+- **Crash: "Index 12 out of bounds for length 12" (OpenGL backend).** The water shader's texel buffer
+  (u_SectionTimeInfo) is bound at texture unit 12, after its 12 samplers. Minecraft's GL state tracks only 12
+  units, so the active unit stayed out of range, and the next texture created (an empty hand's arm skin in first
+  person) crashed. `GlCommandEncoderMixin` sets the active unit back to 0 after each draw's bindings when it
+  is past 11. It crashed on every start in "New World (1)" with an empty hand selected; it no longer does.
+
 **Later, outside ray tracing:** particles (lava's smoke) drawn nearly black at night, even beside lava: they are
 vanilla-lit into the graded image and probably need what entities got (EntityPass). And take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.

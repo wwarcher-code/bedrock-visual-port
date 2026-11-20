@@ -19,6 +19,8 @@
 		"minecraft.SpriteContentsAccessor",
 		"minecraft.StagedDrawMixin",
 		"renderpearl.FrontendGpuDeviceAccessor",
+		"renderpearl.GlCommandEncoderMixin",
+		"renderpearl.GlStateManagerAccessor",
 		"renderpearl.VulkanCommandEncoderAccessor",
 		"renderpearl.VulkanDeviceAccessor",
 		"renderpearl.VulkanFeatureSetsMixin",
