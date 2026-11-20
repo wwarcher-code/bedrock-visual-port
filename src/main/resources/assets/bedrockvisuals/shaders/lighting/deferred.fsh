@@ -24,8 +24,9 @@ uniform sampler2D DistantWaterDepth; // DH's final depth, its water surface incl
 uniform sampler2D DistantFinalColor; // DH's final colour, its water included
 uniform sampler2D PreviousScene;   // the previous frame's HDR scene (BloomPass.java), for reflections
 uniform sampler2D RtShadowMap;     // ray-traced sun or moon visibility per pixel, red (RtShadows.java)
-uniform sampler2D RtEmissiveMap;   // ray-traced diffuse light over pi (RtEmissive.java), twice the width: the light
-                                   // from emissive texels on the left half, the bounced light on the right
+uniform sampler2D RtEmissiveMap;   // ray-traced diffuse light over pi (RtEmissive.java), three times the width: the
+                                   // light from emissive texels, the bounced light, and where the light comes from
+                                   // (xyz: towards it, as long as it comes from one way)
 layout(std140) uniform RtShadowData {
     vec4 RtShadowParams;           // x: RtShadowMap holds this frame's, y: show the comparison view
     vec4 RtEmissiveParams;         // x: RtEmissiveMap's emitted light is this frame's, y: the share of block light
@@ -1128,7 +1129,7 @@ void main() {
     // How much the point glows as a light standing in for block light (lava), when the traced light is on.
     float standInGlow = 0.0;
     if (RtEmissiveParams.x > 0.5 && distant < 0.0) {
-        vec4 traced = texture(RtEmissiveMap, vec2(texCoord.x * 0.5, texCoord.y));
+        vec4 traced = texture(RtEmissiveMap, vec2(texCoord.x / 3.0, texCoord.y));
         // Any face of a block the light volume marks as glowing all over (lava; EmitterColors.glowsAllOver), at
         // its light level. Per block, not per pixel.
         float standIn = 0.0;
@@ -1153,9 +1154,34 @@ void main() {
     // Ray-traced bounce light (RtEmissive.java): the sun, moon and emitted light off other surfaces, over
     // Bedrock's indirect terms (its sky ambient isn't bounced, so nothing is counted twice).
     if (RtEmissiveParams.z > 0.5 && distant < 0.0) {
-        indirect += texture(RtEmissiveMap, vec2(0.5 + texCoord.x * 0.5, texCoord.y)).rgb;
+        indirect += texture(RtEmissiveMap, vec2((1.0 + texCoord.x) / 3.0, texCoord.y)).rgb;
     }
     color += diffuseColor * indirect * (1.0 - emissive);
+    // The traced light's highlight on glossy surfaces (RtEmissive's third section, TexelCache's E): the texel's
+    // light (emitted and bounced, over pi) taken as coming from the way it mostly comes, by how much it comes from
+    // one way. With E the irradiance, a light from l gives f_spec(l) x E: the lights' reflections, and the bounce's
+    // glossy part. Not on glowing faces (their own light).
+    if (RtEmissiveParams.x > 0.5 && distant < 0.0 && standInGlow <= 0.0 && emissive < 0.99) {
+        vec3 from = texture(RtEmissiveMap, vec2((2.0 + texCoord.x) / 3.0, texCoord.y)).xyz;
+        float directed = min(length(from), 1.0);
+        float glossNv = dot(n, v);
+        if (directed > 0.02 && glossNv > 0.0) {
+            vec3 l = from / length(from);
+            float glossNl = dot(n, l);
+            if (glossNl > 0.0) {
+                vec3 tracedLight = texture(RtEmissiveMap, vec2(texCoord.x / 3.0, texCoord.y)).rgb;
+                if (RtEmissiveParams.z > 0.5) {
+                    tracedLight += texture(RtEmissiveMap, vec2((1.0 + texCoord.x) / 3.0, texCoord.y)).rgb;
+                }
+                vec3 h = normalize(l + v);
+                vec3 fresnel = f0 + (1.0 - f0) * pow(1.0 - max(dot(h, v), 0.0), 5.0);
+                float geometry = smithG1(glossNv, roughness) * smithG1(glossNl, roughness);
+                vec3 brdf = fresnel * ggx(max(dot(n, h), 0.0), roughness) * geometry
+                        / (4.0 * max(glossNv, 1e-4) * max(glossNl, 0.1));
+                color += brdf * tracedLight * 3.14159265 * directed * (1.0 - emissive);
+            }
+        }
+    }
 
     // Reflected sky: smooth and metallic surfaces mirror their surroundings. Until there are reflections, the
     // sky in the mirror direction stands in (Bedrock's own sky, else a gradient), fading out with roughness and

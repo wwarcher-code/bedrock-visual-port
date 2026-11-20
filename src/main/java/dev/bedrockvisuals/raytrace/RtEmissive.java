@@ -393,6 +393,9 @@ public final class RtEmissive {
 			// One sample of the light from emissive texels at point p (normal n), given the cell's lights' running
 			// totals of weight (cumulative[i]: lights 0 to i): as the terrain lets it through (an entity in the way
 			// sets shadowed instead, for TexelCache's C).
+			// The direction the last emissiveSample's and bounceSample's light came from (for TexelCache's E).
+			vec3 emittedFrom;
+			vec3 bouncedFrom;
 			vec3 emissiveSample(vec3 p, vec3 g, vec3 n, bool thinSheet, uint count, uint indexBase,
 			        float cumulative[PER_CELL], float total, vec3 u, out bool shadowed) {
 			    shadowed = false;
@@ -435,6 +438,7 @@ public final class RtEmissive {
 			        return vec3(0.0);
 			    }
 			    vec3 direction = toPoint / d;
+			    emittedFrom = direction;
 			    float cosReceiver = dot(n, direction);
 			    vec3 nRay = n;
 			    if (thinSheet && cosReceiver < 0.0) {
@@ -524,6 +528,7 @@ public final class RtEmissive {
 			    vec3 side = normalize(cross(abs(normal.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0), normal));
 			    vec3 up = cross(normal, side);
 			    vec3 direction = normalize(side * (r * cos(phi)) + up * (r * sin(phi)) + normal * sqrt(max(1.0 - r * r, 0.0)));
+			    bouncedFrom = direction;
 			    return bounceRadiance(p + normal * 0.01, direction);
 			}
 
@@ -660,6 +665,11 @@ public final class RtEmissive {
 			                : vec3(0.0);
 			        // The bounce goes to the texel too, for bounce rays meeting it (bounceRadiance: one lookup).
 			        addSample(slot, emitted, bounced);
+			        const vec3 LUMA3 = vec3(0.2126, 0.7152, 0.0722);
+			        addDirection(slot, emittedFrom, dot(emitted, LUMA3));
+			        if (bounces) {
+			            addDirection(slot, bouncedFrom, dot(bounced, LUMA3));
+			        }
 			        bouncedSum += min(bounced, vec3(MAX_SAMPLE));
 			        bool seen = false;
 			        vec3 seenColor = vec3(1.0);
@@ -716,8 +726,10 @@ public final class RtEmissive {
 			    if (any(greaterThanEqual(pixel, size.xy))) {
 			        return;
 			    }
-			    uint left = pixel.y * size.x * 2u + pixel.x;
+			    uint left = pixel.y * size.x * 3u + pixel.x;
 			    uint right = left + size.x;
+			    // A third section: where the texel's light comes from (TexelCache's E), for the highlight.
+			    uint towards = right + size.x;
 			    vec3 p;
 			    vec3 n;
 			    bool thinSheet;
@@ -725,6 +737,7 @@ public final class RtEmissive {
 			    if (!surface(pixel, p, n, thinSheet, level)) {
 			        pixels[left] = uvec2(0u);
 			        pixels[right] = uvec2(0u);
+			        pixels[towards] = uvec2(0u);
 			        return;
 			    }
 			    int slot = findTexel(texelKey(p, n, thinSheet, originBlock.xyz, level), false);
@@ -842,6 +855,8 @@ public final class RtEmissive {
 			    // a walk through up to PER_CELL lights a pixel.
 			    pixels[left] = uvec2(packHalf2x16(emitted.rg), packHalf2x16(vec2(emitted.b, 0.0)));
 			    pixels[right] = uvec2(packHalf2x16(bounced.rg), packHalf2x16(vec2(bounced.b, 1.0)));
+			    vec3 from = slot >= 0 ? entries[slot].fastE.xyz : vec3(0.0);
+			    pixels[towards] = uvec2(packHalf2x16(from.xy), packHalf2x16(vec2(from.z, 0.0)));
 			}
 			""";
 
@@ -1119,7 +1134,7 @@ public final class RtEmissive {
 					new FrameCompute.Image(normal), new FrameCompute.Image(atlas), new FrameCompute.Image(materials),
 					new FrameCompute.Buffer(grid.lights().buffer()), new FrameCompute.Buffer(grid.cells().buffer()),
 					new FrameCompute.Buffer(TexelCache.buffer(rt).buffer()), new FrameCompute.Buffer(params.buffer()));
-			PASS.dispatch(rt, w * 2, h, bindings, constants, new int[][] {{(w + 7) / 8, (h + 7) / 8, 1},
+			PASS.dispatch(rt, w * 3, h, bindings, constants, new int[][] {{(w + 7) / 8, (h + 7) / 8, 1},
 					{TexelCache.ENTRIES / 64, 1, 1}, {(w + 7) / 8, (h + 7) / 8, 1}});
 			tracedThisFrame = true;
 			// The entities' light (EntityProbes): the emitted light and the bounce, whichever is on.

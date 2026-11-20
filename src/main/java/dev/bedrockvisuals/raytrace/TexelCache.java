@@ -36,6 +36,9 @@ import static org.lwjgl.vulkan.VK12.*;
  *   ivec4 position  the texel's world block (xyz) and level (w), for wiping it when the world changes near it
  *   uvec4 sumD      this frame's carried-light rays that got through: their colour (stained glass; xyz), how many
  *   vec4 fastD      its average over the last couple of frames (rgb; w 1 once measured)
+ *   ivec4 sumE      this frame's samples' directions weighed by their light (xyz, 1/256 fixed point), the weights
+ *   vec4 fastE      their mean over up to 16 frames (xyz: towards the light, as long as it comes from one way),
+ *                   frames held (w)
  * </pre>
  * The slow average hides the noise; the fast one notices changes the world doesn't report (see blendTexel). When
  * the world reports one (a section built again: a block placed or broken), every texel near it, on screen or not,
@@ -58,12 +61,12 @@ import static org.lwjgl.vulkan.VK12.*;
  */
 final class TexelCache {
 	static final int ENTRIES = 1 << 21;
-	static final int ENTRY_SIZE = 192;
+	static final int ENTRY_SIZE = 224;
 
 	/** The GLSL for a shader with the cache at binding {@code CACHE_BINDING} (define it first). */
 	static final String GLSL = """
 			struct TexelEntry { uint key; uint lastFrame; uint count; uint wiped; uvec4 sumA; uvec4 sumB; uvec4 sumC;
-			    vec4 historyA; vec4 historyB; vec4 fastA; vec4 fastB; vec4 fastC; ivec4 position; uvec4 sumD; vec4 fastD; };
+			    vec4 historyA; vec4 historyB; vec4 fastA; vec4 fastB; vec4 fastC; ivec4 position; uvec4 sumD; vec4 fastD; ivec4 sumE; vec4 fastE; };
 			layout(set = 0, binding = CACHE_BINDING, std430) buffer TexelCache { TexelEntry entries[]; };
 			const uint CACHE_ENTRIES = ENTRIES_HEREu;
 			const uint PROBES = 8u;
@@ -180,6 +183,8 @@ final class TexelCache {
 			                entries[oldest].fastC = vec4(0.0);
 			                entries[oldest].sumD = uvec4(0u);
 			                entries[oldest].fastD = vec4(0.0);
+			                entries[oldest].sumE = ivec4(0);
+			                entries[oldest].fastE = vec4(0.0);
 			                return int(oldest);
 			            }
 			        }
@@ -215,6 +220,18 @@ final class TexelCache {
 			    atomicAdd(entries[slot].sumB.y, fixedB.y);
 			    atomicAdd(entries[slot].sumB.z, fixedB.z);
 			    atomicAdd(entries[slot].count, count);
+			}
+
+			// A sample's direction (where its light came from) weighed by its light, for TexelCache's E.
+			void addDirection(int slot, vec3 direction, float light) {
+			    int weight = int(clamp(light, 0.0, MAX_SAMPLE) * 256.0 + 0.5);
+			    if (weight > 0) {
+			        ivec3 weighted = ivec3(round(direction * float(weight)));
+			        atomicAdd(entries[slot].sumE.x, weighted.x);
+			        atomicAdd(entries[slot].sumE.y, weighted.y);
+			        atomicAdd(entries[slot].sumE.z, weighted.z);
+			        atomicAdd(entries[slot].sumE.w, weight);
+			    }
 			}
 
 			void addSample(int slot, vec3 a, vec3 b) {
@@ -350,6 +367,17 @@ final class TexelCache {
 			            entries[slot].fastD = vec4(fastD.w > 0.0 ? mix(fastD.rgb, color, ENTITY_WEIGHT) : color, 1.0);
 			        }
 			        entries[slot].sumD = uvec4(0u);
+			        // Where the light comes from (E): the mean of the samples' directions weighed by their light. Its
+			        // length is how much it comes from one way (1) rather than all round (0); the lighting pass gives
+			        // smooth surfaces a highlight of the texel's light from there.
+			        ivec4 sumE = entries[slot].sumE;
+			        if (sumE.w > 0) {
+			            vec3 mean = vec3(sumE.xyz) / float(sumE.w);
+			            vec4 fastE = entries[slot].fastE;
+			            float frames = min(fastE.w, 15.0);
+			            entries[slot].fastE = vec4(mix(fastE.xyz, mean, 1.0 / (frames + 1.0)), frames + 1.0);
+			        }
+			        entries[slot].sumE = ivec4(0);
 
 			        // Held to this frame's cap first: a lowered cap (the world changed) takes effect at once.
 			        float held = min(entries[slot].historyA.w, cap);
@@ -384,6 +412,8 @@ final class TexelCache {
 			        entries[slot].sumC = uvec4(0u);
 			        entries[slot].sumD = uvec4(0u);
 			        entries[slot].fastD = vec4(0.0);
+			        entries[slot].sumE = ivec4(0);
+			        entries[slot].fastE = vec4(0.0);
 			        entries[slot].position = ivec4(0);
 			        entries[slot].key = 0u;
 			    }

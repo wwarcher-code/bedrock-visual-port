@@ -606,6 +606,16 @@ off and 17.8 with all of it.
     146.3 off, 143.5 on; walls a little darker, seeing half the sky), the closed test box unchanged, the seabed
     close to before (69.7, 62.3). Without the water loss the seabed went flat cyan.
 
+- **Glossy: the lights' highlights and the bounce's glossy part.** Each texel also keeps where its light comes
+  from (TexelCache's E, entries now 224 bytes): the mean of its samples' directions, emitted and bounced, weighed
+  by their light, over up to 16 frames. Its length is how much the light comes from one way. GATHER writes it as a
+  third section of its output (three times the width now), and the lighting pass adds a GGX highlight of the
+  texel's traced light (emitted and bounced) from that direction, times that length: f_spec(l) x E. Smooth and
+  metal surfaces now reflect lights that aren't on screen (SSR only had those on screen), and the bounce from a
+  bright wall glints on a polished floor. Checked on iron and gold floors with a lantern and a torch: a streak of
+  the torch's light on the iron toward the camera, a sheen around the lantern on the gold. One direction a texel:
+  two lights on opposite sides blur into a weaker highlight between them.
+
 **Later, outside ray tracing:** particles (lava's smoke) drawn nearly black at night, even beside lava: they are
 vanilla-lit into the graded image and probably need what entities got (EntityPass). And take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.
