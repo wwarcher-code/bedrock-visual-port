@@ -982,7 +982,7 @@ void main() {
                         : underTerrain(from) ? 0.0 : 1.0;
             }
             float byMaps = (mapped < 0.0 ? skyFallback : mix(skyFallback, mapped * skyGuard, edgeFade)) * guard;
-            float byRays = rayTraced * skyGuard * guard;
+            float byRays = rayTraced * skyGuard; // the rays need no guard (below)
             fragColor = dot(nCaster, moonCasts ? moonDir : sunDir) < 0.1 ? vec4(0.3, 0.3, 0.3, 1.0)
                     : vec4(byMaps, byRays, 0.0, 1.0);
             meterLuminance = vec4(0.18, 0.0, 0.0, 1.0);
@@ -1000,7 +1000,11 @@ void main() {
     // Farther from the camera than the light volume reaches (23 blocks up or down, 63 across), a point under its
     // column's terrain surface (the water column map's height map) is taken as shaded: in a big cave the lit
     // ledges high above the camera were out of the volume's reach and kept the shadow map's sun.
-    if (skyLight < 0.999 && casterVisibility > 0.0) {
+    // Not with ray-traced shadows: they trace every section built since it loaded, not only those the camera
+    // sees, and the heuristic shaded the ground under a floating build (the test rooms) as if in a cave: the
+    // column's top was the build, and where a ray left the volume (23 blocks above the camera) under it moved
+    // with the camera's height, so the shadow's edge swept across the ground as the camera rose or sank.
+    if (skyLight < 0.999 && casterVisibility > 0.0 && !(RtShadowParams.x > 0.5 && distant < 0.0)) {
         vec3 from = position + nCaster * 0.05;
         casterVisibility *= inLightVolume(from) ? voxelRayVisibility(from, moonCasts ? moonDir : sunDir, 64)
                 : underTerrain(from) ? 0.0 : 1.0;
