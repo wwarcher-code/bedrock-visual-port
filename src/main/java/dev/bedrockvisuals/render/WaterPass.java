@@ -47,6 +47,8 @@ public final class WaterPass {
 			.withUniform("WaterData", UniformType.UNIFORM_BUFFER)
 			.withUniform("u_WaterNormal", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("u_WaterMers", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("u_WaterFlowNormal", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("u_WaterFlowMers", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("AtmosphereData", UniformType.UNIFORM_BUFFER)
 			.withUniform("u_BrdfLut", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("u_ShadowMap3", UniformType.COMBINED_IMAGE_SAMPLER)
@@ -295,6 +297,8 @@ public final class WaterPass {
 		pass.setUniform("WaterData", data);
 		pass.setUniform("u_WaterNormal", WaterSurfaceMaps.normal(), nearest);
 		pass.setUniform("u_WaterMers", WaterSurfaceMaps.mers(), nearest);
+		pass.setUniform("u_WaterFlowNormal", WaterSurfaceMaps.flowNormal(), nearest);
+		pass.setUniform("u_WaterFlowMers", WaterSurfaceMaps.flowMers(), nearest);
 		pass.setUniform("AtmosphereData", LightingPass.atmosphereData());
 		// Without Bedrock's table the shader approximates it (WaterData.Animation.z 0) and never reads this.
 		pass.setUniform("u_BrdfLut", BrdfLut.view() != null ? BrdfLut.view() : WaterSurfaceMaps.mers(),

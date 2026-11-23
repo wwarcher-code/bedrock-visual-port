@@ -62,6 +62,15 @@ public interface DistantTerrainSource {
 	}
 
 	/**
+	 * For the column {@link #topSolid} last read on this thread: the bottom of the solid run its top block is
+	 * part of (the underside of a floating build or an overhang), or {@link #NO_HEIGHT} when unknown. Where it is
+	 * above the ground, the column is open beneath it.
+	 */
+	default int lastUndersideY() {
+		return NO_HEIGHT;
+	}
+
+	/**
 	 * Lets go of whatever the source keeps for {@link #topSolidY} (Distant Horizons: its data cache, which holds
 	 * terrain data checked out of its pools). Called by the same background thread after each tile it reads.
 	 */

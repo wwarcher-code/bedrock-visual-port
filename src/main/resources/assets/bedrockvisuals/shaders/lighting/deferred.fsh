@@ -239,7 +239,9 @@ float phaseHG(float g, float cosine) {
 }
 
 // The far terrain's shadow at p towards the light (DistantHeights.java): marched across the height map of
-// Distant Horizons' terrain (a cell of 8 blocks, the top of its highest solid block), in steps that grow with
+// Distant Horizons' terrain (a cell of 8 blocks, the top of its highest solid block and, in g, the bottom of
+// the solid run it's part of where that's open beneath: before, a floating build shaded everything under it,
+// straight down whatever the sun's angle, past the cascades' reach), in steps that grow with
 // the distance. Where the shadow cascades cover p, only casters beyond their reach count (they hold the near
 // ones, in full detail). Soft over a few blocks, wider farther out, as the map is coarse.
 const int HEIGHT_STEPS = 64;
@@ -259,9 +261,14 @@ float distantHeightShadow(vec3 p, vec3 towardsLight, bool cascadeCovered) {
         }
         if (!cascadeCovered || dot(q.xz, q.xz) > 120.0 * 120.0) {
             ivec2 texel = ivec2(mod(floor((q.xz + DistantHeightOrigin.xz) / HEIGHT_CELL), HEIGHT_SIZE));
-            float height = texelFetch(DistantHeightMap, texel, 0).r * 65535.0;
+            vec2 run = texelFetch(DistantHeightMap, texel, 0).rg * 65535.0;
+            float height = run.x;
             if (height > 0.0) {
                 float under = height - above;
+                if (run.y > 0.0) {
+                    // Open beneath the run (a floating build, an overhang): only the run itself shades.
+                    under = min(under, above - run.y);
+                }
                 visibility = min(visibility, 1.0 - clamp(under / max(t * 0.02, 2.0), 0.0, 1.0));
                 if (visibility <= 0.0) {
                     return 0.0;

@@ -137,7 +137,35 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 				topPoint = point;
 			}
 		}
+		// The bottom of the solid run under the top: down through solid points that touch it.
+		int underside = NO_HEIGHT;
+		if (topPoint != null) {
+			underside = topPoint.bottomYBlockPos;
+			boolean extended = true;
+			while (extended) {
+				extended = false;
+				for (var point : result.payload) {
+					if (point == null || point.blockStateWrapper == null || point.blockStateWrapper.isAir()
+							|| point.blockStateWrapper.isLiquid()) {
+						continue;
+					}
+					if (point.topYBlockPos >= underside && point.bottomYBlockPos < underside) {
+						underside = point.bottomYBlockPos;
+						extended = true;
+					}
+				}
+			}
+		}
+		lastUnderside = underside;
 		return ((long) top << 32) | (topPoint == null ? 0 : colourOf(topPoint, x, z) & 0xFFFFFFL);
+	}
+
+	/** The underside topSolid last found (its worker thread only). */
+	private int lastUnderside = NO_HEIGHT;
+
+	@Override
+	public int lastUndersideY() {
+		return lastUnderside;
 	}
 
 	/**

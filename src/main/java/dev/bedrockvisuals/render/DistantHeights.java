@@ -34,6 +34,11 @@ public final class DistantHeights {
 	private static final int RECENTER = 32;
 
 	private static final short[] heights = new short[SIZE * SIZE];
+	/**
+	 * Per cell: the bottom of the solid run under the top, above the floor (0: solid down to the ground, or
+	 * unknown). The map's second channel: a floating build or an overhang shades only what's beside its run.
+	 */
+	private static final short[] undersides = new short[SIZE * SIZE];
 	/** Per cell: the top block's colour, 0xRRGGBB in sRGB (0 unknown). */
 	private static final int[] colours = new int[SIZE * SIZE];
 	/** One bit per row: written by the worker since the last upload. */
@@ -73,6 +78,7 @@ public final class DistantHeights {
 			lastLevel = minecraft.level;
 			generation++;
 			java.util.Arrays.fill(heights, (short) 0);
+			java.util.Arrays.fill(undersides, (short) 0);
 			java.util.Arrays.fill(colours, 0);
 			highest = 0;
 			for (int i = 0; i < dirtyRows.length(); i++) {
@@ -173,11 +179,16 @@ public final class DistantHeights {
 		int top = (int) (packed >> 32);
 		int colour = (int) packed & 0xFFFFFF;
 		int value = top == DistantTerrainSource.NO_HEIGHT ? 0 : Math.max(1, Math.min(65535, top - minY));
+		int bottom = source.lastUndersideY();
+		// Open beneath only with a gap above the floor (else the run stands on the ground).
+		int under = value == 0 || bottom == DistantTerrainSource.NO_HEIGHT || bottom - minY <= 1 ? 0
+				: Math.min(value, bottom - minY);
 		int tx = Math.floorMod(cellX, SIZE);
 		int tz = Math.floorMod(cellZ, SIZE);
 		int index = tz * SIZE + tx;
-		if (heights[index] != (short) value) {
+		if (heights[index] != (short) value || undersides[index] != (short) under) {
 			heights[index] = (short) value;
+			undersides[index] = (short) under;
 			VERSIONS.incrementAndGet(versionIndex(Math.floorDiv(cellX * CELL, 16), Math.floorDiv(cellZ * CELL, 16)));
 			dirtyRows.getAndUpdate(tz >> 6, bits -> bits | (1L << (tz & 63)));
 			if (value != 0) {
@@ -198,8 +209,8 @@ public final class DistantHeights {
 		GpuDevice device = RenderSystem.getDevice();
 		if (texture == null) {
 			texture = device.createTexture(() -> "Bedrock Visuals distant heights",
-					GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.R16_UNORM, SIZE, SIZE, 1, 1);
-			ByteBuffer empty = MemoryUtil.memCalloc(SIZE * SIZE * 2);
+					GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RG16_UNORM, SIZE, SIZE, 1, 1);
+			ByteBuffer empty = MemoryUtil.memCalloc(SIZE * SIZE * 4);
 			try {
 				device.createCommandEncoder().writeToTexture(texture, empty, 0, 0, 0, 0, SIZE, SIZE);
 			} finally {
@@ -216,7 +227,7 @@ public final class DistantHeights {
 			}
 			colourView = device.createTextureView(colourTexture);
 		}
-		ByteBuffer row = MemoryUtil.memAlloc(SIZE * 2);
+		ByteBuffer row = MemoryUtil.memAlloc(SIZE * 4);
 		ByteBuffer colourRow = MemoryUtil.memAlloc(SIZE * 4);
 		try {
 			int uploaded = 0;
@@ -229,7 +240,7 @@ public final class DistantHeights {
 				dirtyRows.getAndUpdate(r >> 6, bits -> bits & ~bit);
 				row.clear();
 				for (int x = 0; x < SIZE; x++) {
-					row.putShort(heights[r * SIZE + x]);
+					row.putShort(heights[r * SIZE + x]).putShort(undersides[r * SIZE + x]);
 				}
 				row.flip();
 				device.createCommandEncoder().writeToTexture(texture, row, 0, 0, 0, r, SIZE, 1);

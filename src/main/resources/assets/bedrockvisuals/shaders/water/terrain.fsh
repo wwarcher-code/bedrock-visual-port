@@ -67,6 +67,8 @@ uniform sampler2D u_CloudShadowMap;
 // Bedrock's water_still_grey normal map and MERS (WaterSurfaceMaps.java): strips of 16x16 frames.
 uniform sampler2D u_WaterNormal;
 uniform sampler2D u_WaterMers;
+uniform sampler2D u_WaterFlowNormal; // Bedrock's flowing water maps (water_flow_grey), for the flowing sprite
+uniform sampler2D u_WaterFlowMers;
 
 #ifndef OIT_ALPHA_ONLY
 layout(location = 0) out vec4 fragColor;
@@ -172,8 +174,15 @@ float surfaceFootprint = 1.0;
 // sprite, which spans two).
 void surfaceTexelOf(int frame, out vec3 tangentNormal, out vec4 mers);
 
+// The flowing sprite (falling water's sides, sloped surfaces) reads Bedrock's flowing water maps, whose frames
+// run the ripples along the flow; still water's maps there rippled the sides in place like the surface on top.
+bool flowingTexel() {
+    return !inRect(v_FaceTexCoord, StillRect) && inRect(v_FaceTexCoord, FlowRect);
+}
+
 void surfaceTexel(out vec3 tangentNormal, out float roughness, out float metalness) {
-    float frames = max(Animation.y, 1.0);
+    ivec2 flowSize = textureSize(u_WaterFlowNormal, 0);
+    float frames = flowingTexel() ? max(float(flowSize.y / max(flowSize.x, 1)), 1.0) : max(Animation.y, 1.0);
     float time = mod(Animation.x, frames);
     int f0 = int(floor(time));
     int f1 = int(mod(float(f0 + 1), frames));
@@ -192,11 +201,21 @@ void surfaceTexel(out vec3 tangentNormal, out float roughness, out float metalne
     metalness = clamp((0.5 + 0.498 * mers.r - 0.50196) * 2.00787, 0.0, 1.0);
 }
 
+void mapTexel(sampler2D normals, sampler2D merses, int frame, out vec3 tangentNormal, out vec4 mers);
+
 void surfaceTexelOf(int frame, out vec3 tangentNormal, out vec4 mers) {
+    if (flowingTexel()) {
+        mapTexel(u_WaterFlowNormal, u_WaterFlowMers, frame, tangentNormal, mers);
+    } else {
+        mapTexel(u_WaterNormal, u_WaterMers, frame, tangentNormal, mers);
+    }
+}
+
+void mapTexel(sampler2D normals, sampler2D merses, int frame, out vec3 tangentNormal, out vec4 mers) {
     vec4 rect = inRect(v_FaceTexCoord, StillRect) ? StillRect : inRect(v_FaceTexCoord, FlowRect) ? FlowRect : OverlayRect;
     vec2 local = (v_TexCoord - rect.xy) / max(rect.zw - rect.xy, vec2(1e-6));
     float spriteTexels = max(round((rect.z - rect.x) / u_TexelSize.x), 1.0);
-    ivec2 mapSize = textureSize(u_WaterNormal, 0);
+    ivec2 mapSize = textureSize(normals, 0);
     int frameSize = max(mapSize.x, 1);
     ivec2 texel = ivec2(mod(floor(local * spriteTexels), float(frameSize)));
     texel.y += frame * frameSize;
@@ -211,10 +230,17 @@ void surfaceTexelOf(int frame, out vec3 tangentNormal, out vec4 mers) {
     float blend = level - float(lod);
     ivec2 near = texel >> lod;
     ivec2 far = texel >> lodUp;
-    vec3 n0 = texelFetch(u_WaterNormal, near, lod).xyz * 2.0 - 1.0;
-    vec3 n1 = texelFetch(u_WaterNormal, far, lodUp).xyz * 2.0 - 1.0;
+    vec3 n0 = texelFetch(normals, near, lod).xyz * 2.0 - 1.0;
+    vec3 n1 = texelFetch(normals, far, lodUp).xyz * 2.0 - 1.0;
     tangentNormal = mix(n0, n1, blend);
-    mers = mix(texelFetch(u_WaterMers, near, lod), texelFetch(u_WaterMers, far, lodUp), blend);
+    // The MERS strip may be smaller than the normals' (flowing water's: 16 a frame against 32).
+    int mersFrame = max(textureSize(merses, 0).x, 1);
+    ivec2 mersTexel = ivec2(texel.x * mersFrame / frameSize, (texel.y - frame * frameSize) * mersFrame / frameSize
+            + frame * mersFrame);
+    int mersLevels = int(log2(float(mersFrame)));
+    int mLod = min(lod, mersLevels);
+    int mLodUp = min(lodUp, mersLevels);
+    mers = mix(texelFetch(merses, mersTexel >> mLod, mLod), texelFetch(merses, mersTexel >> mLodUp, mLodUp), blend);
 }
 
 // Defined with the surface fog below: the outer cascade's shadow test at p.

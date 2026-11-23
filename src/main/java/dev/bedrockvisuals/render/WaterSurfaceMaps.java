@@ -73,6 +73,42 @@ final class WaterSurfaceMaps {
 		mers = upload("Bedrock Visuals water MERS", mersImage, false);
 		BedrockVisualsClient.LOGGER.info("[water] surface maps: {} frames of {}x{}", frames, normalImage.width(),
 				normalImage.width());
+		// Flowing water's own maps (water_flow_grey: 32x32 frames, two blocks a side as Java's water_flow
+		// sprite, whose frames run the ripples along the flow). With the still maps on every face, falling water's
+		// sides rippled in place like the surface on top.
+		TgaImage flowNormalImage = null;
+		TgaImage flowMersImage = null;
+		Optional<TextureSet> flowSet = BedrockInputs.pack().flatMap(pack -> pack.textureSet("blocks/water_flow_grey"));
+		if (flowSet.isPresent()) {
+			flowNormalImage = read(flowSet.get().normal());
+			flowMersImage = read(flowSet.get().material().image());
+		}
+		if (flowNormalImage == null || flowMersImage == null || flowNormalImage.width() < 1
+				|| flowMersImage.width() < 1 || flowNormalImage.height() / flowNormalImage.width()
+						!= flowMersImage.height() / flowMersImage.width()) {
+			BedrockVisualsClient.LOGGER.warn("[water] no usable water_flow_grey maps; flowing water uses the still ones");
+			flowNormal = normal;
+			flowMers = mers;
+			return;
+		}
+		flowNormal = upload("Bedrock Visuals flowing water normal", flowNormalImage, true);
+		flowMers = upload("Bedrock Visuals flowing water MERS", flowMersImage, false);
+		BedrockVisualsClient.LOGGER.info("[water] flowing surface maps: {} frames of {}x{} (MERS {}x{})",
+				flowNormalImage.height() / flowNormalImage.width(), flowNormalImage.width(), flowNormalImage.width(),
+				flowMersImage.width(), flowMersImage.width());
+	}
+
+	private static GpuTextureView flowNormal;
+	private static GpuTextureView flowMers;
+
+	static GpuTextureView flowNormal() {
+		load();
+		return flowNormal;
+	}
+
+	static GpuTextureView flowMers() {
+		load();
+		return flowMers;
 	}
 
 	private static TgaImage read(Path path) {
