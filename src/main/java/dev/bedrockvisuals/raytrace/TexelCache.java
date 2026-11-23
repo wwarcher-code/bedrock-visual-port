@@ -202,6 +202,68 @@ final class TexelCache {
 			    }
 			}
 
+			// A texel's level goes by its distance from the camera (texelLevel), so as the camera moves a sphere's
+			// worth of surface changes level at 32, 64, 128 and 256 blocks, each texel there a new entry. They
+			// started empty (no light, then a few noisy frames; their bounce cells too, which the lighting pass then
+			// filled with Bedrock's sky light): a visible shell sweeping over the ground ahead. A texel just claimed
+			// this frame starts instead from the history of the same spot at the next coarser level that has one
+			// (or the next finer), and goes on from there.
+			void copyHistory(int slot, int from) {
+			    entries[slot].historyA = vec4(entries[from].historyA.rgb, min(entries[from].historyA.w, 32.0));
+			    entries[slot].historyB = entries[from].historyB;
+			    entries[slot].fastA = entries[from].fastA;
+			    entries[slot].fastB = entries[from].fastB;
+			    entries[slot].fastC = entries[from].fastC;
+			    entries[slot].fastE = entries[from].fastE;
+			}
+
+			bool justClaimed(int slot) {
+			    return entries[slot].lastFrame == size.z && entries[slot].historyA.w <= 0.0 && entries[slot].fastA.w <= 0.0;
+			}
+
+			void seedTexel(int slot, vec3 p, vec3 n, bool thinSheet, int level) {
+			    if (!justClaimed(slot)) {
+			        return;
+			    }
+			    int other = -1;
+			    for (int up = level + 1; up <= 4 && other < 0; up++) {
+			        int found = findTexel(texelKey(texelCentre(p, n, thinSheet, up), n, thinSheet, originBlock.xyz, up), false);
+			        other = found >= 0 && found != slot && entries[found].historyA.w >= 2.0 ? found : -1;
+			    }
+			    for (int down = level - 1; down >= 0 && other < 0; down--) {
+			        int found = findTexel(texelKey(texelCentre(p, n, thinSheet, down), n, thinSheet, originBlock.xyz, down),
+			                false);
+			        other = found >= 0 && found != slot && entries[found].historyA.w >= 2.0 ? found : -1;
+			    }
+			    if (other >= 0) {
+			        copyHistory(slot, other);
+			    }
+			}
+
+			// The same for a bounce cell (bounceKey: two levels coarser than its texels, at most 4), from the cell of
+			// another texel level whose cells differ.
+			void seedBounceCell(int cell, vec3 p, vec3 n, bool thinSheet, int level) {
+			    if (!justClaimed(cell)) {
+			        return;
+			    }
+			    int other = -1;
+			    for (int up = level + 1; up <= 4 && other < 0; up++) {
+			        if (bounceLevel(up) != bounceLevel(level)) {
+			            int found = findTexel(bounceKey(p, n, thinSheet, originBlock.xyz, up), false);
+			            other = found >= 0 && found != cell && entries[found].historyA.w >= 2.0 ? found : -1;
+			        }
+			    }
+			    for (int down = level - 1; down >= 0 && other < 0; down--) {
+			        if (bounceLevel(down) != bounceLevel(level)) {
+			            int found = findTexel(bounceKey(p, n, thinSheet, originBlock.xyz, down), false);
+			            other = found >= 0 && found != cell && entries[found].historyA.w >= 2.0 ? found : -1;
+			        }
+			    }
+			    if (other >= 0) {
+			        copyHistory(cell, other);
+			    }
+			}
+
 			// Whether the world changed near a world block this frame.
 			bool changedNear(ivec3 block) {
 			    for (int i = 0; i < changeCount.x; i++) {

@@ -19,8 +19,9 @@ import java.util.Locale;
  *   e1.xyz, reach      the edge to the second corner; how far it lights (blocks)
  *   e2.xyz, cutoff     the edge to the fourth corner; Sodium's alpha cutoff for its texels
  *   uv0.xy, uvE1.xy    the texture coordinates at p0, and along e1
- *   uvE2.xy, glow, 0   along e2; for a block that gives off Java light but has no emissive texels in
- *                      Bedrock's maps (lava), its light level / 15, standing in for every texel's emissive
+ *   uvE2.xy, glow,     along e2; for a block that gives off Java light but barely glows in Bedrock's maps,
+ *     masked           its light level / 15, standing in for its texels' emissive: every texel's (lava), or with
+ *                      masked 1, only those Bedrock marks as glowing at all (glow lichen's berries)
  * </pre>
  * A point of the quad is p0 + s e1 + t e2 (s, t in [0, 1]): Sodium's quads are parallelograms, in position and
  * texture alike.
@@ -185,15 +186,28 @@ public final class EmissiveLights {
 				continue;
 			}
 			float glow = 0;
+			float masked = 0;
 			if (emissive < WEAK_EMISSIVE && emitters != null) {
-				// The block the face belongs to: just behind the quad's centre.
-				float nx = cx / area * 0.05f;
-				float ny = cy / area * 0.05f;
-				float nz = cz / area * 0.05f;
-				int level = emitters.lightAt(mx - nx, my - ny, mz - nz);
+				// The block the face belongs to: the one its centre is in, for a face inside a block's cell (glow
+				// lichen's, a hair off the wall it grows on; lava's top); for a face on the cells' boundary, the one
+				// just behind it. Only ever behind, the lichen facing out from its wall took the wall's light (none)
+				// and gave none.
+				float ux = cx / area;
+				float uy = cy / area;
+				float uz = cz / area;
+				float across = Math.abs(ux) > 0.9f ? mx : Math.abs(uy) > 0.9f ? my : mz;
+				float off = Math.abs(across - Math.round(across));
+				int level = off > 0.002f && (Math.abs(ux) > 0.9f || Math.abs(uy) > 0.9f || Math.abs(uz) > 0.9f)
+						? emitters.lightAt(mx, my, mz)
+						: emitters.lightAt(mx - ux * 0.05f, my - uy * 0.05f, mz - uz * 0.05f);
 				if (level > 0) {
 					glow = level / 15f;
-					emissive = glow;
+					// Texels Bedrock marks as glowing at all, however faintly (glow lichen's berries), glow at the
+					// light level and the rest not: every texel glowing made a patch of lichen a lamp. With none
+					// marked (lava), every texel glows.
+					float coverage = MaterialAtlas.emissiveCoverage(uMin, vMin, uMax, vMax);
+					masked = coverage > 0 ? 1 : 0;
+					emissive = glow * (coverage > 0 ? coverage : 1);
 				}
 			}
 			if (emissive < MIN_EMISSIVE) {
@@ -231,6 +245,7 @@ public final class EmissiveLights {
 			out[o + 16] = uv[6] - uv[0];
 			out[o + 17] = uv[7] - uv[1];
 			out[o + 18] = glow;
+			out[o + 19] = masked;
 			count++;
 		}
 		return out.length == count * FLOATS ? out : Arrays.copyOf(out, count * FLOATS);

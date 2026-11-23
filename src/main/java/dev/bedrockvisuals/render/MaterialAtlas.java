@@ -142,6 +142,31 @@ public final class MaterialAtlas {
 		return sum / 255f / ((x1 - x0) * (y1 - y0));
 	}
 
+	/**
+	 * The share of the texels in an atlas rectangle (texture coordinates) with any emissive at all, however faint:
+	 * glow lichen's berries are marked at 5 of 255 in Bedrock's maps, the leaves not at all.
+	 */
+	public static float emissiveCoverage(float u0, float v0, float u1, float v1) {
+		byte[] channel = emissive;
+		if (channel == null) {
+			return 0;
+		}
+		int x0 = Math.clamp((int) Math.floor(Math.min(u0, u1) * emissiveWidth + 0.01), 0, emissiveWidth - 1);
+		int x1 = Math.clamp((int) Math.ceil(Math.max(u0, u1) * emissiveWidth - 0.01), x0 + 1, emissiveWidth);
+		int y0 = Math.clamp((int) Math.floor(Math.min(v0, v1) * emissiveHeight + 0.01), 0, emissiveHeight - 1);
+		int y1 = Math.clamp((int) Math.ceil(Math.max(v0, v1) * emissiveHeight - 0.01), y0 + 1, emissiveHeight);
+		int lit = 0;
+		for (int y = y0; y < y1; y++) {
+			int row = y * emissiveWidth;
+			for (int x = x0; x < x1; x++) {
+				if (channel[row + x] != 0) {
+					lit++;
+				}
+			}
+		}
+		return lit / (float) ((x1 - x0) * (y1 - y0));
+	}
+
 	/** One texel's emissive (0 to 1) in the block atlas's pixels; 0 outside it or before it is built. */
 	public static float emissiveAt(int x, int y) {
 		byte[] channel = emissive;

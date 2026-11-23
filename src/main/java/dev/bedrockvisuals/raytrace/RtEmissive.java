@@ -77,6 +77,8 @@ public final class RtEmissive {
 			                           // colour times its strength, and its reach
 			    vec4 skyBounceLight;   // rgb: the sky's light (Bedrock's sky ambient, LightingState.sky); w: 1 when
 			                           // bounce rays that reach the sky bring it back (in place of Bedrock's term)
+			    vec4 lavaSprites[2];   // the block atlas's rectangles (u0, v0, u1, v1) of lava's still and flowing
+			                           // textures: lava glows all over (GATHER)
 			};
 			layout(set = 0, binding = OUTPUT_BINDING, std430) writeonly buffer Output { uvec2 pixels[]; };
 			layout(buffer_reference, scalar, buffer_reference_align = 4) readonly buffer Words { uint w[]; };
@@ -109,6 +111,15 @@ public final class RtEmissive {
 			    float r = d / max(reach, 0.001);
 			    float f = clamp(1.0 - r * r * r * r, 0.0, 1.0);
 			    return f * f;
+			}
+
+			// How much a light's texel at uv glows: Bedrock's emissive there, or for a light standing in for Java's
+			// block light (uv2.z: its light level / 15), that level, on every texel (lava) or, when uv2.w is set,
+			// on those Bedrock marks as glowing at all, however faintly (glow lichen's berries).
+			float lightEmissive(Light light, vec2 uv) {
+			    float marked = textureLod(Materials, uv, 0.0).g;
+			    float standIn = light.uv2.w > 0.5 ? (marked > 0.5 / 255.0 ? light.uv2.z : 0.0) : light.uv2.z;
+			    return max(marked, standIn);
 			}
 
 			vec2 sodiumUv(Words words, uint vertex) {
@@ -431,7 +442,7 @@ public final class RtEmissive {
 			    vec3 x = light.p0.xyz + light.e1.xyz * s + light.e2.xyz * t;
 			    vec2 uv = light.uv.xy + light.uv.zw * s + light.uv2.xy * t;
 			    vec4 texel = textureLod(Atlas, uv, 0.0);
-			    float emissive = max(textureLod(Materials, uv, 0.0).g, light.uv2.z);
+			    float emissive = lightEmissive(light, uv);
 			    if (emissive <= 0.0 || (light.e2.w > 0.0 && texel.a < light.e2.w)) {
 			        return vec3(0.0);
 			    }
@@ -573,6 +584,7 @@ public final class RtEmissive {
 			    if (slot < 0) {
 			        return;
 			    }
+			    seedTexel(slot, p, n, thinSheet, level);
 			    ivec3 block = ivec3(floor(p)) + originBlock.xyz;
 			    // A texel whose history is new (just seen, or wiped by a change near it this frame) takes more samples
 			    // for its first frames, so its light is right and clean at once: 12, then 6, 4, 3 and 2.
@@ -642,6 +654,7 @@ public final class RtEmissive {
 			    // The bounce also goes to the texel's bounce cell (TexelCache's bounceKey), which is what is shown.
 			    int bounceCell = findTexel(bounceKey(p, n, thinSheet, originBlock.xyz, level), true);
 			    if (bounceCell >= 0) {
+			        seedBounceCell(bounceCell, p, n, thinSheet, level);
 			        placeTexel(bounceCell, block, bounceLevel(level));
 			    }
 			    vec3 bouncedSum = vec3(0.0);
@@ -723,6 +736,72 @@ public final class RtEmissive {
 
 	/** Stage 3, a thread a pixel: its texel's light, to the output (emitted on the left, bounced on the right). */
 	private static final String GATHER = GROUPS_8X8 + COMMON + """
+			bool inRect(vec2 uv, vec4 rect) {
+			    return all(greaterThanEqual(uv, rect.xy)) && all(lessThanEqual(uv, rect.zw));
+			}
+
+			// How much the surface at p (normal n) glows as a light standing in for Java's block light: lava all over (its
+			// level, 15), glow lichen on the texels Bedrock marks (its level, 7), else 0. Found from the quad itself, a short
+			// ray into it: lava used to be found from the light volume, which reaches 63 blocks across and 23 up and down, so
+			// past that box lava went from glowing to lit like stone, the edge moving with the camera.
+			float standInGlow(vec3 p, vec3 n) {
+			    rayQueryEXT query;
+			    rayQueryInitializeEXT(query, scene, gl_RayFlagsNoneEXT, 0x01, p + n * 0.05, 0.0, -n, 0.12);
+			    while (rayQueryProceedEXT(query)) {
+			        if (rayQueryGetIntersectionTypeEXT(query, false) == gl_RayQueryCandidateIntersectionTriangleEXT
+			                && blocks(query)) {
+			            rayQueryConfirmIntersectionEXT(query);
+			        }
+			    }
+			    if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
+			        return 0.0;
+			    }
+			    InstanceInfo info = instances[rayQueryGetIntersectionInstanceCustomIndexEXT(query, true)];
+			    if (info.kind != 0u) {
+			        return 0.0;
+			    }
+			    uint geometry = uint(rayQueryGetIntersectionGeometryIndexEXT(query, true));
+			    uint primitive = uint(rayQueryGetIntersectionPrimitiveIndexEXT(query, true));
+			    uvec3 corners = (primitive & 1u) == 0u ? uvec3(0u, 1u, 2u) : uvec3(2u, 3u, 0u);
+			    uint first = info.firstVertex[geometry] + (primitive >> 1u) * 4u;
+			    Words words = Words(info.vertices);
+			    vec2 b = rayQueryGetIntersectionBarycentricsEXT(query, true);
+			    vec2 uv = sodiumUv(words, first + corners.x) * (1.0 - b.x - b.y) + sodiumUv(words, first + corners.y) * b.x
+			            + sodiumUv(words, first + corners.z) * b.y;
+			    if (inRect(uv, lavaSprites[0]) || inRect(uv, lavaSprites[1])) {
+			        return 1.0;
+			    }
+			    // A texel Bedrock marks as glowing only faintly: glowing at its block's light level if a light of the cell's
+			    // list standing in for block light (glow lichen) is this quad. Only for such texels the walk through the list.
+			    float marked = textureLod(Materials, uv, 0.0).g;
+			    if (marked <= 0.5 / 255.0 || marked >= 0.1) {
+			        return 0.0;
+			    }
+			    uint base;
+			    uint indexBase;
+			    vec3 g = p + grid.xyz;
+			    if (switches.x < 0.5 || !gridCell(g, base, indexBase)) {
+			        return 0.0;
+			    }
+			    uint count = floatBitsToUint(cells[base].x);
+			    float glow = 0.0;
+			    for (uint i = 0u; i < count; i++) {
+			        uint word = cellWords[indexBase + i];
+			        if ((word & 0x80000000u) == 0u) {
+			            continue;
+			        }
+			        Light light = lights[word & 0x7FFFFFFFu];
+			        vec3 d = g - light.p0.xyz;
+			        vec3 normal = normalize(cross(light.e1.xyz, light.e2.xyz));
+			        float s = dot(d, light.e1.xyz) / dot(light.e1.xyz, light.e1.xyz);
+			        float t = dot(d, light.e2.xyz) / dot(light.e2.xyz, light.e2.xyz);
+			        if (abs(dot(d, normal)) < 0.02 && s > -0.01 && s < 1.01 && t > -0.01 && t < 1.01) {
+			            glow = max(glow, light.uv2.z);
+			        }
+			    }
+			    return glow;
+			}
+
 			// Frames a texel's own light takes over from the coarser texel standing in for it.
 			const float FILL = 8.0;
 			void main() {
@@ -808,6 +887,7 @@ public final class RtEmissive {
 			        vec2 f = q - low;
 			        vec3 sum = vec3(0.0);
 			        float weight = 0.0;
+			        float corners = 0.0;
 			        for (int i = 0; i < 4; i++) {
 			            vec2 corner = vec2(float(i & 1), float(i >> 1));
 			            vec2 centre = (low + corner + 0.5) * cellSize;
@@ -818,10 +898,14 @@ public final class RtEmissive {
 			                float w = b.x * b.y * min(entries[cell].historyA.w + 0.25, 8.0);
 			                sum += entries[cell].historyB.rgb * w;
 			                weight += w;
+			                corners += b.x * b.y;
 			            }
 			        }
 			        bounced = weight > 0.0 ? sum / weight : vec3(0.0);
-			        settled = clamp(weight / FILL, 0.0, 1.0);
+			        // Over the cells there are: at a face's edge the cells past it (in the air, or in the next block)
+			        // never exist, and counted as unsettled they kept half of Bedrock's sky light along every edge
+			        // and three quarters in the corners, a bright outline round every block.
+			        settled = corners > 0.0 ? clamp(weight / corners / FILL, 0.0, 1.0) : 0.0;
 			    } else {
 			        int cell = findTexel(bounceKey(p, n, thinSheet, originBlock.xyz, level), false);
 			        bounced = cell >= 0 ? entries[cell].historyB.rgb : vec3(0.0);
@@ -861,10 +945,9 @@ public final class RtEmissive {
 			        emitted += light * entityTerms.y * tint;
 			    }
 
-			    // Alpha: 0. Points on blocks that glow all over (lava) are found by the lighting pass from the light
-			    // volume's flag (EmitterColors.glowsAllOver); this pass's own search of the cell's lights for them cost
-			    // a walk through up to PER_CELL lights a pixel.
-			    pixels[left] = uvec2(packHalf2x16(emitted.rg), packHalf2x16(vec2(emitted.b, 0.0)));
+			    // Alpha: how much the point glows as a light standing in for Java's block light (EmissiveLights' glow),
+			    // for the lighting pass to draw it glowing.
+			    pixels[left] = uvec2(packHalf2x16(emitted.rg), packHalf2x16(vec2(emitted.b, standInGlow(p, n))));
 			    pixels[right] = uvec2(packHalf2x16(bounced.rg), packHalf2x16(vec2(bounced.b, settled)));
 			    vec3 from = slot >= 0 ? entries[slot].fastE.xyz : vec3(0.0);
 			    pixels[towards] = uvec2(packHalf2x16(from.xy), packHalf2x16(vec2(from.z, 0.0)));
@@ -1110,7 +1193,7 @@ public final class RtEmissive {
 					.putInt(124, history(exporting));
 
 			// This frame's light and switches, freed once the frame has run.
-			RtBuffer params = rt.hostBuffer(SKY_AT + 16,
+			RtBuffer params = rt.hostBuffer(SKY_AT + 48,
 					VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 			rt.free(params);
 			ByteBuffer frameData = params.bytes();
@@ -1137,6 +1220,18 @@ public final class RtEmissive {
 			org.joml.Vector3f skyLight = dev.bedrockvisuals.render.LightingState.current().sky();
 			frameData.putFloat(SKY_AT, skyLight.x()).putFloat(SKY_AT + 4, skyLight.y()).putFloat(SKY_AT + 8, skyLight.z())
 					.putFloat(SKY_AT + 12, skyBounce && bounce ? 1 : 0);
+			// Lava's textures, which glow all over (standInGlow).
+			net.minecraft.client.renderer.texture.TextureAtlas blocks = (net.minecraft.client.renderer.texture.TextureAtlas)
+					net.minecraft.client.Minecraft.getInstance().getTextureManager()
+							.getTexture(net.minecraft.client.renderer.texture.TextureAtlas.LOCATION_BLOCKS);
+			String[] lava = {"block/lava_still", "block/lava_flow"};
+			for (int i = 0; i < 2; i++) {
+				net.minecraft.client.renderer.texture.TextureAtlasSprite sprite = blocks.getSprite(
+						net.minecraft.resources.Identifier.withDefaultNamespace(lava[i]));
+				int at = SKY_AT + 16 + i * 16;
+				frameData.putFloat(at, sprite.getU0()).putFloat(at + 4, sprite.getV0()).putFloat(at + 8, sprite.getU1())
+						.putFloat(at + 12, sprite.getV1());
+			}
 			frameData.putInt(ENTITY_LIGHTS_AT, carried).putInt(ENTITY_LIGHTS_AT + 4, EntityGeometry.quads() > 0 ? 1 : 0)
 					.putInt(ENTITY_LIGHTS_AT + 8, lightVolume != null ? 1 : 0);
 

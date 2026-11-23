@@ -1199,13 +1199,9 @@ void main() {
     float standInGlow = 0.0;
     if (RtEmissiveParams.x > 0.5 && distant < 0.0) {
         vec4 traced = texture(RtEmissiveMap, vec2(texCoord.x / 3.0, texCoord.y));
-        // Any face of a block the light volume marks as glowing all over (lava; EmitterColors.glowsAllOver), at
-        // its light level. Per block, not per pixel.
-        float standIn = 0.0;
-        vec3 inside = position - n * 0.1; // thin flowing lava is under a block deep
-        if (glowsAllOver(inside)) {
-            standIn = max(lightVolumeAt(inside).y, 1.0 / 15.0);
-        }
+        // A face that stands in for its block's light (lava all over, glow lichen's berries) glows at its light
+        // level: the traced light's alpha (RtEmissive's standInGlow, from the quad itself, at any distance).
+        float standIn = traced.a;
         // Such a face glows as the traced light takes it to (every texel at its light level / 15, as glowstone's
         // texels glow at their emissive): seen lit by Bedrock's block light instead, lava looked like stone by a
         // torch while lighting the room. The traced light on it, mostly its neighbouring lava faces', isn't added

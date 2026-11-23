@@ -99,7 +99,7 @@ public final class EntityProbes {
 			    vec3 x = light.p0.xyz + light.e1.xyz * u.y + light.e2.xyz * u.z;
 			    vec2 uv = light.uv.xy + light.uv.zw * u.y + light.uv2.xy * u.z;
 			    vec4 texel = textureLod(Atlas, uv, 0.0);
-			    float emissive = max(textureLod(Materials, uv, 0.0).g, light.uv2.z);
+			    float emissive = lightEmissive(light, uv);
 			    if (emissive <= 0.0 || (light.e2.w > 0.0 && texel.a < light.e2.w)) {
 			        return vec3(0.0);
 			    }
