@@ -41,6 +41,24 @@ public final class DistantHeights {
 	private static final short[] undersides = new short[SIZE * SIZE];
 	/** Per cell: the top block's colour, 0xRRGGBB in sRGB (0 unknown). */
 	private static final int[] colours = new int[SIZE * SIZE];
+	/**
+	 * The far terrain's block light, finer and nearer than the heights: per {@link #LIGHT_CELL}-block cell out to
+	 * {@link #LIGHT_REACH_TILES} tiles from the camera's, the light at the surface (DistantTerrainSource's
+	 * surfaceBlockLight) times 17, so 255 is level 15. The lighting pass lights Distant Horizons' terrain by it
+	 * and divides the lightmap DH multiplied in back out at it (a lava pool in the far terrain lights its shore).
+	 */
+	static final int LIGHT_CELL = 2;
+	static final int LIGHT_SIZE = 1024;
+	private static final int LIGHT_TILE = 64 / LIGHT_CELL;
+	private static final int LIGHT_TILES = LIGHT_SIZE / LIGHT_TILE;
+	/** Tiles (64 blocks) from the camera's that the light map is read out to: within its wrap. */
+	private static final int LIGHT_REACH_TILES = LIGHT_TILES / 2 - 1;
+	private static final byte[] lights = new byte[LIGHT_SIZE * LIGHT_SIZE];
+	private static final AtomicLongArray lightDirtyRows = new AtomicLongArray(LIGHT_SIZE / 64);
+	private static final long[] lightTileRead = new long[LIGHT_TILES * LIGHT_TILES];
+	private static GpuTexture lightTexture;
+	private static GpuTextureView lightView;
+	private static int nextLightRow;
 	/** One bit per row: written by the worker since the last upload. */
 	private static final AtomicLongArray dirtyRows = new AtomicLongArray(SIZE / 64);
 	private static volatile int centerX;
@@ -80,11 +98,27 @@ public final class DistantHeights {
 			java.util.Arrays.fill(heights, (short) 0);
 			java.util.Arrays.fill(undersides, (short) 0);
 			java.util.Arrays.fill(colours, 0);
+			java.util.Arrays.fill(lights, (byte) 0);
+			for (int i = 0; i < lightDirtyRows.length(); i++) {
+				lightDirtyRows.set(i, -1L);
+			}
 			highest = 0;
 			for (int i = 0; i < dirtyRows.length(); i++) {
 				dirtyRows.set(i, -1L);
 			}
 			any = false;
+		}
+		if (!unloadHooked) {
+			unloadHooked = true;
+			// A chunk Minecraft lets go of is handed to Distant Horizons, which updates its terrain there: its
+			// tile is read again a little later (a lava pool built and left showed nothing in the far terrain
+			// until the five-minute refresh).
+			net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents.CHUNK_UNLOAD.register((level, chunk) -> {
+				int blockX = chunk.getPos().getMinBlockX();
+				int blockZ = chunk.getPos().getMinBlockZ();
+				staleTiles.add(new long[] {Math.floorDiv(blockX, TILE * CELL), Math.floorDiv(blockZ, TILE * CELL),
+						System.nanoTime() + STALE_DELAY_NANOS});
+			});
 		}
 		if (worker == null) {
 			running = true;
@@ -103,6 +137,33 @@ public final class DistantHeights {
 	private static final long[] tileRead = new long[TILES * TILES];
 	/** How often the tiles already read are read again, for terrain Distant Horizons has changed since. */
 	private static final long FULL_REFRESH_NANOS = 300_000_000_000L;
+	/** Tiles (x, z, when) whose chunks were unloaded: read again once Distant Horizons has had time to update. */
+	private static final java.util.concurrent.ConcurrentLinkedQueue<long[]> staleTiles =
+			new java.util.concurrent.ConcurrentLinkedQueue<>();
+	private static final long STALE_DELAY_NANOS = 10_000_000_000L;
+	private static boolean unloadHooked;
+
+	/** Forgets the tiles whose chunks unloaded long enough ago; whether there were any. */
+	private static boolean forgetStaleTiles() {
+		boolean any = false;
+		long now = System.nanoTime();
+		java.util.Iterator<long[]> it = staleTiles.iterator();
+		while (it.hasNext()) {
+			long[] tile = it.next();
+			if (now - tile[2] < 0) {
+				continue;
+			}
+			it.remove();
+			int tileX = (int) tile[0];
+			int tileZ = (int) tile[1];
+			tileRead[Math.floorMod(tileZ, TILES) * TILES + Math.floorMod(tileX, TILES)] = Long.MIN_VALUE;
+			lightTileRead[Math.floorMod(tileZ, LIGHT_TILES) * LIGHT_TILES + Math.floorMod(tileX, LIGHT_TILES)] =
+					Long.MIN_VALUE;
+			any = true;
+		}
+		return any;
+	}
+
 	/** Bumped on a new level: the worker forgets which tiles it has read. */
 	private static volatile int generation;
 
@@ -115,6 +176,7 @@ public final class DistantHeights {
 	 */
 	private static void work(DistantTerrainSource source) {
 		java.util.Arrays.fill(tileRead, Long.MIN_VALUE);
+		java.util.Arrays.fill(lightTileRead, Long.MIN_VALUE);
 		int seen = generation;
 		long lastFull = System.nanoTime();
 		try {
@@ -123,6 +185,7 @@ public final class DistantHeights {
 					seen = generation;
 					lastFull = System.nanoTime();
 					java.util.Arrays.fill(tileRead, Long.MIN_VALUE);
+					java.util.Arrays.fill(lightTileRead, Long.MIN_VALUE);
 				}
 				int tx = Math.floorDiv(centerX, TILE);
 				int tz = Math.floorDiv(centerZ, TILE);
@@ -138,9 +201,11 @@ public final class DistantHeights {
 						}
 					}
 				}
-				if (!moved) {
+				if (!moved && !forgetStaleTiles()) {
 					// Every tile in reach is read or has nothing yet: look again for terrain DH loads later.
-					Thread.sleep(5000);
+					for (int i = 0; i < 10 && !forgetStaleTiles(); i++) {
+						Thread.sleep(500);
+					}
 				}
 			}
 		} catch (InterruptedException e) {
@@ -155,6 +220,46 @@ public final class DistantHeights {
 	}
 
 	private static void readTile(DistantTerrainSource source, int tileX, int tileZ) {
+		readHeightTile(source, tileX, tileZ);
+		readLightTile(source, tileX, tileZ);
+	}
+
+	/** The light map's cells in a tile near enough the camera's, unless read already. */
+	private static void readLightTile(DistantTerrainSource source, int tileX, int tileZ) {
+		if (Math.abs(tileX - Math.floorDiv(centerX, TILE)) > LIGHT_REACH_TILES
+				|| Math.abs(tileZ - Math.floorDiv(centerZ, TILE)) > LIGHT_REACH_TILES) {
+			return;
+		}
+		int index = Math.floorMod(tileZ, LIGHT_TILES) * LIGHT_TILES + Math.floorMod(tileX, LIGHT_TILES);
+		long key = ((long) tileX << 32) ^ (tileZ & 0xFFFFFFFFL);
+		if (lightTileRead[index] == key) {
+			return;
+		}
+		boolean complete = true;
+		try {
+			for (int z = 0; z < LIGHT_TILE; z++) {
+				for (int x = 0; x < LIGHT_TILE; x++) {
+					int cellX = tileX * LIGHT_TILE + x;
+					int cellZ = tileZ * LIGHT_TILE + z;
+					int level = source.surfaceBlockLight(cellX * LIGHT_CELL + LIGHT_CELL / 2,
+							cellZ * LIGHT_CELL + LIGHT_CELL / 2);
+					complete &= level >= 0;
+					byte value = (byte) (Math.max(level, 0) * 17);
+					int tz = Math.floorMod(cellZ, LIGHT_SIZE);
+					int i = tz * LIGHT_SIZE + Math.floorMod(cellX, LIGHT_SIZE);
+					if (lights[i] != value) {
+						lights[i] = value;
+						lightDirtyRows.getAndUpdate(tz >> 6, bits -> bits | (1L << (tz & 63)));
+					}
+				}
+			}
+		} finally {
+			source.releaseHeightCache();
+		}
+		lightTileRead[index] = complete ? key : Long.MIN_VALUE;
+	}
+
+	private static void readHeightTile(DistantTerrainSource source, int tileX, int tileZ) {
 		int index = Math.floorMod(tileZ, TILES) * TILES + Math.floorMod(tileX, TILES);
 		long key = ((long) tileX << 32) ^ (tileZ & 0xFFFFFFFFL);
 		if (tileRead[index] == key) {
@@ -226,6 +331,36 @@ public final class DistantHeights {
 				MemoryUtil.memFree(none);
 			}
 			colourView = device.createTextureView(colourTexture);
+			lightTexture = device.createTexture(() -> "Bedrock Visuals distant block light",
+					GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.R8_UNORM, LIGHT_SIZE,
+					LIGHT_SIZE, 1, 1);
+			ByteBuffer dark = MemoryUtil.memCalloc(LIGHT_SIZE * LIGHT_SIZE);
+			try {
+				device.createCommandEncoder().writeToTexture(lightTexture, dark, 0, 0, 0, 0, LIGHT_SIZE, LIGHT_SIZE);
+			} finally {
+				MemoryUtil.memFree(dark);
+			}
+			lightView = device.createTextureView(lightTexture);
+		}
+		ByteBuffer lightRow = MemoryUtil.memAlloc(LIGHT_SIZE);
+		try {
+			int uploaded = 0;
+			for (int i = 0; i < LIGHT_SIZE && uploaded < ROWS_PER_FRAME; i++) {
+				int r = (nextLightRow + i) % LIGHT_SIZE;
+				long bit = 1L << (r & 63);
+				if ((lightDirtyRows.get(r >> 6) & bit) == 0) {
+					continue;
+				}
+				lightDirtyRows.getAndUpdate(r >> 6, bits -> bits & ~bit);
+				lightRow.clear();
+				lightRow.put(lights, r * LIGHT_SIZE, LIGHT_SIZE);
+				lightRow.flip();
+				device.createCommandEncoder().writeToTexture(lightTexture, lightRow, 0, 0, 0, r, LIGHT_SIZE, 1);
+				uploaded++;
+				nextLightRow = (r + 1) % LIGHT_SIZE;
+			}
+		} finally {
+			MemoryUtil.memFree(lightRow);
 		}
 		ByteBuffer row = MemoryUtil.memAlloc(SIZE * 4);
 		ByteBuffer colourRow = MemoryUtil.memAlloc(SIZE * 4);
@@ -310,6 +445,11 @@ public final class DistantHeights {
 	/** {@link #epoch()} for the ray-traced scene's far terrain (raytrace/DistantField): odd while the map is on. */
 	public static int epochForScene() {
 		return epoch();
+	}
+
+	/** The block light map (LIGHT_SIZE² cells of LIGHT_CELL blocks, wrapping), or null before there is one. */
+	static GpuTextureView lightView() {
+		return lightView;
 	}
 
 	/** The map, or null before there is one. */

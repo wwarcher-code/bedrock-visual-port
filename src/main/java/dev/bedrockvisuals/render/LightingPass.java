@@ -70,6 +70,7 @@ public final class LightingPass {
 			.withUniform("RtProbeMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("RtEntityData", UniformType.UNIFORM_BUFFER)
 			.withUniform("DistantHeightMap", UniformType.COMBINED_IMAGE_SAMPLER)
+			.withUniform("DistantLightMap", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("SkyProbe", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("SunTexture", UniformType.COMBINED_IMAGE_SAMPLER)
 			.withUniform("LightVolumeMap", UniformType.COMBINED_IMAGE_SAMPLER)
@@ -110,7 +111,7 @@ public final class LightingPass {
 	private static GpuTextureView distantDepth;
 	private static Matrix4f previousViewProjection;
 	private static net.minecraft.world.phys.Vec3 previousCamera;
-	private static final int DISTANT_SIZE = 64 + 64;
+	private static final int DISTANT_SIZE = 64 + 64 + 16 * 16;
 	/** Set once the froxel volume has been attempted; before that its flag is set optimistically. */
 	private static boolean froxelTried;
 	/** RtShadowData (lighting/deferred.fsh): the ray-traced shadows' and emissive light's flags. */
@@ -155,16 +156,28 @@ public final class LightingPass {
 		CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
 		if (rtShadowData == null) {
 			rtShadowData = RenderSystem.getDevice().createBuffer(() -> "Bedrock Visuals ray-traced shadow data",
-					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, 32);
+					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, 64);
 		}
 		try (MemoryStack stack = MemoryStack.stackPush()) {
 			boolean traced = dev.bedrockvisuals.raytrace.RtShadows.active();
 			boolean emissive = dev.bedrockvisuals.raytrace.RtEmissive.active();
-			encoder.writeToBuffer(rtShadowData.slice(), Std140Builder.onStack(stack, 32)
-					.putVec4(traced ? 1 : 0, dev.bedrockvisuals.raytrace.RtShadows.comparing() ? 1 : 0, 0, 0)
+			// The emitted light's grid around the camera (EmissiveLights): its lowest corner relative to the camera,
+			// w 1 when there is one; and its size in blocks. Outside it, nothing lists the lights.
+			int[] lightGrid = emissive ? dev.bedrockvisuals.raytrace.EmissiveLights.gridBounds() : null;
+			net.minecraft.world.phys.Vec3 eye = net.minecraft.client.Minecraft.getInstance().gameRenderer.mainCamera()
+					.position();
+			encoder.writeToBuffer(rtShadowData.slice(), Std140Builder.onStack(stack, 64)
+					// z: the loaded chunks' reach in chunks from the camera's (the rays see what's built within it)
+					.putVec4(traced ? 1 : 0, dev.bedrockvisuals.raytrace.RtShadows.comparing() ? 1 : 0,
+							net.minecraft.client.Minecraft.getInstance().options.getEffectiveRenderDistance(), 0)
 					.putVec4(emissive ? 1 : 0, dev.bedrockvisuals.raytrace.RtEmissive.floorShare(),
 							dev.bedrockvisuals.raytrace.RtEmissive.bounceActive() ? 1 : 0,
-							dev.bedrockvisuals.raytrace.RtEmissive.skyBounceActive() ? 1 : 0).get());
+							dev.bedrockvisuals.raytrace.RtEmissive.skyBounceActive() ? 1 : 0)
+					.putVec4(lightGrid == null ? 0 : (float) (lightGrid[0] - eye.x),
+							lightGrid == null ? 0 : (float) (lightGrid[1] - eye.y),
+							lightGrid == null ? 0 : (float) (lightGrid[2] - eye.z), lightGrid == null ? 0 : 1)
+					.putVec4(lightGrid == null ? 0 : lightGrid[3], lightGrid == null ? 0 : lightGrid[4],
+							lightGrid == null ? 0 : lightGrid[5], 0).get());
 		}
 		if (rtEntityData == null) {
 			rtEntityData = RenderSystem.getDevice().createBuffer(() -> "Bedrock Visuals entities' ray-traced light data",
@@ -263,6 +276,11 @@ public final class LightingPass {
 			DistantHeights.write(distantBuilder);
 			// x: 1 when this frame's froxel volume is there (FroxelVolume, drawn below before the pass opens).
 			distantBuilder.putVec4(FroxelVolume.ready() || !froxelTried ? 1 : 0, 0, 0, 0);
+			// Minecraft's lightmap at full sky light for each block light level: what DH multiplied in beside a light.
+			for (int blockLevel = 0; blockLevel < 16; blockLevel++) {
+				Vector3f at = WorldLightmap.atBlockLevel(blockLevel);
+				distantBuilder.putVec4(at.x, at.y, at.z, 0);
+			}
 			encoder.writeToBuffer(distant.slice(), distantBuilder.get());
 			Std140Builder atmosphereBuilder = Std140Builder.onStack(stack, SkyAtmosphere.DATA_SIZE);
 			SkyAtmosphere.write(atmosphereBuilder, light.atmosphere());
@@ -364,6 +382,9 @@ public final class LightingPass {
 					? FroxelVolume.transmittanceView() : gbuffer.depthView(), linear);
 			// The far terrain's heights, for its shadows (DistantData's last vec4 says whether there are any).
 			pass.setUniform("DistantHeightMap", DistantHeights.view() != null ? DistantHeights.view()
+					: gbuffer.depthView(), nearest);
+			// And its block light, made with the heights (read only while they are on).
+			pass.setUniform("DistantLightMap", DistantHeights.lightView() != null ? DistantHeights.lightView()
 					: gbuffer.depthView(), nearest);
 			pass.setUniform("CloudCoverage", coverage,
 					RenderSystem.getSamplerCache().getRepeat(FilterMode.LINEAR, true));

@@ -149,6 +149,7 @@ float viewDistance(float depth) {
 
 struct WaterSurface {
     vec3 n;              // with the surface map's per-texel tilt
+    bool top;            // a face that looks up (or down, from under water): the reflection pass's surfaces
     float roughness;     // the surface map's per-texel roughness
     float metalness;     // the surface map's per-texel metalness, as the G-buffer stores it
     vec3 v;
@@ -256,6 +257,7 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
     }
     vec3 tangentNormal;
     surfaceTexel(tangentNormal, s.roughness, s.metalness);
+    s.top = abs(face.y) > 0.7;
     s.n = normalize(tangent * tangentNormal.x + bitangent * tangentNormal.y + face * tangentNormal.z);
     s.n = withWaves(s.n, face, v_Position);
     if (dot(s.n, v_Position) > 0.0) {
@@ -662,7 +664,7 @@ vec3 waterColor(WaterSurface s, float albedo) {
     // Seen at a low angle, a ripple can tilt the mirror ray below the water's plane, where it can only find the
     // sky; DH's flat water beside it always reflects upwards and found the far shore (a seam between them).
     // Kept a little above the plane.
-    if (UnderwaterParams.x < 0.5 && mirror.y < 0.02) {
+    if (UnderwaterParams.x < 0.5 && s.top && mirror.y < 0.02) {
         mirror = normalize(vec3(mirror.x, 0.02 + 0.5 * abs(mirror.y), mirror.z));
     }
     // The reflection, what lies beneath and the surface's fog are added in HDR (this renderer's units, before
@@ -690,7 +692,10 @@ vec3 waterColor(WaterSurface s, float albedo) {
     float nearHit;
     float farHit = 0.0;
     vec3 reflection;
-    if (resolved.w > -1.5) {
+    // Only on the faces that look up: the reflection pass marches from the water surface over each pixel, the
+    // top of the column (still water's ripples, a mirror that looks up). A waterfall's side took the reflection
+    // of the pool's surface behind or below it, rippling in place across the falling ripples.
+    if (resolved.w > -1.5 && s.top) {
         // The resolve holds the hits' confidence (Bedrock's fades, averaged over recent frames: ripples flip rays
         // between hit and miss) with their reflection premultiplied by it, and Bedrock mixes the probe and the
         // screen's reflection by it as it is (SSR.a x SSRParameters.y, 1). (Sharpened, as it was while the scene

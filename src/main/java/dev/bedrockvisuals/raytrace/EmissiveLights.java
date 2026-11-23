@@ -68,6 +68,15 @@ public final class EmissiveLights {
 	private EmissiveLights() {
 	}
 
+	/**
+	 * The current grid's lowest corner in world blocks and its size, {minX, minY, minZ, sizeX, sizeY, sizeZ}, or
+	 * null before there is one: the lighting pass falls back on Bedrock's block light outside it.
+	 */
+	public static int[] gridBounds() {
+		Grid g = grid;
+		return g == null ? null : new int[] {g.minX(), g.minY(), g.minZ(), CELLS_X * CELL, CELLS_Y * CELL, CELLS_Z * CELL};
+	}
+
 	/** Some section's lights changed (built, rebuilt or gone). */
 	static void changed() {
 		changed = true;

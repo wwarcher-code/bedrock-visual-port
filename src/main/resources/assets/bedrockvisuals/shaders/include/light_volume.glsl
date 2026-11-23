@@ -103,7 +103,21 @@ bool coveredCell(ivec3 cameraCell) {
 // steps) still under the terrain's surface counts as blocked: the volume reaches only 23 blocks up and down, and
 // in a cave taller than that the rays from its floor ran out before they met its roof (sunlit patches deep in
 // big caves).
+// The walk below, with what happens where the ray leaves the volume chosen: covered (a cell under its column's
+// terrain surface) counts as blocked when coveredBlocks, else the ray counts as clear there.
+float voxelRayWalk(vec3 from, vec3 direction, int maxCells, bool coveredBlocks);
+
 float voxelRayVisibility(vec3 from, vec3 direction, int maxCells) {
+    return voxelRayWalk(from, direction, maxCells, true);
+}
+
+// Only the solid blocks in the volume: for ray-traced shadows, which see everything Sodium has built but not
+// the rock it hasn't (a cave reached without the ground over it ever drawn). Past the volume, the rays decide.
+float voxelRaySolidOnly(vec3 from, vec3 direction, int maxCells) {
+    return voxelRayWalk(from, direction, maxCells, false);
+}
+
+float voxelRayWalk(vec3 from, vec3 direction, int maxCells, bool coveredBlocks) {
     if (!inLightVolume(from)) {
         return 1.0;
     }
@@ -127,14 +141,14 @@ float voxelRayVisibility(vec3 from, vec3 direction, int maxCells) {
         }
         vec3 p = vec3(cell) + 0.5 - fract(LightVolumeOrigin.xyz);
         if (max(abs(p.x), abs(p.z)) > range.x || abs(p.y) > range.y) {
-            return coveredCell(inside) ? 0.0 : 1.0;
+            return coveredBlocks && coveredCell(inside) ? 0.0 : 1.0;
         }
         if (solidCell(cell)) {
             return 0.0;
         }
         inside = cell;
     }
-    return coveredCell(inside) ? 0.0 : 1.0;
+    return coveredBlocks && coveredCell(inside) ? 0.0 : 1.0;
 }
 
 #endif

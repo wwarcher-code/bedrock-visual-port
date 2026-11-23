@@ -30,9 +30,12 @@ uniform sampler2D RtEmissiveMap;   // ray-traced diffuse light over pi (RtEmissi
                                    // (xyz: towards it, as long as it comes from one way)
 layout(std140) uniform RtShadowData {
     vec4 RtShadowParams;           // x: RtShadowMap holds this frame's, y: show the comparison view
+                                   // z: the loaded chunks' reach in chunks (beyondCasters)
     vec4 RtEmissiveParams;         // x: RtEmissiveMap's emitted light is this frame's, y: the share of block light
                                    // kept under it, z: its bounced light is this frame's, w: and brings the
                                    // sky's light back (Bedrock's sky ambient term left out)
+    vec4 RtLightGridCorner;        // xyz: the emitted light's grid's lowest corner relative to the camera; w: 1 if any
+    vec4 RtLightGridSize;          // xyz: its size in blocks (EmissiveLights)
 };
 
 #include <bedrockvisuals:common.glsl>
@@ -49,6 +52,7 @@ layout(std140) uniform DistantData {
     vec4 DistantHeightOrigin;      // xz: the camera's world x, z modulo the height map's width in blocks;
                                    // y: its height above the level's floor; w: 1 when there are heights
     vec4 FroxelParams;             // x: 1 when this frame's froxel volume is there (FroxelVolume.java)
+    vec4 DistantBlockLightmap[16]; // rgb: Minecraft's lightmap at full sky light, per block light level
 };
 uniform sampler2D SunTexture;         // Bedrock's textures/environment/sun (SunMoon.java)
 uniform sampler2D MoonTexture;        // and moon_phases: 4 across, 2 down
@@ -56,6 +60,7 @@ uniform sampler2D FroxelScatter;      // Bedrock's coarse fog grid: in-scattered
 uniform sampler2D FroxelTransmittance; // and the transmittance (froxels.glsl)
 #include <bedrockvisuals:froxels.glsl>
 uniform sampler2D DistantHeightMap; // the far terrain's heights (DistantHeights.java)
+uniform sampler2D DistantLightMap;  // and its block light at the surface, finer and nearer (level × 17 / 255)
 uniform sampler2D LightVolumeMap;   // sky and block light around the camera (LightVolume.java)
 // Bedrock's point lights (PointLights.java): the blocks the packs declare as point lights near the camera.
 const int MAX_POINT_LIGHTS = 64;
@@ -247,6 +252,47 @@ float phaseHG(float g, float cosine) {
 const int HEIGHT_STEPS = 64;
 const float HEIGHT_CELL = 8.0;
 const float HEIGHT_SIZE = 1024.0;
+// Where the shadow test covering a point's ray stops seeing casters, and the far terrain's heights take over.
+// The cascades reach 120 blocks. Ray-traced shadows see every loaded chunk: only outside them (by chunk, from
+// the camera's) do the heights count. At 120 blocks they shaded the loaded terrain past it, already traced,
+// by 8-block cells' tops (a tree's crown over its whole cell): dark blotches over chunks that had just come in,
+// which went away as the camera came within 120 blocks of them.
+bool beyondCasters(vec3 q) {
+    if (RtShadowParams.x > 0.5 && RtShadowParams.z > 0.5) {
+        vec2 chunk = floor((q.xz + mod(DistantHeightOrigin.xz, 16.0)) / 16.0);
+        return max(abs(chunk.x), abs(chunk.y)) > RtShadowParams.z;
+    }
+    return dot(q.xz, q.xz) > 120.0 * 120.0;
+}
+
+// The far terrain's block light (0 to 15) at camera-relative p, between its four nearest cells, from
+// DistantHeights' light map (2-block cells out to 960 blocks, faded out from 830); 0 where it has none.
+const float LIGHT_CELL = 2.0;
+const float LIGHT_SIZE = 1024.0;
+float distantBlockLight(vec3 p) {
+    float reach = max(abs(p.x), abs(p.z));
+    if (DistantHeightOrigin.w < 0.5 || reach > 896.0) {
+        return 0.0;
+    }
+    vec2 c = (p.xz + mod(DistantHeightOrigin.xz, LIGHT_CELL * LIGHT_SIZE)) / LIGHT_CELL - 0.5;
+    vec2 base = floor(c);
+    vec2 f = c - base;
+    float a = texelFetch(DistantLightMap, ivec2(mod(base, LIGHT_SIZE)), 0).r;
+    float b = texelFetch(DistantLightMap, ivec2(mod(base + vec2(1.0, 0.0), LIGHT_SIZE)), 0).r;
+    float d = texelFetch(DistantLightMap, ivec2(mod(base + vec2(0.0, 1.0), LIGHT_SIZE)), 0).r;
+    float e = texelFetch(DistantLightMap, ivec2(mod(base + vec2(1.0), LIGHT_SIZE)), 0).r;
+    float level = mix(mix(a, b, f.x), mix(d, e, f.x), f.y) * 15.0;
+    return level * (1.0 - smoothstep(832.0, 896.0, reach));
+}
+
+// Minecraft's lightmap at full sky light and block light level (0 to 15, between levels): what Distant
+// Horizons multiplied its colour by there.
+vec3 distantLightmapAt(float level) {
+    int below = int(floor(clamp(level, 0.0, 15.0)));
+    int above = min(below + 1, 15);
+    return mix(DistantBlockLightmap[below].rgb, DistantBlockLightmap[above].rgb, clamp(level, 0.0, 15.0) - float(below));
+}
+
 float distantHeightShadow(vec3 p, vec3 towardsLight, bool cascadeCovered) {
     if (DistantHeightOrigin.w < 0.5 || towardsLight.y < 0.01) {
         return 1.0;
@@ -259,7 +305,7 @@ float distantHeightShadow(vec3 p, vec3 towardsLight, bool cascadeCovered) {
         if (above > 448.0) {
             break; // above any terrain
         }
-        if (!cascadeCovered || dot(q.xz, q.xz) > 120.0 * 120.0) {
+        if (!cascadeCovered || beyondCasters(q)) {
             ivec2 texel = ivec2(mod(floor((q.xz + DistantHeightOrigin.xz) / HEIGHT_CELL), HEIGHT_SIZE));
             vec2 run = texelFetch(DistantHeightMap, texel, 0).rg * 65535.0;
             float height = run.x;
@@ -909,15 +955,19 @@ void main() {
         // Distant Horizons' colour is its own lit terrain colour; it stands in for the albedo (level 1: no
         // normals or materials from it), with a rough dielectric material and full sky light.
         position = ray * distant;
-        // DH multiplied its colour by Minecraft's lightmap (darker at night); divided back out here.
+        // DH multiplied its colour by Minecraft's lightmap (darker at night, warmer beside a light); divided back
+        // out here, at the block light DH had there (DistantHeights' light map). With the full-sky lightmap
+        // alone, terrain beside a far light kept the torch-yellow it was multiplied by and turned a dim
+        // yellow-green at night, and it got no block light of its own.
+        float farBlockLight = distantBlockLight(position);
         // Translucent terrain DH drew without depth that isn't sea-level water (a lake above it, ice): its own
         // colour, as before the ground was split from it.
         vec3 lodColor = (distantTranslucent ? texture(DistantFinalColor, texCoord).rgb : texture(DistantColor, texCoord).rgb)
-                / max(DistantLightmap.rgb, vec3(0.05));
+                / max(farBlockLight > 0.0 ? distantLightmapAt(farBlockLight) : DistantLightmap.rgb, vec3(0.05));
         albedo = toLinear(clamp(lodColor, 0.0, 1.0));
         n = distantNormal(texCoord, position);
         mers = vec4(0.0, 0.0, 1.0, 0.0);
-        levels = vec2(8.0, 248.0) / 256.0;
+        levels = vec2(8.0 + 16.0 * farBlockLight, 248.0) / 256.0;
     } else {
         albedo = toLinear(texture(Albedo, texCoord).rgb);
         n = normalize(texture(Normal, texCoord).rgb * 2.0 - 1.0);
@@ -1004,10 +1054,16 @@ void main() {
     // sees, and the heuristic shaded the ground under a floating build (the test rooms) as if in a cave: the
     // column's top was the build, and where a ray left the volume (23 blocks above the camera) under it moved
     // with the camera's height, so the shadow's edge swept across the ground as the camera rose or sank.
-    if (skyLight < 0.999 && casterVisibility > 0.0 && !(RtShadowParams.x > 0.5 && distant < 0.0)) {
+    // With them, still the solid blocks in the volume (voxelRaySolidOnly): Sodium never builds rock it has had
+    // no reason to draw, and a cave reached under water, its roof never seen, let the sun in.
+    if (skyLight < 0.999 && casterVisibility > 0.0) {
         vec3 from = position + nCaster * 0.05;
-        casterVisibility *= inLightVolume(from) ? voxelRayVisibility(from, moonCasts ? moonDir : sunDir, 64)
-                : underTerrain(from) ? 0.0 : 1.0;
+        if (RtShadowParams.x > 0.5 && distant < 0.0) {
+            casterVisibility *= voxelRaySolidOnly(from, moonCasts ? moonDir : sunDir, 64);
+        } else {
+            casterVisibility *= inLightVolume(from) ? voxelRayVisibility(from, moonCasts ? moonDir : sunDir, 64)
+                    : underTerrain(from) ? 0.0 : 1.0;
+        }
     }
     if (DebugParams.w > 6.5 && DebugParams.w < 10.5) {
         // The far terrain views (GBufferDebugView; the flicker test compares frames of each): each input to
@@ -1158,7 +1214,17 @@ void main() {
             emissive = max(emissive, standIn);
             standInGlow = standIn;
         } else {
-            blockRadiance = max(traced.rgb, blockRadiance * RtEmissiveParams.y);
+            // Only inside the grid that lists the lights (EmissiveLights: 48 blocks across each way, 24 up and
+            // down): past it no light reaches any point, and a far torch or lava pool lit its own block and
+            // nothing around it. Towards the grid's faces the lights just outside it are missing too, so the
+            // traced light hands over to Bedrock's block light over its outer 8 blocks.
+            float inGrid = 0.0;
+            if (RtLightGridCorner.w > 0.5) {
+                vec3 local = position - RtLightGridCorner.xyz;
+                vec3 margin = min(local, RtLightGridSize.xyz - local);
+                inGrid = clamp(min(margin.x, min(margin.y, margin.z)) / 8.0, 0.0, 1.0);
+            }
+            blockRadiance = mix(blockRadiance, max(traced.rgb, blockRadiance * RtEmissiveParams.y), inGrid);
         }
     }
     // With the sky's light bounced (RtEmissive's skyBounce), the traced bounce has it in place of this term.

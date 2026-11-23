@@ -71,6 +71,16 @@ public interface DistantTerrainSource {
 	}
 
 	/**
+	 * The block light (0 to 15) at the top of the column at world x, z as the source lit it: the light in the
+	 * space just above its highest block (liquids included), or the block's own glow if brighter (a lava
+	 * pool's surface); -1 when the source has no data there. Called on the same background thread as
+	 * {@link #topSolid}.
+	 */
+	default int surfaceBlockLight(int x, int z) {
+		return -1;
+	}
+
+	/**
 	 * Lets go of whatever the source keeps for {@link #topSolidY} (Distant Horizons: its data cache, which holds
 	 * terrain data checked out of its pools). Called by the same background thread after each tile it reads.
 	 */

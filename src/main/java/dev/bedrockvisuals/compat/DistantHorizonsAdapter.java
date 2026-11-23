@@ -160,6 +160,44 @@ public final class DistantHorizonsAdapter implements DistantTerrainSource {
 		return ((long) top << 32) | (topPoint == null ? 0 : colourOf(topPoint, x, z) & 0xFFFFFFL);
 	}
 
+	@Override
+	public int surfaceBlockLight(int x, int z) {
+		var level = DhApi.Delayed.worldProxy.getSinglePlayerLevel();
+		if (level == null) {
+			return -1;
+		}
+		if (heightCache == null) {
+			heightCache = DhApi.Delayed.terrainRepo.createSoftCache();
+		}
+		var result = DhApi.Delayed.terrainRepo.getColumnDataAtBlockPos(level, x, z, heightCache);
+		if (result == null || !result.success || result.payload == null) {
+			return -1;
+		}
+		com.seibel.distanthorizons.api.objects.data.DhApiTerrainDataPoint surface = null;
+		for (var point : result.payload) {
+			if (point == null || point.blockStateWrapper == null || point.blockStateWrapper.isAir()) {
+				continue;
+			}
+			if (surface == null || point.topYBlockPos > surface.topYBlockPos) {
+				surface = point;
+			}
+		}
+		if (surface == null) {
+			return -1;
+		}
+		int light = surface.blockLightLevel;
+		for (var point : result.payload) {
+			// The air run resting on the surface: the light the surface is lit by.
+			if (point != null && point.bottomYBlockPos == surface.topYBlockPos) {
+				light = Math.max(light, point.blockLightLevel);
+			}
+		}
+		if (surface.blockStateWrapper.getWrappedMcObject() instanceof net.minecraft.world.level.block.state.BlockState state) {
+			light = Math.max(light, state.getLightEmission());
+		}
+		return Math.max(0, Math.min(15, light));
+	}
+
 	/** The underside topSolid last found (its worker thread only). */
 	private int lastUnderside = NO_HEIGHT;
 
