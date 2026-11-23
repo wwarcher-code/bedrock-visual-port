@@ -1214,26 +1214,29 @@ void main() {
             emissive = max(emissive, standIn);
             standInGlow = standIn;
         } else {
-            // Only inside the grid that lists the lights (EmissiveLights: 48 blocks across each way, 24 up and
+            // Only inside the grid that lists the lights (EmissiveLights: 128 blocks across each way, 64 up and
             // down): past it no light reaches any point, and a far torch or lava pool lit its own block and
             // nothing around it. Towards the grid's faces the lights just outside it are missing too, so the
-            // traced light hands over to Bedrock's block light over its outer 8 blocks.
+            // traced light hands over to Bedrock's block light over its outer 16 blocks.
             float inGrid = 0.0;
             if (RtLightGridCorner.w > 0.5) {
                 vec3 local = position - RtLightGridCorner.xyz;
                 vec3 margin = min(local, RtLightGridSize.xyz - local);
-                inGrid = clamp(min(margin.x, min(margin.y, margin.z)) / 8.0, 0.0, 1.0);
+                inGrid = clamp(min(margin.x, min(margin.y, margin.z)) / 16.0, 0.0, 1.0);
             }
             blockRadiance = mix(blockRadiance, max(traced.rgb, blockRadiance * RtEmissiveParams.y), inGrid);
         }
     }
     // With the sky's light bounced (RtEmissive's skyBounce), the traced bounce has it in place of this term.
-    float skyKept = RtEmissiveParams.z > 0.5 && RtEmissiveParams.w > 0.5 && distant < 0.0 ? 0.0 : 1.0;
+    // Where its cache has little history yet (alpha: how settled, RtEmissive), Bedrock's term fills the rest.
+    vec4 tracedBounce = RtEmissiveParams.z > 0.5 && distant < 0.0
+            ? texture(RtEmissiveMap, vec2((1.0 + texCoord.x) / 3.0, texCoord.y)) : vec4(0.0);
+    float skyKept = RtEmissiveParams.z > 0.5 && RtEmissiveParams.w > 0.5 && distant < 0.0 ? 1.0 - tracedBounce.a : 1.0;
     vec3 indirect = max(blockRadiance + SkyColor.rgb * skyCurve * skyKept, AmbientColor.rgb);
     // Ray-traced bounce light (RtEmissive.java): the sun, moon and emitted light off other surfaces, over
     // Bedrock's indirect terms (its sky ambient isn't bounced, so nothing is counted twice).
     if (RtEmissiveParams.z > 0.5 && distant < 0.0) {
-        indirect += texture(RtEmissiveMap, vec2((1.0 + texCoord.x) / 3.0, texCoord.y)).rgb;
+        indirect += tracedBounce.rgb * (RtEmissiveParams.w > 0.5 ? tracedBounce.a : 1.0);
     }
     color += diffuseColor * indirect * (1.0 - emissive);
     // The traced light's highlight on glossy surfaces (RtEmissive's third section, TexelCache's E): the texel's

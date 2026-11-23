@@ -258,6 +258,12 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
     vec3 tangentNormal;
     surfaceTexel(tangentNormal, s.roughness, s.metalness);
     s.top = abs(face.y) > 0.7;
+    // A waterfall's sides: a third of the maps' tilt. At full tilt each texel aimed its mirror ray somewhere else
+    // along the nearly level reflection a side face sees, and the reflection broke into texels jumping about as
+    // the ripples ran down. A surface's ripples tilt a reflection that looks up, where it lands on the sky.
+    if (!s.top) {
+        tangentNormal.xy *= 0.33;
+    }
     s.n = normalize(tangent * tangentNormal.x + bitangent * tangentNormal.y + face * tangentNormal.z);
     s.n = withWaves(s.n, face, v_Position);
     if (dot(s.n, v_Position) > 0.0) {

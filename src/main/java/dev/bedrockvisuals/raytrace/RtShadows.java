@@ -47,6 +47,24 @@ public final class RtShadows {
 	 * pane has two faces. Water, and anything else Sodium tints by biome (a vertex colour that isn't grey), lets
 	 * light through untinted, as before: the lighting pass handles water's look itself.
 	 */
+	/**
+	 * GLSL: whether a candidate hit on the far terrain (DistantField, kind 2) stops a ray. Its columns leave out the
+	 * chunks that were loaded when it was built, but it's only rebuilt every 128 blocks the camera moves: chunks
+	 * loaded since kept the coarse 8-block columns inside them, which cast blocky shadows over the real terrain
+	 * there until the next rebuild. RtScene writes the loaded chunks' square, in the field's own coordinates, into
+	 * its instance info (firstVertex[0], [1]: the lowest x and z; firstVertex[2], passes: the highest), and hits
+	 * inside it are let through. Needs InstanceInfo declared.
+	 */
+	static final String FAR_FIELD_BLOCKS = """
+			bool farFieldBlocks(rayQueryEXT query, InstanceInfo info) {
+			    vec3 hit = rayQueryGetIntersectionObjectRayOriginEXT(query, false)
+			            + rayQueryGetIntersectionObjectRayDirectionEXT(query, false) * rayQueryGetIntersectionTEXT(query, false);
+			    vec2 lo = vec2(float(int(info.firstVertex[0])), float(int(info.firstVertex[1])));
+			    vec2 hi = vec2(float(int(info.firstVertex[2])), float(int(info.passes)));
+			    return any(lessThan(hit.xz, lo)) || any(greaterThan(hit.xz, hi));
+			}
+			""";
+
 	static final String TRANSLUCENT_TINT = """
 			vec3 translucentTint(rayQueryEXT query) {
 			    InstanceInfo info = instances[rayQueryGetIntersectionInstanceCustomIndexEXT(query, false)];
@@ -112,6 +130,7 @@ public final class RtShadows {
 			    bool ignoreOwnBlock;
 			    vec3 ownBlock;
 
+			""" + FAR_FIELD_BLOCKS + """
 			bool blocks(rayQueryEXT query) {
 			    if (ignoreOwnBlock) {
 			        vec3 hit = rayQueryGetWorldRayOriginEXT(query)
@@ -121,6 +140,9 @@ public final class RtShadows {
 			        }
 			    }
 			    InstanceInfo info = instances[rayQueryGetIntersectionInstanceCustomIndexEXT(query, false)];
+			    if (info.kind == 2u) {
+			        return farFieldBlocks(query, info);
+			    }
 			    if (info.kind != 0u) {
 			        return true;
 			    }

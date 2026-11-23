@@ -248,7 +248,15 @@ public final class RtScene {
 					instance(out, i, DistantField.originX() - ox, DistantField.originY() - oy, DistantField.originZ() - oz,
 							i, MASK_TERRAIN, DistantField.structureAddress());
 					// Kind 2: opaque, its vertices in the entities' layout (the shaders take it as they take entities).
-					info(table, i, DistantField.verticesAddress(), 2, EntityGeometry.VERTEX_STRIDE, new int[3], 0);
+					// With the loaded chunks' square in the field's coordinates (RtShadows.FAR_FIELD_BLOCKS): its
+					// columns inside it, left from before those chunks loaded, are let through.
+					int reach = Minecraft.getInstance().options.getEffectiveRenderDistance();
+					int chunkX = Math.floorDiv((int) Math.floor(cam.x), 16);
+					int chunkZ = Math.floorDiv((int) Math.floor(cam.z), 16);
+					int[] low = {(chunkX - reach) * 16 - DistantField.originX(), (chunkZ - reach) * 16 - DistantField.originZ(),
+							(chunkX + reach + 1) * 16 - DistantField.originX()};
+					info(table, i, DistantField.verticesAddress(), 2, EntityGeometry.VERTEX_STRIDE, low,
+							(chunkZ + reach + 1) * 16 - DistantField.originZ());
 				}
 
 				VkAccelerationStructureGeometryKHR.Buffer geometry = VkAccelerationStructureGeometryKHR.calloc(1, stack);

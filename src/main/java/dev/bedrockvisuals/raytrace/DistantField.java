@@ -193,8 +193,9 @@ final class DistantField {
 			kept.bytes().put(raw);
 			owned.add(() -> rt.free(kept));
 			VkAccelerationStructureGeometryKHR.Buffer geometry = VkAccelerationStructureGeometryKHR.calloc(1, stack);
-			geometry.get(0).sType$Default().geometryType(VK_GEOMETRY_TYPE_TRIANGLES_KHR)
-					.flags(VK_GEOMETRY_OPAQUE_BIT_KHR);
+			// Not opaque: every hit goes to the shaders, which let through those inside the chunks loaded now
+			// (RtShadows.FAR_FIELD_BLOCKS).
+			geometry.get(0).sType$Default().geometryType(VK_GEOMETRY_TYPE_TRIANGLES_KHR).flags(0);
 			geometry.get(0).geometry().triangles().sType$Default().vertexFormat(VK_FORMAT_R32G32B32_SFLOAT)
 					.vertexStride(12).maxVertex(count * 6 - 1).indexType(VK_INDEX_TYPE_NONE_KHR);
 			geometry.get(0).geometry().triangles().vertexData().deviceAddress(input.address());

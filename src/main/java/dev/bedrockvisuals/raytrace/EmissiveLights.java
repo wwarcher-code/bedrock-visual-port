@@ -34,10 +34,16 @@ import java.util.Locale;
 public final class EmissiveLights {
 	public static final int FLOATS = 20;
 	static final float[] NONE = new float[0];
-	static final int CELL = 4;
-	static final int CELLS_X = 24;
-	static final int CELLS_Y = 12;
-	static final int CELLS_Z = 24;
+	/**
+	 * 8-block cells, 32 x 16 x 32 of them: 128 blocks each way across (a render distance of 8 chunks) and 64 up
+	 * and down. At 4-block cells and 48 blocks across, a torch or lava pool farther off lit only its own block (the
+	 * lighting pass now hands over to Bedrock's block light past the grid). Each cell still lists the lights that
+	 * reach it most; the shaders weigh them at the point itself, so the coarser cells pick about as well.
+	 */
+	static final int CELL = 8;
+	static final int CELLS_X = 32;
+	static final int CELLS_Y = 16;
+	static final int CELLS_Z = 32;
 	/** The lights a cell lists (the shaders' PER_CELL too): 48 let a lava pool and fall crowd a sea lantern out. */
 	static final int PER_CELL = 96;
 	/** Below this estimated irradiance (power / distance squared) a light no longer counts. */
@@ -240,7 +246,7 @@ public final class EmissiveLights {
 		int minZ = Math.floorDiv((int) Math.floor(cameraZ), CELL) * CELL - CELLS_Z / 2 * CELL;
 		// Kept while the camera stays within REBUILD_CELLS cells of where it was built: rebuilding at every cell the
 		// camera crossed cost up to 10 ms of CPU a frame near many lava faces, in exports every frame it moved. The
-		// grid reaches 48 blocks each way and a light at most 32 (plus the lookup's jitter), so 8 blocks off centre it
+		// grid reaches 128 blocks each way and a light at most 32 (plus the lookup's jitter), so 16 blocks off centre it
 		// still covers everything the camera's surroundings take light from.
 		if (grid != null && !changed && Math.abs(grid.minX() - minX) <= REBUILD_CELLS * CELL
 				&& Math.abs(grid.minY() - minY) <= REBUILD_CELLS * CELL && Math.abs(grid.minZ() - minZ) <= REBUILD_CELLS * CELL

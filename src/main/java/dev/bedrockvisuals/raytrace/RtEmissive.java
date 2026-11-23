@@ -89,11 +89,11 @@ public final class RtEmissive {
 			    ivec4 originBlock;          // xyz: the scene's origin in world blocks; w: samples a texel's history holds
 			};
 
-			const int CELLS_X = 24;
-			const int CELLS_Y = 12;
-			const int CELLS_Z = 24;
+			const int CELLS_X = 32; // EmissiveLights.CELLS_X and so on
+			const int CELLS_Y = 16;
+			const int CELLS_Z = 32;
 			const int PER_CELL = 96; // EmissiveLights.PER_CELL
-			const float CELL = 4.0;
+			const float CELL = 8.0;
 			const float ALPHA_CUTOFF[4] = float[4](0.0, 0.1, 0.5, 1.0);
 			const float PI = 3.14159265;
 			// EmissiveLights' CUTOFF and MAX_REACH: a light's reach from its power.
@@ -131,8 +131,12 @@ public final class RtEmissive {
 
 			// Whether a candidate hit stops a ray: cutout terrain alpha-tested against the block atlas with Sodium's
 			// cutoff, translucent terrain letting it through (as in the shadow maps), entities stopping it.
+			""" + RtShadows.FAR_FIELD_BLOCKS + """
 			bool blocks(rayQueryEXT query) {
 			    InstanceInfo info = instances[rayQueryGetIntersectionInstanceCustomIndexEXT(query, false)];
+			    if (info.kind == 2u) {
+			        return farFieldBlocks(query, info);
+			    }
 			    if (info.kind != 0u) {
 			        return true;
 			    }
@@ -787,6 +791,11 @@ public final class RtEmissive {
 			    // axis-aligned face (bilinear, each weighed by the frames it holds, so a cell just seen counts little),
 			    // else the one there.
 			    vec3 bounced = vec3(0.0);
+			    // How much of a settled history the bounce has here (0 to 1: FILL frames' worth). The lighting pass
+			    // keeps Bedrock's sky ambient for the rest: a chunk just loaded, its cells empty, had no ambient light
+			    // in its shade at all and showed dark, sharp shadows until the cache filled (slowly far off, where a
+			    // texel covers few pixels).
+			    float settled = 0.0;
 			    vec3 axisN = abs(n);
 			    if (!thinSheet && max(axisN.x, max(axisN.y, axisN.z)) >= 0.95) {
 			        float cellSize = float(1 << bounceLevel(level)) / 16.0;
@@ -812,9 +821,11 @@ public final class RtEmissive {
 			            }
 			        }
 			        bounced = weight > 0.0 ? sum / weight : vec3(0.0);
+			        settled = clamp(weight / FILL, 0.0, 1.0);
 			    } else {
 			        int cell = findTexel(bounceKey(p, n, thinSheet, originBlock.xyz, level), false);
 			        bounced = cell >= 0 ? entries[cell].historyB.rgb : vec3(0.0);
+			        settled = cell >= 0 ? clamp(entries[cell].historyA.w / FILL, 0.0, 1.0) : 0.0;
 			    }
 			    // A texel without light of its own yet (no entry, or fewer than FILL frames: just come into view, or
 			    // nearer than before, at a finer level) shows the texel of the next coarser level over the same spot
@@ -854,7 +865,7 @@ public final class RtEmissive {
 			    // volume's flag (EmitterColors.glowsAllOver); this pass's own search of the cell's lights for them cost
 			    // a walk through up to PER_CELL lights a pixel.
 			    pixels[left] = uvec2(packHalf2x16(emitted.rg), packHalf2x16(vec2(emitted.b, 0.0)));
-			    pixels[right] = uvec2(packHalf2x16(bounced.rg), packHalf2x16(vec2(bounced.b, 1.0)));
+			    pixels[right] = uvec2(packHalf2x16(bounced.rg), packHalf2x16(vec2(bounced.b, settled)));
 			    vec3 from = slot >= 0 ? entries[slot].fastE.xyz : vec3(0.0);
 			    pixels[towards] = uvec2(packHalf2x16(from.xy), packHalf2x16(vec2(from.z, 0.0)));
 			}
