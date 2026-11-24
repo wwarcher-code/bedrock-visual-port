@@ -714,3 +714,11 @@ in hue where nothing changed, and lava's light was speckled. Changes:
 - **Glow lichen** glows over its whole quad at 0.15 of its light level, in its brightest marked texel's colour
   (its berries'), and reaches at least its light level in blocks.
 - **Stained glass** tints more: its hue deepened (power 1.5) and weighed 1.4 times its alpha's square root.
+
+**Export crash, out of GPU memory (2026-11-23).** The developer's first export after the four-passes change
+crashed with VK_ERROR_OUT_OF_DEVICE_MEMORY. Every FrameCompute dispatch had a slot with its own output buffer,
+and a slot is only reused once the renderpearl submission it ran in has finished; an export's sub-frames and
+passes (8 x 4 diffuse-light dispatches, plus the shadows and entity probes) all go in one submission, each with a
+buffer three screens wide. The output buffer is now one per FrameCompute (dispatches run in order on one queue,
+behind full barriers). Check: the developer's replay exported at 3840x2160, 60 frames, GPU memory flat at
+4.8 GB through the export.

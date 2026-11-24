@@ -29,8 +29,8 @@ import org.lwjgl.vulkan.*;
  * <p>A pass may have several stages (shaders over the same bindings and push constants), dispatched in order with
  * a full barrier between them; each stage has its own dispatch size. The last stage writes the output.
  *
- * <p>Each dispatch gets a slot (command buffer, descriptor set, output buffer), reused once the renderpearl
- * submission it ran in has finished: the offline preset dispatches several times in one submission.
+ * <p>Each dispatch gets a slot (command buffer, descriptor set), reused once the renderpearl submission it ran in
+ * has finished: the offline preset dispatches several times in one submission. The output buffer is shared.
  */
 final class FrameCompute {
 	/** A binding's content, written into the slot's descriptor set. */
@@ -58,6 +58,12 @@ final class FrameCompute {
 	private long[] pipelines;
 	private long sampler;
 	private final List<Slot> slots = new ArrayList<>();
+	/**
+	 * The output buffer, shared by every slot: dispatches run in order on the one queue, each behind a full barrier,
+	 * so a dispatch only writes it once the one before has copied it out. (A buffer a slot made the export run out
+	 * of GPU memory: its sub-frames and passes, 40-odd dispatches, all go in one renderpearl submission.)
+	 */
+	private RtBuffer output;
 	private GpuTexture texture;
 	private GpuTextureView view;
 	private int width;
@@ -67,7 +73,6 @@ final class FrameCompute {
 		VkCommandBuffer commands;
 		long pool;
 		long set;
-		RtBuffer output;
 		long frameSubmission = -1;
 		/** GPU timestamps before the first stage and after each (timing, for the status report and the log). */
 		long queries;
@@ -116,11 +121,12 @@ final class FrameCompute {
 		Slot slot = freeSlot(rt);
 		readTimes(rt, slot);
 		long bytes = (long) w * h * bytesPerPixel;
-		if (slot.output == null || slot.output.size() < bytes) {
-			rt.free(slot.output);
-			slot.output = rt.deviceBuffer(bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+		if (output == null || output.size() < bytes) {
+			rt.free(output);
+			output = rt.deviceBuffer(bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
 		}
 		slot.frameSubmission = rt.frameSubmission();
+		RtBuffer output = this.output;
 
 		try (MemoryStack stack = MemoryStack.stackPush()) {
 			VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(types.length + 1, stack);
@@ -139,7 +145,7 @@ final class FrameCompute {
 			}
 			writes.get(types.length).sType$Default().dstSet(slot.set).dstBinding(types.length).descriptorCount(1)
 					.descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER).pBufferInfo(VkDescriptorBufferInfo.calloc(1, stack)
-							.buffer(slot.output.buffer()).offset(0).range(bytes));
+							.buffer(output.buffer()).offset(0).range(bytes));
 			vkUpdateDescriptorSets(rt.device, writes, null);
 
 			long image = ((VulkanGpuTexture) texture).vkImage();
@@ -162,7 +168,7 @@ final class FrameCompute {
 				region.imageSubresource().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0)
 						.layerCount(1);
 				region.imageExtent().set(w, h, 1);
-				vkCmdCopyBufferToImage(commands, slot.output.buffer(), image, VK_IMAGE_LAYOUT_GENERAL, region);
+				vkCmdCopyBufferToImage(commands, output.buffer(), image, VK_IMAGE_LAYOUT_GENERAL, region);
 				fullBarrier(commands, stack);
 			});
 		}
