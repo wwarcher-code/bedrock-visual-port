@@ -123,7 +123,7 @@ public final class OfflineRender {
 	}
 
 	/** The sub-frame being drawn (0 outside the preset). */
-	static int subframe() {
+	public static int subframe() {
 		return subframe;
 	}
 

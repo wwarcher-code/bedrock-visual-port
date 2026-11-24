@@ -754,6 +754,18 @@ public final class RtEmissive {
 			        entityWeights[i] = w;
 			        entityTotal += w;
 			    }
+			    // Exports, on the passes that don't trace every texel (size.w's bit 2 clear: RtEmissive's SETTLED_STRIDE):
+			    // a texel whose history is full sits out, unless its bounce cell is still filling or entities are
+			    // about. Its bounce cell takes samples only on the passes every texel traces, or while it is filling
+			    // itself: a full cell given only some of its texels' samples would be averaged over fewer.
+			    bool everyTexel = (size.w & 2u) != 0u;
+			    float full = float(originBlock.w) - 0.5;
+			    bool texelSettled = held >= full;
+			    bool cellSettled = bounceCell < 0 || (!fresh && entries[bounceCell].historyA.w >= full);
+			    if (!everyTexel && texelSettled && cellSettled && !shadowAbout && entityTotal <= 0.0) {
+			        return;
+			    }
+			    bool feedCell = bounceCell >= 0 && (everyTexel || !cellSettled);
 			    originSky = skyBounceLight.w > 0.5 ? surfaceSky(p, n) : 1.0;
 			    for (int sampleIndex = 0; sampleIndex < samples; sampleIndex++) {
 			        uint stream = uint(sampleIndex) * 2u;
@@ -798,7 +810,7 @@ public final class RtEmissive {
 			        // Always, so a texel's share shadowed goes back to none once the last entity is gone.
 			        addEntitySample(slot, dot(emitted, vec3(0.2126, 0.7152, 0.0722)), shadowed, entityTotal > 0.0, seen, seenColor);
 			    }
-			    if (bounceCell >= 0) {
+			    if (feedCell) {
 			        addBounceSamples(bounceCell, bouncedSum, uint(samples));
 			    }
 			}
@@ -1115,6 +1127,19 @@ public final class RtEmissive {
 	 * only needs to forget slow, unreported changes (the sun's path); the longer it is, the more evenly lit.
 	 */
 	private static final int EXPORT_HISTORY = 1024;
+	/**
+	 * In exports a texel whose history is full (EXPORT_HISTORY passes held) traces in one pass of SETTLED_STRIDE, 4
+	 * of a frame's 32; the rest of the frame's passes go to texels still filling theirs (just seen, or wiped by a
+	 * change). A full history is an average over its last EXPORT_HISTORY passes whichever passes they are, so it
+	 * is as clean either way; it only follows slow, unreported changes (the sun's path) over more frames.
+	 */
+	private static final int SETTLED_STRIDE = 8;
+	/**
+	 * Whether settled texels skip passes in exports: off by default. Measured on the developer's replay (1280 x 720,
+	 * 16 sub-frames): a third less time, frames alike side by side but not the same, up to 3% darker in places and
+	 * the light on lava and moving players a little different (settings.json's exportSkipSettled; ScriptRunner's rtskip).
+	 */
+	private static boolean skipSettled;
 	private static boolean failed;
 	private static String failure = "";
 	private static boolean tracedThisFrame;
@@ -1232,6 +1257,15 @@ public final class RtEmissive {
 		return tracedThisFrame && mode != Mode.OFF;
 	}
 
+	public static boolean skipSettled() {
+		return skipSettled;
+	}
+
+	public static void setSkipSettled(boolean on) {
+		skipSettled = on;
+		BedrockVisualsClient.LOGGER.info("[raytrace] settled texels skip export passes: {}", on);
+	}
+
 	/** Whether the lighting pass adds the bounced light from {@link #view()} this frame. */
 	public static void setSkyBounce(boolean on) {
 		skyBounce = on;
@@ -1297,8 +1331,11 @@ public final class RtEmissive {
 		int passes = exporting ? Math.max(1, (EXPORT_PASSES + subframes - 1) / subframes) : 1;
 		try {
 			for (int pass = 0; pass < passes && !failed; pass++) {
+				// The frame's passes counted across its sub-frames: every SETTLED_STRIDE-th one traces every texel.
+				int framePass = dev.bedrockvisuals.render.OfflineRender.subframe() * passes + pass;
+				boolean everyTexel = !exporting || !skipSettled || framePass % SETTLED_STRIDE == 0;
 				tracePass(rt, frame, materials, depth, normal, atlas, projection, modelView, towardsLight, lightColor,
-						exporting, pass == passes - 1);
+						exporting, everyTexel, pass == passes - 1);
 			}
 			tracedThisFrame = !failed;
 		} catch (RuntimeException e) {
@@ -1311,7 +1348,7 @@ public final class RtEmissive {
 	/** One pass of the three stages; the last of the frame also lights the entities. */
 	private static void tracePass(RtDevice rt, RtScene.Frame frame, GpuTextureView materials, GpuTextureView depth,
 			GpuTextureView normal, GpuTextureView atlas, Matrix4fc projection, Matrix4fc modelView,
-			Vector3fc towardsLight, Vector3fc lightColor, boolean exporting, boolean last) {
+			Vector3fc towardsLight, Vector3fc lightColor, boolean exporting, boolean everyTexel, boolean last) {
 		try (MemoryStack stack = MemoryStack.stackPush()) {
 			EmissiveLights.Grid grid = EmissiveLights.grid(rt, frame.cameraX(), frame.cameraY(), frame.cameraZ());
 			int w = depth.getWidth(0);
@@ -1325,7 +1362,8 @@ public final class RtEmissive {
 			constants.putFloat(76, exporting ? 0 : Math.abs(projection.m11()) * h * 0.5f);
 			constants.putFloat(80, frame.originX() - grid.minX()).putFloat(84, frame.originY() - grid.minY())
 					.putFloat(88, frame.originZ() - grid.minZ()).putFloat(92, exporting ? offlineSamples : samples);
-			constants.putInt(96, w).putInt(100, h).putInt(104, (int) frameNumber++).putInt(108, exporting ? 1 : 0);
+			constants.putInt(96, w).putInt(100, h).putInt(104, (int) frameNumber++)
+					.putInt(108, (exporting ? 1 : 0) | (everyTexel ? 2 : 0));
 			constants.putInt(112, frame.originX()).putInt(116, frame.originY()).putInt(120, frame.originZ())
 					.putInt(124, history(exporting));
 

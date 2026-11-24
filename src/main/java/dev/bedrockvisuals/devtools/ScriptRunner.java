@@ -81,7 +81,14 @@ public final class ScriptRunner {
 			Object job = jobType.getConstructor(settingsType).newInstance(settings);
 			Class.forName("com.moulberry.flashback.Flashback").getField("EXPORT_JOB").set(null, job);
 			BedrockVisualsClient.LOGGER.info("[script] exporting ticks {} to {} to {}", args[1], args[2], folder);
-			jobType.getMethod("run").invoke(job);
+			// Flashback switches the flawless-frames activator on from its export screen, not from the job: run
+			// this way the offline preset (sub-frames, every trace pass) stayed off unless forced.
+			dev.bedrockvisuals.render.OfflineRender.setForced(true);
+			try {
+				jobType.getMethod("run").invoke(job);
+			} finally {
+				dev.bedrockvisuals.render.OfflineRender.setForced(false);
+			}
 			Class.forName("com.moulberry.flashback.Flashback").getField("EXPORT_JOB").set(null, null);
 			BedrockVisualsClient.LOGGER.info("[script] export done");
 		} catch (ReflectiveOperationException | IOException | RuntimeException e) {
@@ -248,6 +255,7 @@ public final class ScriptRunner {
 			case "export" -> startExport(minecraft, argument.split("\s+"));
 			case "rthighlight" -> dev.bedrockvisuals.raytrace.RtEmissive.setHighlight(argument.equals("on"));
 			case "rtsky" -> dev.bedrockvisuals.raytrace.RtEmissive.setSkyBounce(argument.equals("on"));
+			case "rtskip" -> dev.bedrockvisuals.raytrace.RtEmissive.setSkipSettled(argument.equals("on"));
 			case "rtbouncegain" -> dev.bedrockvisuals.raytrace.RtEmissive.setBounceGain(Float.parseFloat(argument));
 			case "rtsamples" -> dev.bedrockvisuals.raytrace.RtEmissive.setSamples(Integer.parseInt(argument));
 			case "offline" -> {

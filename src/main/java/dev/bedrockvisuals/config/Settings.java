@@ -40,6 +40,7 @@ public final class Settings {
 		int samples = 1;
 		int exportSamples = 16;
 		int exportSubframes = 0;
+		boolean exportSkipSettled;
 	}
 
 	private Settings() {
@@ -78,6 +79,7 @@ public final class Settings {
 		RtShadows.setInExports(stored.exportTracedShadows);
 		RtEmissive.setSamples(stored.samples);
 		RtEmissive.setOfflineSamples(stored.exportSamples);
+		RtEmissive.setSkipSettled(stored.exportSkipSettled);
 		if (stored.exportSubframes > 0) {
 			OfflineRender.setSamples(stored.exportSubframes);
 		}
@@ -107,6 +109,7 @@ public final class Settings {
 		stored.samples = RtEmissive.samples();
 		stored.exportSamples = RtEmissive.offlineSamples();
 		stored.exportSubframes = OfflineRender.samples();
+		stored.exportSkipSettled = RtEmissive.skipSettled();
 		try {
 			Files.createDirectories(file.getParent());
 			Files.writeString(file, GSON.toJson(stored), StandardCharsets.UTF_8);

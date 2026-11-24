@@ -773,3 +773,17 @@ fell back to "sky", so the rays leaking into the rock counted as sky again. Now,
 the first face along the normal decides: from inside the rock, the back of the cave's own face, with the cave's
 sky light (none); in the open, nothing met, so sky. Check (export lighting forced on, unbrightened): the room's
 lines gone; a sunlit outdoor view of the test room the same as before.
+
+**Export speed and settled texels (2026-11-24).** The developer's export (1920 x 1080 at 120 fps, 16 sub-frames,
+16 samples) ran at about 2.5-3 s a frame: 32 trace passes a frame at some 72 ms each, plus the level drawn 16
+times. Expected for those settings. Tried: a texel whose history is full traces in only 4 of the 32 passes (its
+bounce cell too), as a full history averages its last 1024 passes whichever they are. Flashback's warm-up frames
+fill the histories before the first frame, so it skips from the start. Measured on the replay's camera path
+(1280 x 720, 200 ticks): 315 s down to 209 s; frames alike side by side but not the same: up to 3% darker in
+places, the light on lava and on the moving player a little different (the light from before is forgotten eight
+times slower). So it is a setting, off by default: settings.json's exportSkipSettled.
+
+Found on the way: an export started by ScriptRunner's export line never switched the offline preset on (Flashback
+switches its flawless-frames activator from its export screen, not the job), so scripted exports drew one sample a
+frame with one trace pass: tests of exports made that way before now were not of the export's light. The export
+line now forces the preset for the export's length.
