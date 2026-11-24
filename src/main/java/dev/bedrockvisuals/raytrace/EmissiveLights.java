@@ -8,21 +8,22 @@ import java.util.Arrays;
 import java.util.Locale;
 
 /**
- * The world's emissive texels as lights: every terrain quad whose texture has emissive texels in Bedrock's material
- * maps (MERS green, MaterialAtlas) is an area light, its texels each glowing in their own colour (sampled on the
- * GPU from the block atlas and the material atlas at the point picked).
+ * The world's glowing blocks as lights: every terrain quad of a block that gives off Java light is an area light,
+ * glowing as BlockEmission works out for its block (Bedrock's marked texels, in their colours; or the whole quad),
+ * scaled so the whole block gives off as much as its light level (sampled on the GPU from the block atlas and the
+ * material atlas at the point picked).
  *
  * <p>The quads are found when a section's structure is built (SectionGeometry, from Sodium's vertices) and kept
  * with it, {@link #FLOATS} floats each, relative to the section's origin:
  * <pre>
- *   p0.xyz, power      the quad's first corner; its power estimate (mean emissive x area x 2 x 0.7 albedo)
+ *   p0.xyz, power      the quad's first corner; its power estimate (scaled glow luminance x area x 2)
  *   e1.xyz, reach      the edge to the second corner; how far it lights (blocks)
  *   e2.xyz, cutoff     the edge to the fourth corner; Sodium's alpha cutoff for its texels
  *   uv0.xy, uvE1.xy    the texture coordinates at p0, and along e1
- *   uvE2.xy, glow,     along e2; for a block that gives off Java light but barely glows in Bedrock's maps,
- *     masked           its light level / 15, standing in for its texels' emissive: every texel's (lava); or, where
- *                      Bedrock marks some texels as glowing at all (glow lichen's berries), masked is the brightest
- *                      one's atlas index plus one, and the whole quad glows dimly (MASKED_GLOW) in its colour
+ *   uvE2.xy, glow,     along e2; for a light standing in for block light (BlockEmission's MASKED and ALL_OVER: glow
+ *     masked           lichen, lava), its light level / 15 (the surface's own glow, RtEmissive's standInGlow), else 0;
+ *                      for MASKED, the brightest marked texel's atlas index plus one (the colour it glows in)
+ *   scale, mode, 0, 0  the scale on its glow (BlockEmission) and its mode (BlockEmission.Mode's ordinal)
  * </pre>
  * A point of the quad is p0 + s e1 + t e2 (s, t in [0, 1]): Sodium's quads are parallelograms, in position and
  * texture alike.
@@ -34,7 +35,7 @@ import java.util.Locale;
  * change; positions in it are relative to its corner ({@link Grid#minX} and so on).
  */
 public final class EmissiveLights {
-	public static final int FLOATS = 20;
+	public static final int FLOATS = 24;
 	static final float[] NONE = new float[0];
 	/**
 	 * 8-block cells, 32 x 32 x 32 of them: 128 blocks each way (a render distance of 8 chunks), up and down too, so
@@ -61,18 +62,8 @@ public final class EmissiveLights {
 	/** How far the shaders' jittered cell lookup can land from the point: half a cell's diagonal. */
 	private static final float LOOKUP_JITTER = CELL * 0.5f * (float) Math.sqrt(3);
 	private static final int MAX_LIGHTS = 1 << 16;
-	/** Mean emissive below this (a stray texel) doesn't make a quad a light. */
-	private static final float MIN_EMISSIVE = 0.002f;
-	/**
-	 * Below this mean emissive, a block that gives off Java light glows by its light level instead (lava: barely
-	 * emissive in Bedrock's maps, lit there by its block light).
-	 */
-	private static final float WEAK_EMISSIVE = 0.1f;
-	/**
-	 * For a texture Bedrock marks as glowing only in places (glow lichen): the share of its light level the whole
-	 * quad glows at, in the marked texels' colour (TUNE: a dim, even light; RtEmissive's lightGlow).
-	 */
-	private static final float MASKED_GLOW = 0.15f;
+	/** Scaled glow luminance below this (a torch's stick end, with no flame) doesn't make a quad a light. */
+	private static final float MIN_GLOW = 1e-4f;
 
 	private static boolean changed = true;
 	private static Grid grid;
@@ -100,13 +91,11 @@ public final class EmissiveLights {
 		changed = true;
 	}
 
-	/** The blocks of a section that give off Java light, for quads without emissive texels. */
+	/** The blocks of a section that give off Java light: only their quads are lights (BlockEmission). */
 	record Emitters(net.minecraft.client.multiplayer.ClientLevel level, int originX, int originY, int originZ) {
-		/** The light level of the block at a point given relative to the section's origin. */
-		int lightAt(float x, float y, float z) {
-			net.minecraft.core.BlockPos pos = net.minecraft.core.BlockPos.containing(originX + x, originY + y,
-					originZ + z);
-			return level.getBlockState(pos).getLightEmission();
+		/** The block at a point given relative to the section's origin. */
+		net.minecraft.world.level.block.state.BlockState stateAt(float x, float y, float z) {
+			return level.getBlockState(net.minecraft.core.BlockPos.containing(originX + x, originY + y, originZ + z));
 		}
 	}
 
@@ -134,7 +123,7 @@ public final class EmissiveLights {
 	 * emitters}, null if the section has none).
 	 */
 	static float[] collect(ByteBuffer data, float[] lights, Emitters emitters) {
-		if (MaterialAtlas.emissiveWidth() == 0) {
+		if (MaterialAtlas.emissiveWidth() == 0 || emitters == null) {
 			return lights;
 		}
 		int base = data.position();
@@ -159,12 +148,6 @@ public final class EmissiveLights {
 				uMax = Math.max(uMax, uv[v * 2]);
 				vMin = Math.min(vMin, uv[v * 2 + 1]);
 				vMax = Math.max(vMax, uv[v * 2 + 1]);
-			}
-			float emissive = MaterialAtlas.emissiveMean(uMin, vMin, uMax, vMax);
-			if (emissive < WEAK_EMISSIVE && emitters == null) {
-				if (emissive < MIN_EMISSIVE) {
-					continue;
-				}
 			}
 			int first = base + q * 4 * SectionGeometry.VERTEX_STRIDE;
 			for (int v = 0; v < 4; v++) {
@@ -191,42 +174,40 @@ public final class EmissiveLights {
 			float mx = p[0] + (e1x + e2x) * 0.5f;
 			float my = p[1] + (e1y + e2y) * 0.5f;
 			float mz = p[2] + (e1z + e2z) * 0.5f;
+			// The block the face belongs to: the one its centre is in, for a face inside a block's cell (a torch's,
+			// glow lichen's a hair off its wall, lava's top); for a face on the cells' boundary, the one just behind
+			// it, or in front if that one gives no light (a fluid's surface drawn facing the other way).
+			float ux = cx / area;
+			float uy = cy / area;
+			float uz = cz / area;
+			boolean axis = Math.abs(ux) > 0.9f || Math.abs(uy) > 0.9f || Math.abs(uz) > 0.9f;
+			float across = Math.abs(ux) > 0.9f ? mx : Math.abs(uy) > 0.9f ? my : mz;
+			float off = Math.abs(across - Math.round(across));
+			net.minecraft.world.level.block.state.BlockState state;
+			if (off > 0.002f && axis) {
+				state = emitters.stateAt(mx, my, mz);
+			} else {
+				state = emitters.stateAt(mx - ux * 0.05f, my - uy * 0.05f, mz - uz * 0.05f);
+				if (state.getLightEmission() == 0) {
+					state = emitters.stateAt(mx + ux * 0.05f, my + uy * 0.05f, mz + uz * 0.05f);
+				}
+			}
+			BlockEmission.Emission emission = BlockEmission.of(state);
+			if (emission == null) {
+				continue;
+			}
+			// What this quad gives off: its glow's mean luminance times its area, scaled so the whole block gives
+			// off its light level's worth (BlockEmission), doubled as the lighting pass doubles glow.
+			float luminance = emission.luminance(uMin, vMin, uMax, vMax) * emission.scale();
+			if (luminance < MIN_GLOW) {
+				continue;
+			}
 			long key = (long) Math.round(mx * 64) * 73856093L ^ (long) Math.round(my * 64) * 19349663L
 					^ (long) Math.round(mz * 64) * 83492791L ^ (long) Math.round(area * 256) * 2654435761L;
 			if (!seen.add(key)) {
 				continue;
 			}
-			float glow = 0;
-			float masked = 0;
-			if (emissive < WEAK_EMISSIVE && emitters != null) {
-				// The block the face belongs to: the one its centre is in, for a face inside a block's cell (glow
-				// lichen's, a hair off the wall it grows on; lava's top); for a face on the cells' boundary, the one
-				// just behind it. Only ever behind, the lichen facing out from its wall took the wall's light (none)
-				// and gave none.
-				float ux = cx / area;
-				float uy = cy / area;
-				float uz = cz / area;
-				float across = Math.abs(ux) > 0.9f ? mx : Math.abs(uy) > 0.9f ? my : mz;
-				float off = Math.abs(across - Math.round(across));
-				int level = off > 0.002f && (Math.abs(ux) > 0.9f || Math.abs(uy) > 0.9f || Math.abs(uz) > 0.9f)
-						? emitters.lightAt(mx, my, mz)
-						: emitters.lightAt(mx - ux * 0.05f, my - uy * 0.05f, mz - uz * 0.05f);
-				if (level > 0) {
-					glow = level / 15f;
-					// A texture Bedrock marks as glowing only in places, however faintly (glow lichen's berries):
-					// the whole quad gives off a dim light (MASKED_GLOW of its level) in the colour of its
-					// brightest marked texel. Every texel glowing at its level made a patch of lichen a lamp; only
-					// the marked ones (a fortieth of the texture) left it a light reaching two blocks. With none
-					// marked (lava), every texel glows at its level in its own colour.
-					int marked = MaterialAtlas.brightestEmissiveTexel(uMin, vMin, uMax, vMax);
-					masked = marked;
-					emissive = glow * (marked > 0 ? MASKED_GLOW : 1);
-				}
-			}
-			if (emissive < MIN_EMISSIVE) {
-				continue;
-			}
-			float power = emissive * area * 2.0f * 0.7f;
+			float power = luminance * area * 2.0f;
 			// From its power alone, as the shaders work it out (reachOf) when they pick a light: a reach of the light
 			// level's for dim lights left them picked only within the shorter one, a sphere with nothing past it.
 			float reach = Math.min((float) Math.sqrt(power / CUTOFF), MAX_REACH);
@@ -259,8 +240,12 @@ public final class EmissiveLights {
 			out[o + 15] = uv[3] - uv[1];
 			out[o + 16] = uv[6] - uv[0];
 			out[o + 17] = uv[7] - uv[1];
-			out[o + 18] = glow;
-			out[o + 19] = masked;
+			out[o + 18] = emission.mode() == BlockEmission.Mode.TEXELS ? 0 : emission.level() / 15f;
+			out[o + 19] = emission.mode() == BlockEmission.Mode.MASKED ? emission.marked() : 0;
+			out[o + 20] = emission.scale();
+			out[o + 21] = emission.mode().ordinal();
+			out[o + 22] = 0;
+			out[o + 23] = 0;
 			count++;
 		}
 		return out.length == count * FLOATS ? out : Arrays.copyOf(out, count * FLOATS);

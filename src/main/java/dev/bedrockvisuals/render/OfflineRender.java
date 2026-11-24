@@ -127,6 +127,11 @@ public final class OfflineRender {
 		return subframe;
 	}
 
+	/** How many times this frame's level is drawn (1 outside the preset). */
+	public static int subframes() {
+		return subframes;
+	}
+
 	/** Whether the frame's level is being drawn more than once (TemporalAA jitters it then). */
 	static boolean accumulating() {
 		return subframes > 1;

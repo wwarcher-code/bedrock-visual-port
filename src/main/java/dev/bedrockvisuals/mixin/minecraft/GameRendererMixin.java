@@ -64,6 +64,12 @@ abstract class GameRendererMixin {
 				}
 				OfflineRender.beginSubframe(i, count);
 				original.call(renderer);
+				if (i < count - 1) {
+					// Each sub-frame its own submission: the developer's 64 sub-frames, the traced light four passes
+					// each, ran past the 5 s renderpearl waits for a submission, and the export crashed. A sub-frame
+					// is a whole renderLevel, so nothing after it reads what it recorded but its own textures.
+					com.mojang.blaze3d.systems.RenderSystem.getDevice().createCommandEncoder().submit();
+				}
 			}
 		} finally {
 			OfflineRender.endFrame();

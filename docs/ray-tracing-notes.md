@@ -732,3 +732,22 @@ reach is the power's alone, CUTOFF 0.0003 and MAX_REACH 64 (the light grid 32 ce
 wiping 40 blocks around): in the box every light fades out with no edge. The bigger grid took 271 ms to build in
 the lava cave (2573 lights); a full cell's weakest entry is kept and the z-slices and table built in parallel:
 50 ms.
+
+**Export crash at 64 sub-frames (2026-11-23).** The developer's export crashed with renderpearl's "5s timeout
+reached when waiting for VK semaphore": at 64 sub-frames and four light passes each, one output frame was 256
+passes in one submission. Now each sub-frame is its own submission (GameRendererMixin submits after every
+sub-frame but the last), and the passes are 32 an output frame shared among the sub-frames, at least one each
+(4 at 8 sub-frames, as before). Check: the developer's replay at 3840x2160 with 64 sub-frames, 20 frames in 14 s,
+frames clean.
+
+**Each block's light by its Java light level (2026-11-23).** The developer asked that all of a block's glowing
+texels together give off its Java light level's worth. BlockEmission works it out per block state from the whole
+model (faces another block hides included; a fluid a cube of its texture): its mode (TEXELS where Bedrock marks
+texels at 0.1 or more, MASKED where only faintly as glow lichen's berries, ALL_OVER where not at all as lava),
+its output (glow luminance x area), and a scale to glowstone's output times (level / 15)^2 (the reach then goes
+as the level, as Java's does). Each light carries the scale and mode in a sixth vec4; lightGlow multiplies by it.
+Blocks with no Java light give no traced light. Measured: glowstone scale 1, torch 23.6 (its flame alone), sea
+lantern 0.50, lava 0.15 a face (a pool's top a sixth of a block), glow lichen 0.15 a face. In the dark box a
+torch now lights the room; the lava cave is darker than before. Seen on the way: swapping one light block for
+another mid-scene left a sharp-edged dome of the old light's history for a while; a light placed before the
+scene starts fades smoothly.

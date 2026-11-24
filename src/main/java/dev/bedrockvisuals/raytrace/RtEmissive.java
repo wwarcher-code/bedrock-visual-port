@@ -55,7 +55,7 @@ public final class RtEmissive {
 			layout(set = 0, binding = 3) uniform sampler2D Normal;
 			layout(set = 0, binding = 4) uniform sampler2D Atlas;
 			layout(set = 0, binding = 5) uniform sampler2D Materials;
-			struct Light { vec4 p0; vec4 e1; vec4 e2; vec4 uv; vec4 uv2; };
+			struct Light { vec4 p0; vec4 e1; vec4 e2; vec4 uv; vec4 uv2; vec4 glow; }; // glow: scale, mode (BlockEmission)
 			layout(set = 0, binding = 6, std430) readonly buffer Lights { Light lights[]; };
 			// About how many of a texel's pixels trace samples into it each frame (TRACE).
 			const float TEXEL_SAMPLES = 16.0;
@@ -113,28 +113,26 @@ public final class RtEmissive {
 			    return f * f;
 			}
 
-			// EmissiveLights' MASKED_GLOW: the share of its light level glow lichen's whole quad glows at.
-			const float MASKED_GLOW = 0.15;
-			// A light's glow at uv (texel: the block atlas there), linear, before the lighting pass's doubling: its
-			// colour times Bedrock's emissive there, or for a light standing in for Java's block light (uv2.z: its
-			// light level / 15), times that level (lava, every texel). Where Bedrock marks only some texels as
-			// glowing (uv2.w: the brightest one's atlas index plus one; glow lichen's berries), the whole quad glows
-			// dimly in that texel's colour: soft, even light instead of a few bright specks.
+			// A light's glow at uv (texel: the block atlas there), linear, before the lighting pass's doubling, by its
+			// block's mode (BlockEmission; glow.y), times the scale that makes the whole block give off its Java light
+			// level's worth (glow.x): TEXELS, its colour times Bedrock's emissive there; MASKED (glow lichen's faintly
+			// marked berries), the whole quad in the brightest marked texel's colour (uv2.w: its atlas index plus
+			// one), soft, even light instead of a few bright specks; ALL_OVER (lava), every texel in its colour.
 			vec3 lightGlow(Light light, vec2 uv, vec4 texel) {
-			    if (light.uv2.w >= 1.0) {
+			    float scale = light.glow.x;
+			    if (light.glow.y > 1.5) {
+			        // Its colour from the atlas's third mip level, a 4 x 4 texel average: lava's dark crust and bright
+			        // streaks, taken texel by texel, made every sample of its light a gamble, and the light it cast
+			        // speckled; the average is as bright.
+			        return pow(textureLod(Atlas, uv, 2.0).rgb, vec3(2.2)) * scale;
+			    }
+			    if (light.glow.y > 0.5) {
 			        uint index = uint(light.uv2.w + 0.5) - 1u;
 			        uvec2 atlasSize = uvec2(textureSize(Atlas, 0));
 			        vec2 at = (vec2(index % atlasSize.x, index / atlasSize.x) + 0.5) / vec2(atlasSize);
-			        return pow(textureLod(Atlas, at, 0.0).rgb, vec3(2.2)) * light.uv2.z * MASKED_GLOW;
+			        return pow(textureLod(Atlas, at, 0.0).rgb, vec3(2.2)) * scale;
 			    }
-			    float marked = textureLod(Materials, uv, 0.0).g;
-			    if (light.uv2.z > marked) {
-			        // Glowing all over at its light level (lava): its colour from the atlas's third mip level, a
-			        // 4 x 4 texel average. Its texture's dark crust and bright streaks, taken texel by texel, made
-			        // every sample of its light a gamble, and the light it cast speckled; the average is as bright.
-			        return pow(textureLod(Atlas, uv, 2.0).rgb, vec3(2.2)) * light.uv2.z;
-			    }
-			    return pow(texel.rgb, vec3(2.2)) * marked;
+			    return pow(texel.rgb, vec3(2.2)) * textureLod(Materials, uv, 0.0).g * scale;
 			}
 
 			vec2 sodiumUv(Words words, uint vertex) {
@@ -1033,8 +1031,12 @@ public final class RtEmissive {
 	private static final int ENTITY_LIGHTS_AT = 64 + MAX_CHANGES * 32;
 	/** The frame data's skyBounceLight, after the entity lights. */
 	private static final int SKY_AT = ENTITY_LIGHTS_AT + 16 + EntityLights.MAX * EntityLights.BYTES;
-	/** Trace passes per sub-frame in exports (each adds its samples and carries the light one bounce further). */
-	private static final int EXPORT_PASSES = 4;
+	/**
+	 * Trace passes per output frame in exports (each adds its samples and carries the light one bounce further),
+	 * shared out among its sub-frames, at least one each: 4 a sub-frame at 8. Four a sub-frame at the developer's 64
+	 * took a frame to 256 passes, over a dozen seconds at 4K, for light as settled as at 32.
+	 */
+	private static final int EXPORT_PASSES = 32;
 	/**
 	 * A texel's history in exports, in passes: 1024 is 32 output frames at 4 passes and 8 sub-frames each (half a
 	 * second of a 60 fps video). In exports every change to the world is reported and wipes the texels near it, so the history
@@ -1219,7 +1221,8 @@ public final class RtEmissive {
 		boolean exporting = dev.bedrockvisuals.render.OfflineRender.active();
 		// In exports the light is traced several times over before the frame uses it: each pass adds its samples
 		// to every texel's history and carries the light one bounce further, so what is shown is settled.
-		int passes = exporting ? EXPORT_PASSES : 1;
+		int subframes = dev.bedrockvisuals.render.OfflineRender.subframes();
+		int passes = exporting ? Math.max(1, (EXPORT_PASSES + subframes - 1) / subframes) : 1;
 		try {
 			for (int pass = 0; pass < passes && !failed; pass++) {
 				tracePass(rt, frame, materials, depth, normal, atlas, projection, modelView, towardsLight, lightColor,
