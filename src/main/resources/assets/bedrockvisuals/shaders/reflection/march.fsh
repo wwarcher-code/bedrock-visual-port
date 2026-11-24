@@ -279,7 +279,12 @@ void main() {
         }
         float backScene;
         vec2 hitUv;
-        if (sceneAt(back, backScene, hitUv) && length(back) - backScene < max(length(back - front) * 4.0, 1.0)) {
+        // Only what lies above the water's plane: the ray rises from it, so a hit below is the terrain under the
+        // water seen through it (Java's depth holds no water). Taken, the blocks under the surface reflected
+        // as tall streaks over the water. Passed behind instead, as Bedrock's march, whose depth holds the
+        // water's surface, passes behind a surface farther than its thickness.
+        if (sceneAt(back, backScene, hitUv) && length(back) - backScene < max(length(back - front) * 4.0, 1.0)
+                && back.y * backScene / max(length(back), 1e-4) > origin.y - 0.1) {
             // Java's terrain has the G-buffer's normal there; Distant Horizons' (no Java depth) none.
             bool hasNormal = texture(Depth, hitUv).r > 0.0;
             vec3 hitNormal = hasNormal ? normalize(texture(Normal, hitUv).rgb * 2.0 - 1.0) : vec3(0.0);

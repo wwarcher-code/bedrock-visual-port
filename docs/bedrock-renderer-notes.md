@@ -242,6 +242,9 @@ Order: the scene beneath is attenuated by `WaterExtinction`, then `DeferredWater
   roughness), and the SSR passes and `DeferredIndirectSpecular` then reflect onto it as onto terrain: probe ×
   sky-light fade × `IBLParameters.z` 0.5, replaced by SSR where it hits, times `F0·A + B` with
   `F0 = mix(0.04, albedo, 0.0667)` (about 0.062). That is about three times the 0.02 Schlick term head-on.
+  Since the water is in the depth the SSR marches against, nothing under the surface can be hit. The
+  renderer marches against Java's depth, which has no water, so it takes no hit behind the reflecting
+  face's plane. Before that, blocks under a pool's surface reflected as tall streaks over the water.
 - **Procedural waves:** `DoWaterSurfaceBuffer` can replace the normal map with a sum of `WaterSurfaceParameters.y`
   (28) octaves of `((sin φ + 1)/2)^k` waves (k = `WaterSurfaceWaveParameters.y` 1.5; each octave turns 1.399
   rad, scales frequency by `Octave.z` 1.2, speed by `.w` 1.03, weight by `1 - .y` 0.8, and warps the domain by
@@ -297,6 +300,10 @@ extinction, so the march adds the water's scattering from above without its exti
 multiplies the scene, including the sky seen through the surface, by the water's transmittance along the
 view, capping the path where the ray leaves through the surface above the camera. Seen from below, the
 water surface passes the air beyond inside Snell's window and mirrors the water below outside it.
+A chunk counts as drawn by Sodium (and its water is mapped) when its sea-level section or its surface
+section is built. With the sea level's section alone, chunks whose ground there is buried, which Sodium never
+builds, went unmapped. A lake above the sea or a pool on a hill fell back to the water pass's estimate,
+dimmer and bluer by the chunk.
 
 ## Volumetric fog (verified in PopulateVolume)
 

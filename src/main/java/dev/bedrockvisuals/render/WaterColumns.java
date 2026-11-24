@@ -184,7 +184,7 @@ public final class WaterColumns {
 								skip = true;
 							} else {
 								chunk = level.getChunkSource().getChunk(chunkX, chunkZ, false);
-								rendered = chunk != null && sodiumDraws(chunkX, seaY, chunkZ);
+								rendered = chunk != null && javaDraws(chunk, chunkX, chunkZ, seaY);
 								if (rendered) {
 									segmentKey[segment] = Long.MIN_VALUE; // Java's own water: always mapped
 								} else if (unchanged) {
@@ -327,7 +327,7 @@ public final class WaterColumns {
 						int index = Math.floorMod(cz, 32) * 32 + Math.floorMod(cx, 32);
 						long key = chunkKey(cx, cz);
 						LevelChunk loaded = level.getChunkSource().getChunk(cx, cz, false);
-						boolean drawn = loaded != null && sodiumDraws(cx, seaY, cz);
+						boolean drawn = loaded != null && javaDraws(loaded, cx, cz, seaY);
 						boolean surface = loaded != null && sodiumDraws(cx, surfaceY(loaded, seaY), cz);
 						boolean holdEnds = checkedChunk[index] == key && drawn && heldUntil[index] != 0
 								&& heldUntil[index] <= frame;
@@ -527,6 +527,17 @@ public final class WaterColumns {
 		double dz = nearestToZero(chunkZ * 16 - 1 - cameraZ, chunkZ * 16 + 17 - cameraZ);
 		double radius = renderDistance * 16.0;
 		return dx * dx + dz * dz < radius * radius && renderer.isSectionReady(chunkX, y >> 4, chunkZ);
+	}
+
+	/**
+	 * Whether Sodium draws the chunk: its section at the sea's level, or the one at its surface (at its centre).
+	 * The sea level's alone missed chunks whose ground there is buried: Sodium never builds a section no view
+	 * reaches, and the water above it (a lake or a river above the sea, a pool on a hill) went unmapped, shaded
+	 * by the water pass's estimate instead of the lighting pass's (a row of chunks of a pool came out dimmer and
+	 * bluer than the rest). Chunks loaded past the drawn ones, Distant Horizons' there, have neither built.
+	 */
+	private static boolean javaDraws(LevelChunk chunk, int chunkX, int chunkZ, int seaY) {
+		return sodiumDraws(chunkX, seaY, chunkZ) || sodiumDraws(chunkX, surfaceY(chunk, seaY), chunkZ);
 	}
 
 	/** The height of the chunk's top block at its centre (its surface, trees and all), else the sea's. */

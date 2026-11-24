@@ -164,6 +164,12 @@ struct WaterSurface {
     bool bottomless;     // nothing drawn beneath it, neither Java's terrain nor Distant Horizons'
 };
 
+// The water face's normal, turned towards the camera (set in waterSurface): the reflection marches take no hit
+// behind its plane. A mirror ray leaves the face on the camera's side, so a hit behind it is what lies beyond
+// the water seen through it (Java's depth holds no water): the blocks under a pool's surface reflected as tall
+// streaks over it.
+vec3 reflectingFace = vec3(0.0, 1.0, 0.0);
+
 // How many of the surface map's texels one pixel spans (set in main from the UV derivatives).
 float surfaceFootprint = 1.0;
 
@@ -258,6 +264,7 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
     vec3 tangentNormal;
     surfaceTexel(tangentNormal, s.roughness, s.metalness);
     s.top = abs(face.y) > 0.7;
+    reflectingFace = face;
     // A waterfall's sides: a third of the maps' tilt. At full tilt each texel aimed its mirror ray somewhere else
     // along the nearly level reflection a side face sees, and the reflection broke into texels jumping about as
     // the ripples ran down. A surface's ripples tilt a reflection that looks up, where it lands on the sky.
@@ -434,7 +441,8 @@ vec4 screenSpaceReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
             }
             vec3 b = toScreenEdge(back, size, flipY);
             float bDepth = onScreenY(b.xy, size) ? texelFetch(u_GBufferDepth, ivec2(b.xy), 0).r : 0.0;
-            if (bDepth > 0.0 && b.z - viewDistance(bDepth) < max(length(back - front) * 4.0, 0.5)) {
+            if (bDepth > 0.0 && b.z - viewDistance(bDepth) < max(length(back - front) * 4.0, 0.5)
+                    && dot(back * (viewDistance(bDepth) / max(b.z, 1e-4)) - origin, reflectingFace) > -0.1) {
                 vec2 hit = clamp(b.xy, vec2(0.0), size - 1.0);
                 // Fade towards the screen's edges, where the reflected scene runs out.
                 return vec4(texelFetch(u_LitFlags, ivec2(hit), 0).rgb, screenEdgeFade(hit, size));
@@ -520,7 +528,8 @@ vec4 distantReflection(vec3 origin, vec3 direction, vec2 size, bool flipY) {
         float rayBack;
         ivec2 hitPixel;
         if (distantSceneAt(back, size, flipY, sceneBack, rayBack, hitPixel)
-                && rayBack - sceneBack < max(length(back - front) * 4.0, 1.0)) {
+                && rayBack - sceneBack < max(length(back - front) * 4.0, 1.0)
+                && dot(back * (sceneBack / max(rayBack, 1e-4)) - origin, reflectingFace) > -0.1) {
             return vec4(texelFetch(u_LitFlags, hitPixel, 0).rgb, screenEdgeFade(vec2(hitPixel), size));
         }
         previous = point;
