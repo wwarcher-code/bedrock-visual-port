@@ -255,6 +255,40 @@ float surfaceFogShadow(vec3 p);
 // Defined with the reflections below: Distant Horizons' ground at a texture and a clip position.
 float distantDistanceAt(vec2 uv, vec2 ndcXy);
 
+// How far the view runs through water from the surface at entry (camera-relative) along dir before it leaves
+// the water, by the water column map, up to path (returned when it doesn't leave sooner, or where the map
+// can't tell: outside it, or no water mapped at the entry). Bedrock's water extinction runs from the water's
+// front depth to the scene's, but its waterfalls are a block thick there; this pass took everything between a
+// waterfall's face and the wall or sky behind it for water: ten blocks of air behind a two-block waterfall
+// came out nearly opaque blue, and lava-lit stone behind one in a cave deep green (the water takes the red).
+const float WATER_EXIT_STEP = 0.25;
+const int WATER_EXIT_STEPS = 64;
+float waterExit(vec3 entry, vec3 dir, float path) {
+    WaterColumn c;
+    vec3 inside = entry + dir * 0.1;
+    if (max(abs(inside.x), abs(inside.z)) > WATER_COLUMN_RANGE - 16.0) {
+        return path;
+    }
+    if (depthBelowWaterSurface(inside) < 0.0) {
+        // Just past the face there's no water: the view grazes a waterfall's side (or meets a face from behind).
+        // Through barely any water, where the map holds Java's chunk there (else it can't tell: as before).
+        // (Taken as before, a waterfall's side edges were dark blue lines.)
+        waterColumnAt(inside, c);
+        return c.loaded ? min(path, 0.1) : path;
+    }
+    float t = 0.1;
+    for (int i = 0; i < WATER_EXIT_STEPS; i++) {
+        t += WATER_EXIT_STEP;
+        if (t >= path) {
+            return path;
+        }
+        if (depthBelowWaterSurface(entry + dir * t) < 0.0) {
+            return t - 0.5 * WATER_EXIT_STEP;
+        }
+    }
+    return path;
+}
+
 WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
     WaterSurface s;
     vec3 face = faceNormal;
@@ -296,6 +330,14 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
         if (ground > 0.0) {
             s.bottomless = false;
             path = min(max(ground - length(v_Position), 0.0), BOTTOMLESS);
+        }
+    }
+    // Only as far as the water goes (waterExit); past it the view runs through air.
+    if (UnderwaterParams.x < 0.5) {
+        float exit = waterExit(v_Position, normalize(v_Position), path);
+        if (exit < path) {
+            path = exit;
+            s.bottomless = false;
         }
     }
     // The view's extinction and the water volume's (water_columns.glsl).

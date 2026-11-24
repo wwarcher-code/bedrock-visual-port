@@ -304,6 +304,11 @@ A chunk counts as drawn by Sodium (and its water is mapped) when its sea-level s
 section is built. With the sea level's section alone, chunks whose ground there is buried, which Sodium never
 builds, went unmapped. A lake above the sea or a pool on a hill fell back to the water pass's estimate,
 dimmer and bluer by the chunk.
+The water pass counts the view's path through water only as far as the water column map says the water
+goes along it (stepped a quarter block at a time, up to 16 blocks). Taking everything up to the opaque scene
+behind, a waterfall two blocks wide in front of a wall ten blocks back came out nearly opaque blue, and solid
+blue against the sky (the 64-block bottomless path). A view grazing a waterfall's side counts as through
+almost no water where the map holds Java's chunk.
 
 ## Volumetric fog (verified in PopulateVolume)
 
