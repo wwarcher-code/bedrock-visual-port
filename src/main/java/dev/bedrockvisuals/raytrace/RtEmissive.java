@@ -92,15 +92,15 @@ public final class RtEmissive {
 			};
 
 			const int CELLS_X = 32; // EmissiveLights.CELLS_X and so on
-			const int CELLS_Y = 16;
+			const int CELLS_Y = 32;
 			const int CELLS_Z = 32;
 			const int PER_CELL = 96; // EmissiveLights.PER_CELL
 			const float CELL = 8.0;
 			const float ALPHA_CUTOFF[4] = float[4](0.0, 0.1, 0.5, 1.0);
 			const float PI = 3.14159265;
 			// EmissiveLights' CUTOFF and MAX_REACH: a light's reach from its power.
-			const float LIGHT_CUTOFF = 0.004;
-			const float LIGHT_MAX_REACH = 32.0;
+			const float LIGHT_CUTOFF = 0.0003;
+			const float LIGHT_MAX_REACH = 64.0;
 			float reachOf(float power) {
 			    return min(sqrt(power / LIGHT_CUTOFF), LIGHT_MAX_REACH);
 			}
@@ -1019,9 +1019,9 @@ public final class RtEmissive {
 	private static final int MAX_CHANGES = 16;
 	/**
 	 * How far a change reaches, in blocks: a block placed or broken changes the light and shadows of the texels
-	 * around it, as far as a light reaches (EmissiveLights' reach is up to 32 blocks; most are under 20).
+	 * around it, as far as a light reaches (EmissiveLights' reach is up to 64 blocks; most are under 40).
 	 */
-	private static final int CHANGE_REACH = 24;
+	private static final int CHANGE_REACH = 40;
 	/**
 	 * Per change: its box (lowest, highest world block) and how many more dispatches it wipes texels for. Two:
 	 * in the first frame after a change the bounce rays still read their neighbours' light from before it, and a

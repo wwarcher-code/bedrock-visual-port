@@ -722,3 +722,13 @@ passes (8 x 4 diffuse-light dispatches, plus the shadows and entity probes) all 
 buffer three screens wide. The output buffer is now one per FrameCompute (dispatches run in order on one queue,
 behind full barriers). Check: the developer's replay exported at 3840x2160, 60 frames, GPU memory flat at
 4.8 GB through the export.
+
+**Lights stopped in a sphere (2026-11-23).** Block lights lit a disc around themselves with a hard edge and no
+traced light past it (seen in a sealed 30-block stone box: glowstone a disc on the wall, a torch almost nothing).
+Two causes. The shaders pick a light by reachOf(power), but last round's dim lights (glow lichen) carried a longer
+reach of their light level: past the power's reach they were never picked. And the reach itself, where the
+estimate power / d^2 falls to CUTOFF 0.004, was bright enough to see under auto exposure in the dark. Now the
+reach is the power's alone, CUTOFF 0.0003 and MAX_REACH 64 (the light grid 32 cells tall to hold it, changes
+wiping 40 blocks around): in the box every light fades out with no edge. The bigger grid took 271 ms to build in
+the lava cave (2573 lights); a full cell's weakest entry is kept and the z-slices and table built in parallel:
+50 ms.

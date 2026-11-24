@@ -37,20 +37,25 @@ public final class EmissiveLights {
 	public static final int FLOATS = 20;
 	static final float[] NONE = new float[0];
 	/**
-	 * 8-block cells, 32 x 16 x 32 of them: 128 blocks each way across (a render distance of 8 chunks) and 64 up
-	 * and down. At 4-block cells and 48 blocks across, a torch or lava pool farther off lit only its own block (the
+	 * 8-block cells, 32 x 32 x 32 of them: 128 blocks each way (a render distance of 8 chunks), up and down too, so
+	 * a light's whole reach (MAX_REACH) fits however far the camera is from where the grid was built. At 4-block cells and 48 blocks across, a torch or lava pool farther off lit only its own block (the
 	 * lighting pass now hands over to Bedrock's block light past the grid). Each cell still lists the lights that
 	 * reach it most; the shaders weigh them at the point itself, so the coarser cells pick about as well.
 	 */
 	static final int CELL = 8;
 	static final int CELLS_X = 32;
-	static final int CELLS_Y = 16;
+	static final int CELLS_Y = 32;
 	static final int CELLS_Z = 32;
 	/** The lights a cell lists (the shaders' PER_CELL too): 48 let a lava pool and fall crowd a sea lantern out. */
 	static final int PER_CELL = 96;
-	/** Below this estimated irradiance (power / distance squared) a light no longer counts. */
-	private static final float CUTOFF = 0.004f;
-	private static final float MAX_REACH = 32;
+	/**
+	 * Below this estimated irradiance (power / distance squared) a light no longer counts; the shaders fade it out
+	 * towards there. At 0.004 (a glowstone face's light at 19 blocks, a torch's at 4) the fade was a visible sphere
+	 * around each light in a dark cave, with no traced light past it: now 13 times fainter, past what auto
+	 * exposure shows.
+	 */
+	private static final float CUTOFF = 0.0003f;
+	private static final float MAX_REACH = 64;
 	/** Cells the camera may move from where the grid was built before it is built again. */
 	private static final int REBUILD_CELLS = 2;
 	/** How far the shaders' jittered cell lookup can land from the point: half a cell's diagonal. */
@@ -193,7 +198,6 @@ public final class EmissiveLights {
 			}
 			float glow = 0;
 			float masked = 0;
-			int lightLevel = 0;
 			if (emissive < WEAK_EMISSIVE && emitters != null) {
 				// The block the face belongs to: the one its centre is in, for a face inside a block's cell (glow
 				// lichen's, a hair off the wall it grows on; lava's top); for a face on the cells' boundary, the one
@@ -209,7 +213,6 @@ public final class EmissiveLights {
 						: emitters.lightAt(mx - ux * 0.05f, my - uy * 0.05f, mz - uz * 0.05f);
 				if (level > 0) {
 					glow = level / 15f;
-					lightLevel = level;
 					// A texture Bedrock marks as glowing only in places, however faintly (glow lichen's berries):
 					// the whole quad gives off a dim light (MASKED_GLOW of its level) in the colour of its
 					// brightest marked texel. Every texel glowing at its level made a patch of lichen a lamp; only
@@ -224,9 +227,9 @@ public final class EmissiveLights {
 				continue;
 			}
 			float power = emissive * area * 2.0f * 0.7f;
-			// A light standing in for Java's block light reaches at least as far as that light does (its level in
-			// blocks), however dim: glow lichen's light is faint, not cut short.
-			float reach = Math.min(Math.max((float) Math.sqrt(power / CUTOFF), lightLevel), MAX_REACH);
+			// From its power alone, as the shaders work it out (reachOf) when they pick a light: a reach of the light
+			// level's for dim lights left them picked only within the shorter one, a sphere with nothing past it.
+			float reach = Math.min((float) Math.sqrt(power / CUTOFF), MAX_REACH);
 			int material = data.getInt(first + 16) >>> 16 & 0xFF;
 			float cutoff = switch (material >>> 1 & 3) {
 				case 0 -> 0f;
@@ -273,7 +276,7 @@ public final class EmissiveLights {
 		int minZ = Math.floorDiv((int) Math.floor(cameraZ), CELL) * CELL - CELLS_Z / 2 * CELL;
 		// Kept while the camera stays within REBUILD_CELLS cells of where it was built: rebuilding at every cell the
 		// camera crossed cost up to 10 ms of CPU a frame near many lava faces, in exports every frame it moved. The
-		// grid reaches 128 blocks each way and a light at most 32 (plus the lookup's jitter), so 16 blocks off centre it
+		// grid reaches 128 blocks each way and a light at most 64 (plus the lookup's jitter), so 16 blocks off centre it
 		// still covers everything the camera's surroundings take light from.
 		if (grid != null && !changed && Math.abs(grid.minX() - minX) <= REBUILD_CELLS * CELL
 				&& Math.abs(grid.minY() - minY) <= REBUILD_CELLS * CELL && Math.abs(grid.minZ() - minZ) <= REBUILD_CELLS * CELL
@@ -327,6 +330,13 @@ public final class EmissiveLights {
 		int[] listed = new int[cells * PER_CELL];
 		float[] scores = new float[cells * PER_CELL];
 		int[] sizes = new int[cells];
+		// A full cell's weakest entry, so a light too weak for it is turned away at once: with lights reaching 64
+		// blocks a lava cave's 2500 faces each met some 5000 cells, and scanning a full cell's 96 for each took the
+		// build to 270 ms.
+		int[] weakestAt = new int[cells];
+		float[] weakestScore = new float[cells];
+		// One z-slice of cells a thread (their lists apart), each going through the lights in order as before.
+		java.util.stream.IntStream.range(0, CELLS_Z).parallel().forEach(z -> {
 		for (int l = 0; l < n; l++) {
 			int o = l * FLOATS;
 			float cx = lights[o] + (lights[o + 4] + lights[o + 8]) * 0.5f;
@@ -343,7 +353,7 @@ public final class EmissiveLights {
 			int y1 = Math.min((int) Math.floor((cy + reach) / CELL), CELLS_Y - 1);
 			int z0 = Math.max((int) Math.floor((cz - reach) / CELL), 0);
 			int z1 = Math.min((int) Math.floor((cz + reach) / CELL), CELLS_Z - 1);
-			for (int z = z0; z <= z1; z++) {
+			if (z >= z0 && z <= z1) {
 				for (int y = y0; y <= y1; y++) {
 					for (int x = x0; x <= x1; x++) {
 						// Distance from the light to the nearest point of the cell.
@@ -361,22 +371,19 @@ public final class EmissiveLights {
 							listed[at + sizes[cell]] = l;
 							scores[at + sizes[cell]] = score;
 							sizes[cell]++;
-						} else {
-							int weakest = 0;
-							for (int k = 1; k < PER_CELL; k++) {
-								if (scores[at + k] < scores[at + weakest]) {
-									weakest = k;
-								}
+							if (sizes[cell] == PER_CELL) {
+								weakest(scores, at, cell, weakestAt, weakestScore);
 							}
-							if (score > scores[at + weakest]) {
-								listed[at + weakest] = l;
-								scores[at + weakest] = score;
-							}
+						} else if (score > weakestScore[cell]) {
+							listed[at + weakestAt[cell]] = l;
+							scores[at + weakestAt[cell]] = score;
+							weakest(scores, at, cell, weakestAt, weakestScore);
 						}
 					}
 				}
 			}
 		}
+		});
 
 		RtBuffer lightBuffer = rt.hostBuffer((long) Math.max(n, 1) * FLOATS * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 		ByteBuffer out = lightBuffer.bytes();
@@ -389,7 +396,7 @@ public final class EmissiveLights {
 		long cellBytes = (long) cells * (PER_CELL + 1) * 16;
 		RtBuffer cellBuffer = rt.hostBuffer(cellBytes + (long) cells * PER_CELL * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 		ByteBuffer table = cellBuffer.bytes();
-		for (int c = 0; c < cells; c++) {
+		java.util.stream.IntStream.range(0, cells).parallel().forEach(c -> {
 			int at = c * (PER_CELL + 1) * 16;
 			table.putInt(at, sizes[c]);
 			for (int k = 0; k < sizes[c]; k++) {
@@ -402,7 +409,7 @@ public final class EmissiveLights {
 				table.putFloat(e + 12, lights[o + 3]);
 				table.putInt((int) cellBytes + (c * PER_CELL + k) * 4, l | (lights[o + 18] > 0 ? 0x80000000 : 0));
 			}
-		}
+		});
 		return new Grid(minX, minY, minZ, lightBuffer, cellBuffer, n, MaterialAtlas.generation());
 	}
 
@@ -415,6 +422,18 @@ public final class EmissiveLights {
 		}
 		grid = null;
 		changed = true;
+	}
+
+	/** Finds a full cell's weakest entry. */
+	private static void weakest(float[] scores, int at, int cell, int[] weakestAt, float[] weakestScore) {
+		int weakest = 0;
+		for (int k = 1; k < PER_CELL; k++) {
+			if (scores[at + k] < scores[at + weakest]) {
+				weakest = k;
+			}
+		}
+		weakestAt[cell] = weakest;
+		weakestScore[cell] = scores[at + weakest];
 	}
 
 	/** Writes every light of the built sections (world position of its centre, power, reach, glow) to a file. */

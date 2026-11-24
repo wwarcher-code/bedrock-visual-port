@@ -1211,8 +1211,8 @@ void main() {
             emissive = max(emissive, standIn);
             standInGlow = standIn;
         } else {
-            // Only inside the grid that lists the lights (EmissiveLights: 128 blocks across each way, 64 up and
-            // down): past it no light reaches any point, and a far torch or lava pool lit its own block and
+            // Only inside the grid that lists the lights (EmissiveLights: 128 blocks each way, up and down
+            // too): past it no light reaches any point, and a far torch or lava pool lit its own block and
             // nothing around it. Towards the grid's faces the lights just outside it are missing too, so the
             // traced light hands over to Bedrock's block light over its outer 16 blocks.
             float inGrid = 0.0;
