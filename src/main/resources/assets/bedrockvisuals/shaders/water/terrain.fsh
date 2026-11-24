@@ -54,6 +54,9 @@ uniform sampler2D u_BrdfLut;
 uniform sampler2D WaterColumnMap;
 #define WATER_COLUMNS WaterColumnMap
 #include <bedrockvisuals:water_columns.glsl>
+uniform sampler2D LightVolumeMap; // the blocks around the camera (LightVolume.java): where the water is, for waterExit
+#define LIGHT_VOLUME LightVolumeMap
+#include <bedrockvisuals:light_volume.glsl>
 // The outer shadow cascade and the cloud cells, for the volumetric fog in front of the surface.
 uniform sampler2D DistantDepth;     // Distant Horizons' ground this frame (LightingPass.java), when it is lit
 layout(std140) uniform DistantData {
@@ -256,16 +259,38 @@ float surfaceFogShadow(vec3 p);
 float distantDistanceAt(vec2 uv, vec2 ndcXy);
 
 // How far the view runs through water from the surface at entry (camera-relative) along dir before it leaves
-// the water, by the water column map, up to path (returned when it doesn't leave sooner, or where the map
-// can't tell: outside it, or no water mapped at the entry). Bedrock's water extinction runs from the water's
-// front depth to the scene's, but its waterfalls are a block thick there; this pass took everything between a
-// waterfall's face and the wall or sky behind it for water: ten blocks of air behind a two-block waterfall
-// came out nearly opaque blue, and lava-lit stone behind one in a cave deep green (the water takes the red).
+// the water, up to path (returned when it doesn't leave sooner, or where nothing can tell): around the camera
+// by the water blocks in the light volume, farther out by the water column map. Bedrock's water extinction runs
+// from the water's front depth to the scene's, but its waterfalls are a block thick there; this pass took
+// everything between a waterfall's face and the wall or sky behind it for water: ten blocks of air behind a
+// two-block waterfall came out nearly opaque blue, and a cave's waterfall in front of a lavafall bright green
+// (the water takes the red). The map alone didn't do for that one: it holds only each column's top body of
+// water (the sea far above), and no Java chunk down there.
 const float WATER_EXIT_STEP = 0.25;
 const int WATER_EXIT_STEPS = 64;
 float waterExit(vec3 entry, vec3 dir, float path) {
     WaterColumn c;
     vec3 inside = entry + dir * 0.1;
+    if (inLightVolume(inside)) {
+        if (!waterBlockAt(inside)) {
+            return min(path, 0.1); // grazing the water's side, or a face seen from behind
+        }
+        float t = 0.1;
+        for (int i = 0; i < WATER_EXIT_STEPS; i++) {
+            t += WATER_EXIT_STEP;
+            if (t >= path) {
+                return path;
+            }
+            vec3 p = entry + dir * t;
+            if (!inLightVolume(p)) {
+                return path;
+            }
+            if (!waterBlockAt(p)) {
+                return t - 0.5 * WATER_EXIT_STEP;
+            }
+        }
+        return path;
+    }
     if (max(abs(inside.x), abs(inside.z)) > WATER_COLUMN_RANGE - 16.0) {
         return path;
     }

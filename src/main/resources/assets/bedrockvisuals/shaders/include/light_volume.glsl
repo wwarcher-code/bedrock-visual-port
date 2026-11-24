@@ -44,6 +44,19 @@ bool glowsAllOver(vec3 p) {
     return abs(blue - 64.0) < 20.0 || abs(blue - 192.0) < 20.0;
 }
 
+// Whether the block at the camera-relative point p holds water and isn't solid (LightVolume's blue at 32): the
+// cave's waterfalls and pools, which the water column map (the top body of each column alone) doesn't hold.
+// False outside the volume.
+bool waterBlockAt(vec3 p) {
+    if (!inLightVolume(p)) {
+        return false;
+    }
+    ivec3 cell = ivec3(floor(p + LightVolumeOrigin.xyz));
+    cell = ivec3(int(mod(float(cell.x), 128.0)), int(mod(float(cell.y), 48.0)), int(mod(float(cell.z), 128.0)));
+    ivec2 texel = ivec2((cell.y % 8) * 128 + cell.x, (cell.y / 8) * 128 + cell.z);
+    return abs(texelFetch(LIGHT_VOLUME, texel, 0).b * 255.0 - 32.0) < 12.0;
+}
+
 // Whether the block at world-grid cell (camera-relative, floored) is solid and opaque.
 bool solidCell(ivec3 cameraCell) {
     ivec3 cell = cameraCell + ivec3(floor(LightVolumeOrigin.xyz));

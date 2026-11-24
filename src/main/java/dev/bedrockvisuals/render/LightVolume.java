@@ -27,7 +27,8 @@ import org.lwjgl.system.MemoryUtil;
  * levels for {@link #SIZE_XZ} x {@link #SIZE_Y} x {@link #SIZE_XZ} blocks around the camera, wrapping on world
  * coordinates (so a block always sits at the same texel), its horizontal slices side by side in a 2D texture,
  * {@link #TILES_X} across. A few slices are refreshed each frame. Blue is 1 where the block is solid and opaque
- * (isSolidRender): what the point lights' shadows are traced through. Alpha is 1 below the column's terrain surface
+ * (isSolidRender): what the point lights' shadows are traced through; an eighth (32) where it holds water and isn't
+ * solid (the water pass's path through water). Alpha is 1 below the column's terrain surface
  * (WaterColumns.terrainTop).
  */
 public final class LightVolume {
@@ -254,9 +255,11 @@ public final class LightVolume {
 				int blockLevel = block == null ? 0 : block.get(x & 15, localY, z & 15);
 				boolean solid = false;
 				boolean glowsAllOver = false;
+				boolean water = false;
 				if (!empty) {
 					BlockState state = section.getBlockState(x & 15, localY, z & 15);
 					solid = state.isSolidRender();
+					water = state.getFluidState().is(net.minecraft.tags.FluidTags.WATER);
 					glowsAllOver = dev.bedrockvisuals.raytrace.EmitterColors.glowsAllOver(state);
 					if (!colors.isEmpty() && state.getLightEmission() > 0) {
 						float[] color = colors.get(state.getBlock());
@@ -273,8 +276,8 @@ public final class LightVolume {
 				texels[texel] = (byte) (skyLevel * 17);
 				texels[texel + 1] = (byte) (blockLevel * 17);
 				// Blue: solid and opaque above a half (255; 192 also glowing all over), and glowing all over (lava,
-				// raytrace/EmitterColors.glowsAllOver) at a quarter (64) or 192.
-				texels[texel + 2] = (byte) (solid ? (glowsAllOver ? 192 : 255) : (glowsAllOver ? 64 : 0));
+				// raytrace/EmitterColors.glowsAllOver) at a quarter (64) or 192; water, not solid, an eighth (32).
+				texels[texel + 2] = (byte) (solid ? (glowsAllOver ? 192 : 255) : glowsAllOver ? 64 : water ? 32 : 0);
 				// Alpha: 1 under the column's terrain surface (WaterColumns.terrainTop), where a ray that leaves the
 				// volume upwards still has terrain over it (the cave check, light_volume.glsl).
 				boolean covered = y < WaterColumns.terrainTop(x, z);
