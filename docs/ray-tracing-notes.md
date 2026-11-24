@@ -751,3 +751,16 @@ lantern 0.50, lava 0.15 a face (a pool's top a sixth of a block), glow lichen 0.
 torch now lights the room; the lava cave is darker than before. Seen on the way: swapping one light block for
 another mid-scene left a sharp-edged dome of the old light's history for a while; a light placed before the
 scene starts fades smoothly.
+
+**Glowing block edges in exports (2026-11-23).** The developer's export of their deepslate cave showed a grey-white
+line along the edges and seams of every block (camera keyframe 0 of their replay, -397 -42 -70, at noon). Only in
+exports, only with the bounce on, and gone with the bounce rays' sun and sky both left out. Drawing escaped bounce
+rays in blue put them in strips along the edges. The trace stage moved each pixel's point to its texel's centre,
+and a point a hair off its face (a wall's top row, seen from below) landed in the next row of texels, the
+ceiling's, whose centre is inside the ceiling's rock. Rays from there met no faces (those between solid blocks
+aren't drawn) and got out: to the sky (sky bounce), or to a surface the sun reached through the rock. Exports
+use the finest texels (a sixteenth of a block), so the edge rows were all such texels. Now the texel comes from
+the point pulled 0.02 blocks towards the camera (which saw it through the air), on its face's plane. And, as
+Bedrock does: no sun on a bounce ray's hit without sky light there, and no sky for a bounce ray from a surface
+without sky light. Check: the same view at noon, the edge lines gone; a faint grey remains at the tops of some
+ledges in that big cave.

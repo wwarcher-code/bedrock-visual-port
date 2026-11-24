@@ -253,8 +253,21 @@ public final class RtEmissive {
 			    vec3 relative = world.xyz / world.w;
 			    vec3 a = abs(n);
 			    thinSheet = max(a.x, max(a.y, a.z)) < 0.9;
-			    level = texelLevel(length(relative));
-			    p = texelCentre(relative + camera.xyz, n, thinSheet, level);
+			    float distance = length(relative);
+			    level = texelLevel(distance);
+			    // The texel from the point a little towards the camera, which saw it through the air: the point itself,
+			    // a hair off the face, at the top of a wall could land past the wall's top, in the ceiling's row of
+			    // texels, whose centre is inside the ceiling's rock. Rays from there, in the solid rock where the faces
+			    // between blocks aren't drawn, reached the lights unblocked and got out to the sky: a cave's block
+			    // edges glowed in the sky's colour in exports (finest texels there).
+			    vec3 raw = relative + camera.xyz;
+			    p = texelCentre(relative * max(1.0 - 0.02 / max(distance, 0.02), 0.0) + camera.xyz, n, thinSheet, level);
+			    // And onto its face's plane: block faces lie on sixteenths of a block.
+			    if (!thinSheet) {
+			        int axis = a.x >= a.y && a.x >= a.z ? 0 : a.y >= a.z ? 1 : 2;
+			        float plane = round(raw[axis] * 16.0) / 16.0;
+			        p[axis] = abs(plane - raw[axis]) < 0.02 ? plane : raw[axis];
+			    }
 			    return true;
 			}
 
@@ -296,8 +309,13 @@ public final class RtEmissive {
 			    return max(tint.r, max(tint.g, tint.b)) - min(tint.r, min(tint.g, tint.b)) > 0.06;
 			}
 
+			// Whether the surface bounce rays leave has any Java sky light (surfaceSky, set per texel by the trace
+			// stage): with none it can't see the sky, and a ray that meets nothing left the loaded sections (or
+			// slipped into the rock), not out to the sky.
+			float originSky = 1.0;
+
 			vec3 skyBounce(vec3 direction, vec3 tint) {
-			    return skyBounceLight.w > 0.5 && direction.y > 0.0 ? skyBounceLight.rgb * tint : vec3(0.0);
+			    return skyBounceLight.w > 0.5 && direction.y > 0.0 ? skyBounceLight.rgb * tint * originSky : vec3(0.0);
 			}
 
 			// The light a bounce ray from origin sends back from the surface it meets: the sun or moon on it (its own
@@ -342,6 +360,9 @@ public final class RtEmissive {
 			    vec3 v1;
 			    vec3 v2;
 			    vec3 albedo;
+			    // The sky light where the ray met terrain (Sodium's vertex light, its sky byte: the level x 16 + 8):
+			    // above 0 where the sun can reach at all. Entities, without it, count as under the sky.
+			    float hitSky = 1.0;
 			    bool terrain = info.kind == 0u;
 			    if (terrain) {
 			        uint first = info.firstVertex[geometry] + (primitive >> 1u) * 4u;
@@ -352,6 +373,10 @@ public final class RtEmissive {
 			                + sodiumUv(words, first + corners.z) * b.y;
 			        // The block's texture times Sodium's vertex colour (biome tint and ambient occlusion).
 			        albedo = pow(textureLod(Atlas, uv, 0.0).rgb, vec3(2.2)) * unpackUnorm4x8(words.w[first * 5u + 2u]).rgb;
+			        vec3 skyBytes = vec3(float((words.w[(first + corners.x) * 5u + 4u] >> 8u) & 0xFFu),
+			                float((words.w[(first + corners.y) * 5u + 4u] >> 8u) & 0xFFu),
+			                float((words.w[(first + corners.z) * 5u + 4u] >> 8u) & 0xFFu));
+			        hitSky = max(dot(skyBytes, vec3(1.0 - b.x - b.y, b.x, b.y)) - 8.5, 0.0);
 			    } else {
 			        uint first = (primitive >> 1u) * 4u;
 			        v0 = entityPosition(words, first + corners.x);
@@ -366,10 +391,13 @@ public final class RtEmissive {
 			        hitNormal = -hitNormal;
 			    }
 			    vec3 light = vec3(0.0);
-			    // The sun or moon on it.
+			    // The sun or moon on it, only where there is sky light (Bedrock's rule, as the lighting pass's skyGuard): a
+			    // shadow ray that slipped between two faces of a cave's roof found no more faces in the solid rock above,
+			    // and the surface above out of the loaded sections, so it reached the sun. Bounce rays from the edges of
+			    // blocks met such points most, and a cave's edges glowed in exports, white in the sun's colour.
 			    vec3 towards = normalize(towardsLight.xyz);
 			    float nDotL = dot(hitNormal, towards);
-			    if (nDotL > 0.0 && dot(lightColor.rgb, vec3(1.0)) > 0.0) {
+			    if (nDotL > 0.0 && dot(lightColor.rgb, vec3(1.0)) > 0.0 && hitSky > 0.0) {
 			        light += albedo / PI * lightColor.rgb * nDotL
 			                * transmittance(hit + hitNormal * 0.01, towards, 1024.0, 0x01u);
 			    }
@@ -546,6 +574,36 @@ public final class RtEmissive {
 
 			// One sample of the light bounced to point p (normal n): a cosine-weighted ray, and the light the surface
 			// it meets sends back (in the cache's units: with a cosine-weighted pdf, the radiance itself).
+			// 1 if the terrain surface at p (normal n) has any sky light, else 0: Sodium's vertex light of the face under
+			// it (its sky byte: the level x 16 + 8), the most of its corners, found by a short ray into it. 1 where no
+			// terrain face is found.
+			float surfaceSky(vec3 p, vec3 n) {
+			    rayQueryEXT query;
+			    rayQueryInitializeEXT(query, scene, gl_RayFlagsNoneEXT, 0x01, p + n * 0.05, 0.0, -n, 0.12);
+			    while (rayQueryProceedEXT(query)) {
+			        if (rayQueryGetIntersectionTypeEXT(query, false) == gl_RayQueryCandidateIntersectionTriangleEXT
+			                && blocks(query)) {
+			            rayQueryConfirmIntersectionEXT(query);
+			        }
+			    }
+			    if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
+			        return 1.0;
+			    }
+			    InstanceInfo info = instances[rayQueryGetIntersectionInstanceCustomIndexEXT(query, true)];
+			    if (info.kind != 0u) {
+			        return 1.0;
+			    }
+			    uint geometry = uint(rayQueryGetIntersectionGeometryIndexEXT(query, true));
+			    uint primitive = uint(rayQueryGetIntersectionPrimitiveIndexEXT(query, true));
+			    uint first = info.firstVertex[geometry] + (primitive >> 1u) * 4u;
+			    Words words = Words(info.vertices);
+			    uint most = 0u;
+			    for (uint i = 0u; i < 4u; i++) {
+			        most = max(most, (words.w[(first + i) * 5u + 4u] >> 8u) & 0xFFu);
+			    }
+			    return most > 8u ? 1.0 : 0.0;
+			}
+
 			vec3 bounceSample(vec3 p, vec3 n, bool thinSheet, vec3 u) {
 			    vec3 normal = n;
 			    if (thinSheet && u.z < 0.5) {
@@ -683,6 +741,7 @@ public final class RtEmissive {
 			        entityWeights[i] = w;
 			        entityTotal += w;
 			    }
+			    originSky = skyBounceLight.w > 0.5 ? surfaceSky(p, n) : 1.0;
 			    for (int sampleIndex = 0; sampleIndex < samples; sampleIndex++) {
 			        uint stream = uint(sampleIndex) * 2u;
 			        bool shadowed;
