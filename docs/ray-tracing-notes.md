@@ -764,3 +764,12 @@ the point pulled 0.02 blocks towards the camera (which saw it through the air), 
 Bedrock does: no sun on a bounce ray's hit without sky light there, and no sky for a bounce ray from a surface
 without sky light. Check: the same view at noon, the edge lines gone; a faint grey remains at the tops of some
 ledges in that big cave.
+
+That check was wrong: the lines were dimmer, not gone. They stood out most in a deepslate room with ledges at the
+replay's starting spot (-400.3 -41 -64.3, yaw 122), bright along the ledges' top edges and the corners. Switching
+parts off one at a time: gone with the sky bounce off, there with block light off, so sky light on surfaces with
+none. surfaceSky's short ray into the face found no face at those texels (their point just inside the rock) and
+fell back to "sky", so the rays leaking into the rock counted as sky again. Now, when the short ray finds nothing,
+the first face along the normal decides: from inside the rock, the back of the cave's own face, with the cave's
+sky light (none); in the open, nothing met, so sky. Check (export lighting forced on, unbrightened): the room's
+lines gone; a sunlit outdoor view of the test room the same as before.

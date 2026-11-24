@@ -577,9 +577,10 @@ public final class RtEmissive {
 			// 1 if the terrain surface at p (normal n) has any sky light, else 0: Sodium's vertex light of the face under
 			// it (its sky byte: the level x 16 + 8), the most of its corners, found by a short ray into it. 1 where no
 			// terrain face is found.
-			float surfaceSky(vec3 p, vec3 n) {
+			// The sky light of the first face a ray meets: 1 or 0 as surfaceSky, 1 for an entity, -1 if it meets none.
+			float faceSky(vec3 origin, vec3 direction, float far) {
 			    rayQueryEXT query;
-			    rayQueryInitializeEXT(query, scene, gl_RayFlagsNoneEXT, 0x01, p + n * 0.05, 0.0, -n, 0.12);
+			    rayQueryInitializeEXT(query, scene, gl_RayFlagsNoneEXT, 0x01, origin, 0.0, direction, far);
 			    while (rayQueryProceedEXT(query)) {
 			        if (rayQueryGetIntersectionTypeEXT(query, false) == gl_RayQueryCandidateIntersectionTriangleEXT
 			                && blocks(query)) {
@@ -587,7 +588,7 @@ public final class RtEmissive {
 			        }
 			    }
 			    if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
-			        return 1.0;
+			        return -1.0;
 			    }
 			    InstanceInfo info = instances[rayQueryGetIntersectionInstanceCustomIndexEXT(query, true)];
 			    if (info.kind != 0u) {
@@ -602,6 +603,18 @@ public final class RtEmissive {
 			        most = max(most, (words.w[(first + i) * 5u + 4u] >> 8u) & 0xFFu);
 			    }
 			    return most > 8u ? 1.0 : 0.0;
+			}
+
+			// Where the short ray finds no face, the texel's point is off its face: at the edges of blocks it can sit
+			// just inside the rock, where there are no faces, and its bounce rays, meeting none either, counted as
+			// sky; a cave's edges glowed grey-white in exports. Then the first face out along the normal decides: from
+			// inside the rock, the back of the cave's own face (the cave's sky light); out in the open, none (sky).
+			float surfaceSky(vec3 p, vec3 n) {
+			    float sky = faceSky(p + n * 0.05, -n, 0.12);
+			    if (sky < 0.0) {
+			        sky = faceSky(p, n, 256.0);
+			    }
+			    return sky < 0.0 ? 1.0 : sky;
 			}
 
 			vec3 bounceSample(vec3 p, vec3 n, bool thinSheet, vec3 u) {
