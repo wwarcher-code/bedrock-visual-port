@@ -697,3 +697,20 @@ off and 17.8 with all of it.
 
 **Later, outside ray tracing:** take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.
+
+**Stable light for exports (2026-11-23).** The bounce never looked steady in caves: it shuffled and shifted
+in hue where nothing changed, and lava's light was speckled. Changes:
+- **No noise-triggered resets in exports.** The fast-average reset fired on bursts of noise (a few bounce rays
+  finding a bright patch, lava's animated glow) and swapped a settled history for six frames' worth. In exports
+  every world change is reported and wipes the texels near it, so the reset is off there; while playing it now
+  needs 5 standard deviations and a twelfth of the light.
+- **Several passes per sub-frame in exports** (4), each adding its samples and carrying the light one bounce
+  further, with a history of 1024 passes (32 output frames at 8 sub-frames). While playing the history is 2 s
+  of frames (16 to 240).
+- **Cubic B-spline over 4 x 4 bounce cells** in GATHER instead of a bilinear blend of 2 x 2: no creases between
+  cells and four times the samples behind each pixel.
+- **Lava's light from the atlas's third mip level**: its texture's dark crust and bright streaks made every
+  sample of its light a gamble.
+- **Glow lichen** glows over its whole quad at 0.15 of its light level, in its brightest marked texel's colour
+  (its berries'), and reaches at least its light level in blocks.
+- **Stained glass** tints more: its hue deepened (power 1.5) and weighed 1.4 times its alpha's square root.

@@ -169,7 +169,8 @@ public final class LightingPass {
 			encoder.writeToBuffer(rtShadowData.slice(), Std140Builder.onStack(stack, 64)
 					// z: the loaded chunks' reach in chunks from the camera's (the rays see what's built within it)
 					.putVec4(traced ? 1 : 0, dev.bedrockvisuals.raytrace.RtShadows.comparing() ? 1 : 0,
-							net.minecraft.client.Minecraft.getInstance().options.getEffectiveRenderDistance(), 0)
+							net.minecraft.client.Minecraft.getInstance().options.getEffectiveRenderDistance(),
+							dev.bedrockvisuals.raytrace.RtEmissive.highlight() ? 0 : 1)
 					.putVec4(emissive ? 1 : 0, dev.bedrockvisuals.raytrace.RtEmissive.floorShare(),
 							dev.bedrockvisuals.raytrace.RtEmissive.bounceActive() ? 1 : 0,
 							dev.bedrockvisuals.raytrace.RtEmissive.skyBounceActive() ? 1 : 0)

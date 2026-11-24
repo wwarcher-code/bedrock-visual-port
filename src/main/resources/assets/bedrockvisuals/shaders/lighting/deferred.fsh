@@ -30,7 +30,8 @@ uniform sampler2D RtEmissiveMap;   // ray-traced diffuse light over pi (RtEmissi
                                    // (xyz: towards it, as long as it comes from one way)
 layout(std140) uniform RtShadowData {
     vec4 RtShadowParams;           // x: RtShadowMap holds this frame's, y: show the comparison view
-                                   // z: the loaded chunks' reach in chunks (beyondCasters)
+                                   // z: the loaded chunks' reach in chunks (beyondCasters); w: 1 leaves out
+                                   // the traced light's highlight (debugging: ScriptRunner's rthighlight)
     vec4 RtEmissiveParams;         // x: RtEmissiveMap's emitted light is this frame's, y: the share of block light
                                    // kept under it, z: its bounced light is this frame's, w: and brings the
                                    // sky's light back (Bedrock's sky ambient term left out)
@@ -1239,7 +1240,7 @@ void main() {
     // light (emitted and bounced, over pi) taken as coming from the way it mostly comes, by how much it comes from
     // one way. With E the irradiance, a light from l gives f_spec(l) x E: the lights' reflections, and the bounce's
     // glossy part. Not on glowing faces (their own light).
-    if (RtEmissiveParams.x > 0.5 && distant < 0.0 && standInGlow <= 0.0 && emissive < 0.99) {
+    if (RtEmissiveParams.x > 0.5 && RtShadowParams.w < 0.5 && distant < 0.0 && standInGlow <= 0.0 && emissive < 0.99) {
         vec3 from = texture(RtEmissiveMap, vec2((2.0 + texCoord.x) / 3.0, texCoord.y)).xyz;
         float directed = min(length(from), 1.0);
         float glossNv = dot(n, v);

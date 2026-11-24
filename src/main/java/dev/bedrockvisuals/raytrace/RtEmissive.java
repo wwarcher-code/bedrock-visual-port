@@ -113,13 +113,28 @@ public final class RtEmissive {
 			    return f * f;
 			}
 
-			// How much a light's texel at uv glows: Bedrock's emissive there, or for a light standing in for Java's
-			// block light (uv2.z: its light level / 15), that level, on every texel (lava) or, when uv2.w is set,
-			// on those Bedrock marks as glowing at all, however faintly (glow lichen's berries).
-			float lightEmissive(Light light, vec2 uv) {
+			// EmissiveLights' MASKED_GLOW: the share of its light level glow lichen's whole quad glows at.
+			const float MASKED_GLOW = 0.15;
+			// A light's glow at uv (texel: the block atlas there), linear, before the lighting pass's doubling: its
+			// colour times Bedrock's emissive there, or for a light standing in for Java's block light (uv2.z: its
+			// light level / 15), times that level (lava, every texel). Where Bedrock marks only some texels as
+			// glowing (uv2.w: the brightest one's atlas index plus one; glow lichen's berries), the whole quad glows
+			// dimly in that texel's colour: soft, even light instead of a few bright specks.
+			vec3 lightGlow(Light light, vec2 uv, vec4 texel) {
+			    if (light.uv2.w >= 1.0) {
+			        uint index = uint(light.uv2.w + 0.5) - 1u;
+			        uvec2 atlasSize = uvec2(textureSize(Atlas, 0));
+			        vec2 at = (vec2(index % atlasSize.x, index / atlasSize.x) + 0.5) / vec2(atlasSize);
+			        return pow(textureLod(Atlas, at, 0.0).rgb, vec3(2.2)) * light.uv2.z * MASKED_GLOW;
+			    }
 			    float marked = textureLod(Materials, uv, 0.0).g;
-			    float standIn = light.uv2.w > 0.5 ? (marked > 0.5 / 255.0 ? light.uv2.z : 0.0) : light.uv2.z;
-			    return max(marked, standIn);
+			    if (light.uv2.z > marked) {
+			        // Glowing all over at its light level (lava): its colour from the atlas's third mip level, a
+			        // 4 x 4 texel average. Its texture's dark crust and bright streaks, taken texel by texel, made
+			        // every sample of its light a gamble, and the light it cast speckled; the average is as bright.
+			        return pow(textureLod(Atlas, uv, 2.0).rgb, vec3(2.2)) * light.uv2.z;
+			    }
+			    return pow(texel.rgb, vec3(2.2)) * marked;
 			}
 
 			vec2 sodiumUv(Words words, uint vertex) {
@@ -442,8 +457,8 @@ public final class RtEmissive {
 			    vec3 x = light.p0.xyz + light.e1.xyz * s + light.e2.xyz * t;
 			    vec2 uv = light.uv.xy + light.uv.zw * s + light.uv2.xy * t;
 			    vec4 texel = textureLod(Atlas, uv, 0.0);
-			    float emissive = lightEmissive(light, uv);
-			    if (emissive <= 0.0 || (light.e2.w > 0.0 && texel.a < light.e2.w)) {
+			    vec3 glowColor = lightGlow(light, uv, texel);
+			    if (dot(glowColor, vec3(1.0)) <= 0.0 || (light.e2.w > 0.0 && texel.a < light.e2.w)) {
 			        return vec3(0.0);
 			    }
 			    vec3 toPoint = x - g;
@@ -472,7 +487,7 @@ public final class RtEmissive {
 			        return vec3(0.0);
 			    }
 			    shadowed = entitiesNear && occludedBy(p + nRay * 0.01, direction, tMax, 0x02u);
-			    vec3 glow = pow(texel.rgb, vec3(2.2)) * emissive * 2.0;
+			    vec3 glow = glowColor * 2.0;
 			    return glow * through * window * cosReceiver * cosLight * area / max(d * d, 1.0 / 64.0) / probability
 			            * switches.w / PI;
 			}
@@ -804,6 +819,8 @@ public final class RtEmissive {
 
 			// Frames a texel's own light takes over from the coarser texel standing in for it.
 			const float FILL = 8.0;
+			// A bounce cell counts in the blend only if its samples arrived within this many passes.
+			const uint RECENT_FRAMES = 4u;
 			void main() {
 			    uvec2 pixel = gl_GlobalInvocationID.xy;
 			    if (any(greaterThanEqual(pixel, size.xy))) {
@@ -885,20 +902,31 @@ public final class RtEmissive {
 			        vec2 q = at / cellSize - 0.5;
 			        vec2 low = floor(q);
 			        vec2 f = q - low;
+			        // A cubic B-spline over the 4 x 4 nearest cells, not a bilinear blend of 2 x 2: smooth across the
+			        // cells (no creases where the bilinear blend's slope jumps) and four times the samples behind each
+			        // pixel, so the bounce reads as an even light instead of a pattern that shifts as cells refill.
+			        vec2 f2 = f * f;
+			        vec2 f3 = f2 * f;
+			        vec2 bx[4] = vec2[4]((1.0 - f) * (1.0 - f) * (1.0 - f) / 6.0, (3.0 * f3 - 6.0 * f2 + 4.0) / 6.0,
+			                (-3.0 * f3 + 3.0 * f2 + 3.0 * f + 1.0) / 6.0, f3 / 6.0);
 			        vec3 sum = vec3(0.0);
 			        float weight = 0.0;
 			        float corners = 0.0;
-			        for (int i = 0; i < 4; i++) {
-			            vec2 corner = vec2(float(i & 1), float(i >> 1));
-			            vec2 centre = (low + corner + 0.5) * cellSize;
+			        for (int i = 0; i < 16; i++) {
+			            ivec2 corner = ivec2(i & 3, i >> 2);
+			            vec2 centre = (low + vec2(corner) - 0.5) * cellSize;
 			            vec3 point = p + u * (centre.x - at.x) + v * (centre.y - at.y);
 			            int cell = findTexel(bounceKey(point, n, false, originBlock.xyz, level), false);
-			            if (cell >= 0) {
-			                vec2 b = mix(1.0 - f, f, corner);
-			                float w = b.x * b.y * min(entries[cell].historyA.w + 0.25, 8.0);
+			            // Only cells of faces still there, seen in the last few passes: a block mined out of a wall left
+			            // its face's cells in the cache for EVICT frames, wiped, in the wall's plane right beside the faces
+			            // around the hole. Counted as unsettled, they let Bedrock's sky light back in along every edge
+			            // next to them: a bright outline round every block of a freshly dug room.
+			            if (cell >= 0 && size.z - entries[cell].lastFrame <= RECENT_FRAMES) {
+			                float b = bx[corner.x].x * bx[corner.y].y;
+			                float w = b * min(entries[cell].historyA.w + 0.25, 8.0);
 			                sum += entries[cell].historyB.rgb * w;
 			                weight += w;
-			                corners += b.x * b.y;
+			                corners += b;
 			            }
 			        }
 			        bounced = weight > 0.0 ? sum / weight : vec3(0.0);
@@ -984,9 +1012,9 @@ public final class RtEmissive {
 	 * How long a texel's slow average reaches back while playing (TexelCache), in seconds: as many frames as the
 	 * game draws in that time, between {@link #MIN_HISTORY} and {@link #MAX_HISTORY}.
 	 */
-	private static final float HISTORY_SECONDS = 1.0f;
+	private static final float HISTORY_SECONDS = 2.0f;
 	private static final int MIN_HISTORY = 16;
-	private static final int MAX_HISTORY = 96;
+	private static final int MAX_HISTORY = 240;
 	/** Places the world changed since the last dispatch (TexelCache), at most {@link #MAX_CHANGES}. */
 	private static final int MAX_CHANGES = 16;
 	/**
@@ -1005,11 +1033,14 @@ public final class RtEmissive {
 	private static final int ENTITY_LIGHTS_AT = 64 + MAX_CHANGES * 32;
 	/** The frame data's skyBounceLight, after the entity lights. */
 	private static final int SKY_AT = ENTITY_LIGHTS_AT + 16 + EntityLights.MAX * EntityLights.BYTES;
+	/** Trace passes per sub-frame in exports (each adds its samples and carries the light one bounce further). */
+	private static final int EXPORT_PASSES = 4;
 	/**
-	 * In exports, in sub-frames: 64 is 8 output frames at 8 sub-frames each, which is as far back as a change
-	 * too small to set off the history's reaction (TexelCache) can trail.
+	 * A texel's history in exports, in passes: 1024 is 32 output frames at 4 passes and 8 sub-frames each (half a
+	 * second of a 60 fps video). In exports every change to the world is reported and wipes the texels near it, so the history
+	 * only needs to forget slow, unreported changes (the sun's path); the longer it is, the more evenly lit.
 	 */
-	private static final int EXPORT_HISTORY = 64;
+	private static final int EXPORT_HISTORY = 1024;
 	private static boolean failed;
 	private static String failure = "";
 	private static boolean tracedThisFrame;
@@ -1137,6 +1168,17 @@ public final class RtEmissive {
 		return skyBounce;
 	}
 
+	private static boolean highlight = true;
+
+	/** Whether glossy surfaces get the traced light's highlight (the lighting pass; off for debugging). */
+	public static boolean highlight() {
+		return highlight;
+	}
+
+	public static void setHighlight(boolean on) {
+		highlight = on;
+	}
+
 	/** Whether this frame's bounce brings the sky's light back (the lighting then leaves out Bedrock's sky term). */
 	public static boolean skyBounceActive() {
 		return skyBounce && bounceActive();
@@ -1173,12 +1215,32 @@ public final class RtEmissive {
 		if (frame == null || materials == null) {
 			return;
 		}
+		RtDevice rt = RtDevice.get();
+		boolean exporting = dev.bedrockvisuals.render.OfflineRender.active();
+		// In exports the light is traced several times over before the frame uses it: each pass adds its samples
+		// to every texel's history and carries the light one bounce further, so what is shown is settled.
+		int passes = exporting ? EXPORT_PASSES : 1;
+		try {
+			for (int pass = 0; pass < passes && !failed; pass++) {
+				tracePass(rt, frame, materials, depth, normal, atlas, projection, modelView, towardsLight, lightColor,
+						exporting, pass == passes - 1);
+			}
+			tracedThisFrame = !failed;
+		} catch (RuntimeException e) {
+			failed = true;
+			failure = e.getMessage();
+			BedrockVisualsClient.LOGGER.error("[raytrace] ray-traced diffuse light failed; back to Bedrock's", e);
+		}
+	}
+
+	/** One pass of the three stages; the last of the frame also lights the entities. */
+	private static void tracePass(RtDevice rt, RtScene.Frame frame, GpuTextureView materials, GpuTextureView depth,
+			GpuTextureView normal, GpuTextureView atlas, Matrix4fc projection, Matrix4fc modelView,
+			Vector3fc towardsLight, Vector3fc lightColor, boolean exporting, boolean last) {
 		try (MemoryStack stack = MemoryStack.stackPush()) {
-			RtDevice rt = RtDevice.get();
 			EmissiveLights.Grid grid = EmissiveLights.grid(rt, frame.cameraX(), frame.cameraY(), frame.cameraZ());
 			int w = depth.getWidth(0);
 			int h = depth.getHeight(0);
-			boolean exporting = dev.bedrockvisuals.render.OfflineRender.active();
 			Matrix4f inverse = new Matrix4f(projection).mul(modelView).invert();
 			ByteBuffer constants = stack.malloc(128);
 			inverse.get(0, constants);
@@ -1188,7 +1250,7 @@ public final class RtEmissive {
 			constants.putFloat(76, exporting ? 0 : Math.abs(projection.m11()) * h * 0.5f);
 			constants.putFloat(80, frame.originX() - grid.minX()).putFloat(84, frame.originY() - grid.minY())
 					.putFloat(88, frame.originZ() - grid.minZ()).putFloat(92, exporting ? offlineSamples : samples);
-			constants.putInt(96, w).putInt(100, h).putInt(104, (int) frameNumber++).putInt(108, 0);
+			constants.putInt(96, w).putInt(100, h).putInt(104, (int) frameNumber++).putInt(108, exporting ? 1 : 0);
 			constants.putInt(112, frame.originX()).putInt(116, frame.originY()).putInt(120, frame.originZ())
 					.putInt(124, history(exporting));
 
@@ -1242,13 +1304,10 @@ public final class RtEmissive {
 					new FrameCompute.Buffer(TexelCache.buffer(rt).buffer()), new FrameCompute.Buffer(params.buffer()));
 			PASS.dispatch(rt, w * 3, h, bindings, constants, new int[][] {{(w + 7) / 8, (h + 7) / 8, 1},
 					{TexelCache.ENTRIES / 64, 1, 1}, {(w + 7) / 8, (h + 7) / 8, 1}});
-			tracedThisFrame = true;
-			// The entities' light (EntityProbes): the emitted light and the bounce, whichever is on.
-			EntityProbes.dispatch(rt, bindings, constants, lightVolume, materials, frame);
-		} catch (RuntimeException e) {
-			failed = true;
-			failure = e.getMessage();
-			BedrockVisualsClient.LOGGER.error("[raytrace] ray-traced diffuse light failed; back to Bedrock's", e);
+			if (last) {
+				// The entities' light (EntityProbes): the emitted light and the bounce, whichever is on.
+				EntityProbes.dispatch(rt, bindings, constants, lightVolume, materials, frame);
+			}
 		}
 	}
 

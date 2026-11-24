@@ -246,6 +246,7 @@ public final class ScriptRunner {
 			case "replay" -> flashback("com.moulberry.flashback.Flashback", "openReplayWorld",
 					new Class<?>[] {Path.class}, Path.of(argument));
 			case "export" -> startExport(minecraft, argument.split("\s+"));
+			case "rthighlight" -> dev.bedrockvisuals.raytrace.RtEmissive.setHighlight(argument.equals("on"));
 			case "rtsky" -> dev.bedrockvisuals.raytrace.RtEmissive.setSkyBounce(argument.equals("on"));
 			case "rtbouncegain" -> dev.bedrockvisuals.raytrace.RtEmissive.setBounceGain(Float.parseFloat(argument));
 			case "rtsamples" -> dev.bedrockvisuals.raytrace.RtEmissive.setSamples(Integer.parseInt(argument));

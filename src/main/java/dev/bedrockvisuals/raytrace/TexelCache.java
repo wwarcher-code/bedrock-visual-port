@@ -452,7 +452,14 @@ final class TexelCache {
 			        float slowLight = dot(slowA + slowB, LUMA);
 			        // An exponential average of weight w over noise of variance v varies by v * w / (2 - w).
 			        float fastNoise = sqrt(variance * fastWeight / (2.0 - fastWeight));
-			        if (fastA.w >= FAST && abs(fastLight - slowLight) > 4.0 * fastNoise + 0.05 * slowLight + 0.001) {
+			        // Not in exports (size.w 1): there every change to the world is reported (and wipes the texels near
+			        // it), the rest (the sun's path) is slow, and a reset taken on a burst of noise (a few bounce rays
+			        // finding a bright patch, lava's animated glow) swapped a long, settled history for a few frames'
+			        // worth: the light jumped and shimmered in hue where nothing changed. While playing, only well past
+			        // the noise (5 standard deviations and a twelfth of the light).
+			        bool exporting = (size.w & 1u) != 0u;
+			        if (!exporting && fastA.w >= FAST
+			                && abs(fastLight - slowLight) > 5.0 * fastNoise + 0.08 * slowLight + 0.001) {
 			            slowA = fastA.rgb;
 			            slowB = fastB.rgb;
 			            held = fastA.w;

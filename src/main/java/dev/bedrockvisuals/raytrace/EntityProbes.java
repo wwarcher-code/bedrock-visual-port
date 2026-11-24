@@ -99,8 +99,8 @@ public final class EntityProbes {
 			    vec3 x = light.p0.xyz + light.e1.xyz * u.y + light.e2.xyz * u.z;
 			    vec2 uv = light.uv.xy + light.uv.zw * u.y + light.uv2.xy * u.z;
 			    vec4 texel = textureLod(Atlas, uv, 0.0);
-			    float emissive = lightEmissive(light, uv);
-			    if (emissive <= 0.0 || (light.e2.w > 0.0 && texel.a < light.e2.w)) {
+			    vec3 glowColor = lightGlow(light, uv, texel);
+			    if (dot(glowColor, vec3(1.0)) <= 0.0 || (light.e2.w > 0.0 && texel.a < light.e2.w)) {
 			        return vec3(0.0);
 			    }
 			    vec3 toPoint = x - g;
@@ -117,7 +117,7 @@ public final class EntityProbes {
 			    if (dot(through, vec3(1.0)) <= 0.0) {
 			        return vec3(0.0);
 			    }
-			    vec3 glow = pow(texel.rgb, vec3(2.2)) * emissive * 2.0 * through * window;
+			    vec3 glow = glowColor * 2.0 * through * window;
 			    return glow * cosLight * area / max(d * d, 1.0 / 64.0) / probability * switches.w / PI;
 			}
 

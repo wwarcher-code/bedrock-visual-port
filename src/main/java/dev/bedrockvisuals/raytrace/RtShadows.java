@@ -66,6 +66,8 @@ public final class RtShadows {
 			""";
 
 	static final String TRANSLUCENT_TINT = """
+			const float GLASS_STRENGTH = 1.4;
+			const float GLASS_SATURATION = 1.5;
 			vec3 translucentTint(rayQueryEXT query) {
 			    InstanceInfo info = instances[rayQueryGetIntersectionInstanceCustomIndexEXT(query, false)];
 			    uint geometry = uint(rayQueryGetIntersectionGeometryIndexEXT(query, false));
@@ -88,7 +90,11 @@ public final class RtShadows {
 			    // sun through it keeps its colour instead of washing out to white.
 			    vec3 color = pow(texel.rgb, vec3(2.2));
 			    color = min(color / max(max(color.r, max(color.g, color.b)), 0.25), vec3(1.0));
-			    return sqrt(mix(vec3(1.0), color, sqrt(texel.a)));
+			    // Its hue weighed well over its alpha alone, and deepened (the weaker channels lowered further): the
+			    // light through a pane or block takes its colour clearly (TUNE). Per face: a block's two faces
+			    // together give the whole.
+			    color = pow(color, vec3(GLASS_SATURATION));
+			    return sqrt(mix(vec3(1.0), color, min(sqrt(texel.a) * GLASS_STRENGTH, 1.0)));
 			}
 			""";
 

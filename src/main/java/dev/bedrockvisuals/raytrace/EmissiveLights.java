@@ -20,8 +20,9 @@ import java.util.Locale;
  *   e2.xyz, cutoff     the edge to the fourth corner; Sodium's alpha cutoff for its texels
  *   uv0.xy, uvE1.xy    the texture coordinates at p0, and along e1
  *   uvE2.xy, glow,     along e2; for a block that gives off Java light but barely glows in Bedrock's maps,
- *     masked           its light level / 15, standing in for its texels' emissive: every texel's (lava), or with
- *                      masked 1, only those Bedrock marks as glowing at all (glow lichen's berries)
+ *     masked           its light level / 15, standing in for its texels' emissive: every texel's (lava); or, where
+ *                      Bedrock marks some texels as glowing at all (glow lichen's berries), masked is the brightest
+ *                      one's atlas index plus one, and the whole quad glows dimly (MASKED_GLOW) in its colour
  * </pre>
  * A point of the quad is p0 + s e1 + t e2 (s, t in [0, 1]): Sodium's quads are parallelograms, in position and
  * texture alike.
@@ -62,6 +63,11 @@ public final class EmissiveLights {
 	 * emissive in Bedrock's maps, lit there by its block light).
 	 */
 	private static final float WEAK_EMISSIVE = 0.1f;
+	/**
+	 * For a texture Bedrock marks as glowing only in places (glow lichen): the share of its light level the whole
+	 * quad glows at, in the marked texels' colour (TUNE: a dim, even light; RtEmissive's lightGlow).
+	 */
+	private static final float MASKED_GLOW = 0.15f;
 
 	private static boolean changed = true;
 	private static Grid grid;
@@ -187,6 +193,7 @@ public final class EmissiveLights {
 			}
 			float glow = 0;
 			float masked = 0;
+			int lightLevel = 0;
 			if (emissive < WEAK_EMISSIVE && emitters != null) {
 				// The block the face belongs to: the one its centre is in, for a face inside a block's cell (glow
 				// lichen's, a hair off the wall it grows on; lava's top); for a face on the cells' boundary, the one
@@ -202,19 +209,24 @@ public final class EmissiveLights {
 						: emitters.lightAt(mx - ux * 0.05f, my - uy * 0.05f, mz - uz * 0.05f);
 				if (level > 0) {
 					glow = level / 15f;
-					// Texels Bedrock marks as glowing at all, however faintly (glow lichen's berries), glow at the
-					// light level and the rest not: every texel glowing made a patch of lichen a lamp. With none
-					// marked (lava), every texel glows.
-					float coverage = MaterialAtlas.emissiveCoverage(uMin, vMin, uMax, vMax);
-					masked = coverage > 0 ? 1 : 0;
-					emissive = glow * (coverage > 0 ? coverage : 1);
+					lightLevel = level;
+					// A texture Bedrock marks as glowing only in places, however faintly (glow lichen's berries):
+					// the whole quad gives off a dim light (MASKED_GLOW of its level) in the colour of its
+					// brightest marked texel. Every texel glowing at its level made a patch of lichen a lamp; only
+					// the marked ones (a fortieth of the texture) left it a light reaching two blocks. With none
+					// marked (lava), every texel glows at its level in its own colour.
+					int marked = MaterialAtlas.brightestEmissiveTexel(uMin, vMin, uMax, vMax);
+					masked = marked;
+					emissive = glow * (marked > 0 ? MASKED_GLOW : 1);
 				}
 			}
 			if (emissive < MIN_EMISSIVE) {
 				continue;
 			}
 			float power = emissive * area * 2.0f * 0.7f;
-			float reach = Math.min((float) Math.sqrt(power / CUTOFF), MAX_REACH);
+			// A light standing in for Java's block light reaches at least as far as that light does (its level in
+			// blocks), however dim: glow lichen's light is faint, not cut short.
+			float reach = Math.min(Math.max((float) Math.sqrt(power / CUTOFF), lightLevel), MAX_REACH);
 			int material = data.getInt(first + 16) >>> 16 & 0xFF;
 			float cutoff = switch (material >>> 1 & 3) {
 				case 0 -> 0f;

@@ -167,6 +167,34 @@ public final class MaterialAtlas {
 		return lit / (float) ((x1 - x0) * (y1 - y0));
 	}
 
+	/**
+	 * The atlas texel (its index, y times the width plus x, plus one) in a rectangle (texture coordinates) that
+	 * Bedrock marks as glowing most, 0 if none is: the colour glow lichen's light takes (its berries').
+	 */
+	public static int brightestEmissiveTexel(float u0, float v0, float u1, float v1) {
+		byte[] channel = emissive;
+		if (channel == null) {
+			return 0;
+		}
+		int x0 = Math.clamp((int) Math.floor(Math.min(u0, u1) * emissiveWidth + 0.01), 0, emissiveWidth - 1);
+		int x1 = Math.clamp((int) Math.ceil(Math.max(u0, u1) * emissiveWidth - 0.01), x0 + 1, emissiveWidth);
+		int y0 = Math.clamp((int) Math.floor(Math.min(v0, v1) * emissiveHeight + 0.01), 0, emissiveHeight - 1);
+		int y1 = Math.clamp((int) Math.ceil(Math.max(v0, v1) * emissiveHeight - 0.01), y0 + 1, emissiveHeight);
+		int best = 0;
+		int bestIndex = 0;
+		for (int y = y0; y < y1; y++) {
+			int row = y * emissiveWidth;
+			for (int x = x0; x < x1; x++) {
+				int value = channel[row + x] & 0xFF;
+				if (value > best) {
+					best = value;
+					bestIndex = row + x + 1;
+				}
+			}
+		}
+		return bestIndex;
+	}
+
 	/** One texel's emissive (0 to 1) in the block atlas's pixels; 0 outside it or before it is built. */
 	public static float emissiveAt(int x, int y) {
 		byte[] channel = emissive;
