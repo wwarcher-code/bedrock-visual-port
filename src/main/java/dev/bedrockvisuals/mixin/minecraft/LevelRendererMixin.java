@@ -62,6 +62,7 @@ abstract class LevelRendererMixin {
 	private void bedrockvisuals$prepareFirstPersonShadow(com.mojang.blaze3d.resource.GraphicsResourceAllocator allocator,
 			boolean arg1, net.minecraft.client.renderer.state.level.CameraRenderState camera, GpuBufferSlice fog,
 			org.joml.Vector4f fogColor, boolean arg5, boolean arg6, CallbackInfo ci) {
+		dev.bedrockvisuals.render.ChunkChanges.frameDrawn();
 		dev.bedrockvisuals.render.FirstPersonShadow.prepare(camera);
 	}
 
