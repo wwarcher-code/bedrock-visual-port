@@ -371,13 +371,15 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
     // exactly one of them applies it. Whatever the path's length: gated on the path being under the 64-block
     // cap, long paths (looking across water far out, or down into a hollow under a ledge) skipped the lighting
     // pass's flag and got this pass's deep-water fallback on top, saturated blue.
-    if (opaque > 0.0) {
-        vec3 beneath = v_Position * (viewDistance(opaque) / max(viewDistance(gl_FragCoord.z), 1e-4));
-        // The shadow map holds nothing over caves (Sodium's cave culling): water under the terrain's surface
-        // is in shade (its scattered light lit teal in a cave's pool at noon).
-        s.beneathLit = underTerrain(beneath + vec3(0.0, 0.05, 0.0)) ? 0.0 : surfaceFogShadow(beneath);
-        s.beneathSky = waterColumnSkyLight(waterTestPoint(beneath));
-    }
+    // The light the water scatters, judged in the middle of the water the view crosses: whether the sun
+    // reaches it and the sky light over it. (Judged at what lies behind, a waterfall in front of a ledge's
+    // underside went by which column each point of the underside fell in, on the block's edge: lit or in
+    // shade, and the sky of the water on the ledge above or not, in a staircase patch the shape of that water.)
+    // The shadow map holds nothing over caves (Sodium's cave culling): water under the terrain's surface is in
+    // shade (its scattered light lit teal in a cave's pool at noon).
+    vec3 scatterPoint = v_Position + normalize(v_Position) * (0.5 * waterPath);
+    s.beneathLit = underTerrain(scatterPoint) ? 0.0 : surfaceFogShadow(scatterPoint);
+    s.beneathSky = depthBelowWaterSurface(scatterPoint) >= 0.0 ? waterColumnSkyLight(scatterPoint) : -1.0;
     // Its own flag rather than the same test here: this pass reconstructs the point from the water's geometry
     // and the lighting pass from its matrices, and with view bobbing they differ enough to disagree at a
     // block's edge. Read over Distant Horizons' ground too, which the lighting pass dims and flags the same
@@ -859,7 +861,7 @@ vec3 waterColor(WaterSurface s, float albedo) {
         // casters (Sodium's cave culling). By the shadow map alone, a waterfall deep in a cave scattered
         // sunlight in pale blue patches wherever the map had no caster over it. The sky's share too goes by
         // the water's own sky light there, not the column's (the sea's, far above the cave).
-        vec3 inWater = v_Position + normalize(v_Position) * 0.1;
+        vec3 inWater = v_Position + normalize(v_Position) * (0.5 * s.path); // as for beneathLit
         vec2 here = lightVolumeAt(inWater);
         if (here.x >= 0.0) {
             vec3 l = normalize(ShadowParams.w > 0.5 ? MoonDirection.xyz : SunDirection.xyz);
