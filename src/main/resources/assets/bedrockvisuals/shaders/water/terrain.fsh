@@ -830,11 +830,22 @@ vec3 waterColor(WaterSurface s, float albedo) {
     vec3 transmitted = beneath * s.transmittance;
     if (s.scatters) {
         // Beyond the water column map, the water's own scattered light (the lighting pass adds it within).
-        transmitted += waterInScatter(normalize(v_Position), s.path, s.beneathLit,
-                // The surface's sky light (one level up for the water block's own dimming of it), as the
-                // lighting pass takes its column's.
-                min(VolumeCamera.x, s.beneathSky >= 0.0 ? waterSkyAccess(s.beneathSky)
-                        : waterSkyAccess(clamp(levels.y + 1.0 / 15.0, 0.0, 1.0))));
+        float sunVisibility = s.beneathLit;
+        float skyAccess = min(VolumeCamera.x, s.beneathSky >= 0.0 ? waterSkyAccess(s.beneathSky)
+                : waterSkyAccess(clamp(levels.y + 1.0 / 15.0, 0.0, 1.0)));
+        // As the fog's march does (lighting/volume.fsh): in the light volume, no sun where no sky light reaches
+        // the water, and where it isn't full the blocks towards the sun stand in for the shadow map's missing
+        // casters (Sodium's cave culling). By the shadow map alone, a waterfall deep in a cave scattered
+        // sunlight in pale blue patches wherever the map had no caster over it. The sky's share too goes by
+        // the water's own sky light there, not the column's (the sea's, far above the cave).
+        vec3 inWater = v_Position + normalize(v_Position) * 0.1;
+        vec2 here = lightVolumeAt(inWater);
+        if (here.x >= 0.0) {
+            vec3 l = normalize(ShadowParams.w > 0.5 ? MoonDirection.xyz : SunDirection.xyz);
+            sunVisibility *= here.x > 0.0001 ? (here.x < 0.999 ? voxelRayVisibility(inWater, l, 24) : 1.0) : 0.0;
+            skyAccess = min(skyAccess, waterSkyAccess(clamp(here.x + 1.0 / 15.0, 0.0, 1.0)) * step(0.0001, here.x));
+        }
+        transmitted += waterInScatter(normalize(v_Position), s.path, sunVisibility, skyAccess);
     }
     vec3 surfaceLight = specularScale * reflection + glint;
     // DeferredWater fogs the surface's own light like terrain: towards the sky radiance (blended to the
