@@ -260,12 +260,9 @@ float distantDistanceAt(vec2 uv, vec2 ndcXy);
 
 // How far the view runs through water from the surface at entry (camera-relative) along dir before it leaves
 // the water, up to path (returned when it doesn't leave sooner, or where nothing can tell): around the camera
-// by the water blocks in the light volume, farther out by the water column map. Bedrock's water extinction runs
-// from the water's front depth to the scene's, but its waterfalls are a block thick there; this pass took
-// everything between a waterfall's face and the wall or sky behind it for water: ten blocks of air behind a
-// two-block waterfall came out nearly opaque blue, and a cave's waterfall in front of a lavafall bright green
-// (the water takes the red). The map alone didn't do for that one: it holds only each column's top body of
-// water (the sea far above), and no Java chunk down there.
+// by the water blocks in the light volume, farther out by the water column map (which holds only each
+// column's top body of water: a cave's waterfall under the sea went by the sea's). Bedrock's volumetric fog
+// holds its water medium between the water's front and back depths; this stands in for those.
 const float WATER_EXIT_STEP = 0.25;
 const int WATER_EXIT_STEPS = 64;
 float waterExit(vec3 entry, vec3 dir, float path) {
@@ -357,17 +354,14 @@ WaterSurface waterSurface(vec3 faceNormal, vec3 tangent, vec3 bitangent) {
             path = min(max(ground - length(v_Position), 0.0), BOTTOMLESS);
         }
     }
-    // Only as far as the water goes (waterExit); past it the view runs through air.
-    if (UnderwaterParams.x < 0.5) {
-        float exit = waterExit(v_Position, normalize(v_Position), path);
-        if (exit < path) {
-            path = exit;
-            s.bottomless = false;
-        }
-    }
-    // The view's extinction and the water volume's (water_columns.glsl).
-    s.transmittance = exp(-(Absorption.rgb + Scattering.rgb + vec3(WATER_VOLUME_EXTINCTION)) * path);
-    s.path = path;
+    // Bedrock's two terms: WaterExtinction's from the surface to the scene behind, whatever lies between (a
+    // waterfall in front of a far wall absorbs all the way to it: blue, and lava behind it blue-green), and the
+    // volumetric fog's water medium, extinction and in-scattered light, only between the water's front and
+    // back depths (waterExit: as far as the water goes). (Both over the whole way, a cave's waterfall over a
+    // lavafall came out a saturated green; both over the water alone, it vanished.)
+    float waterPath = UnderwaterParams.x < 0.5 ? waterExit(v_Position, normalize(v_Position), path) : path;
+    s.transmittance = exp(-(Absorption.rgb + Scattering.rgb) * path - vec3(WATER_VOLUME_EXTINCTION) * waterPath);
+    s.path = waterPath;
     s.scatters = UnderwaterParams.x < 0.5;
     s.beneathLit = 1.0;
     s.beneathSky = -1.0;

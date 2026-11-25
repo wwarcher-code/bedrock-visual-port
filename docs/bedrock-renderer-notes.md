@@ -304,11 +304,14 @@ A chunk counts as drawn by Sodium (and its water is mapped) when its sea-level s
 section is built. With the sea level's section alone, chunks whose ground there is buried, which Sodium never
 builds, went unmapped. A lake above the sea or a pool on a hill fell back to the water pass's estimate,
 dimmer and bluer by the chunk.
-The water pass counts the view's path through water only as far as the water column map says the water
-goes along it (stepped a quarter block at a time, up to 16 blocks). Taking everything up to the opaque scene
-behind, a waterfall two blocks wide in front of a wall ten blocks back came out nearly opaque blue, and solid
-blue against the sky (the 64-block bottomless path). A view grazing a waterfall's side counts as through
-almost no water where the map holds Java's chunk.
+The water pass dims what's beneath by Bedrock's two terms: the water's extinction (σ) from the surface to the
+scene behind, whatever lies between, as WaterExtinction does, and the volumetric fog's water medium (its
+extinction and in-scattered light) only through the water itself, as PopulateVolume holds it between the
+water's front and back depths. How far the view runs through water comes from the water blocks around the
+camera (LightVolume marks water, not solid, at 32 in its blue), farther out from the water column map. Both
+terms over the whole way, a cave's waterfall in front of a lavafall came out a saturated green; both over the
+water alone, it vanished. Checked against Bedrock by the developer: waterfalls in front of far walls are blue,
+and lava behind one blue-green.
 
 ## Volumetric fog (verified in PopulateVolume)
 
