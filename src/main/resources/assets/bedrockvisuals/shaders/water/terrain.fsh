@@ -265,46 +265,47 @@ float distantDistanceAt(vec2 uv, vec2 ndcXy);
 // holds its water medium between the water's front and back depths; this stands in for those.
 const float WATER_EXIT_STEP = 0.25;
 const int WATER_EXIT_STEPS = 64;
-float waterExit(vec3 entry, vec3 dir, float path) {
+// Whether the camera-relative point p holds water, as far as can be told (waterExit): known 1 water, 0 not;
+// unknown -1 (outside the light volume and the column map, or in a column whose chunk the map doesn't hold).
+float waterKnownAt(vec3 p) {
+    if (inLightVolume(p)) {
+        return waterBlockAt(p) ? 1.0 : 0.0;
+    }
+    if (max(abs(p.x), abs(p.z)) > WATER_COLUMN_RANGE - 16.0) {
+        return -1.0;
+    }
+    if (depthBelowWaterSurface(p) >= 0.0) {
+        return 1.0;
+    }
     WaterColumn c;
-    vec3 inside = entry + dir * 0.1;
-    if (inLightVolume(inside)) {
-        if (!waterBlockAt(inside)) {
-            return min(path, 0.1); // grazing the water's side, or a face seen from behind
-        }
-        float t = 0.1;
-        for (int i = 0; i < WATER_EXIT_STEPS; i++) {
-            t += WATER_EXIT_STEP;
-            if (t >= path) {
-                return path;
-            }
-            vec3 p = entry + dir * t;
-            if (!inLightVolume(p)) {
-                return path;
-            }
-            if (!waterBlockAt(p)) {
-                return t - 0.5 * WATER_EXIT_STEP;
-            }
-        }
-        return path;
-    }
-    if (max(abs(inside.x), abs(inside.z)) > WATER_COLUMN_RANGE - 16.0) {
-        return path;
-    }
-    if (depthBelowWaterSurface(inside) < 0.0) {
-        // Just past the face there's no water: the view grazes a waterfall's side (or meets a face from behind).
-        // Through barely any water, where the map holds Java's chunk there (else it can't tell: as before).
-        // (Taken as before, a waterfall's side edges were dark blue lines.)
-        waterColumnAt(inside, c);
-        return c.loaded ? min(path, 0.1) : path;
-    }
+    waterColumnAt(p, c);
+    return c.loaded ? 0.0 : -1.0;
+}
+
+float waterExit(vec3 entry, vec3 dir, float path) {
     float t = 0.1;
+    float known = waterKnownAt(entry + dir * t);
+    if (known < 0.0) {
+        return path;
+    }
+    if (known < 0.5) {
+        // Just past the face there's no water: the view grazes a waterfall's side (or meets a face from behind),
+        // through barely any water. (Taken the whole way, a waterfall's side edges were dark blue lines.)
+        return min(path, 0.1);
+    }
+    // On through the water: the light volume's blocks while the view is in it, then the column map's. (Given
+    // up where it left the volume, the whole way counted as water there: across a waterfall seen from below, a
+    // band one block high where the view left the volume glowed with the scattered light of 64 blocks of water.)
     for (int i = 0; i < WATER_EXIT_STEPS; i++) {
         t += WATER_EXIT_STEP;
         if (t >= path) {
             return path;
         }
-        if (depthBelowWaterSurface(entry + dir * t) < 0.0) {
+        known = waterKnownAt(entry + dir * t);
+        if (known < 0.0) {
+            return path;
+        }
+        if (known < 0.5) {
             return t - 0.5 * WATER_EXIT_STEP;
         }
     }
@@ -686,6 +687,19 @@ vec3 surfaceFog(vec3 dir, float distance, out vec3 transmittance) {
 // The straight-alpha color that, blended over the scene beneath at the surface's opacity, gives the water's
 // look: reflection + glint + (1 - F) * (bottom * transmittance + scattered light). The parts combine on screen
 // (after tone mapping), since the scene beneath and the reflections come from the finished image.
+// The HDR colour (before local exposure) the picture shows as display at this fragment: toDisplay and local
+// exposure inverted by refinement from guess, a channel at a time (the display goes about as the HDR's power
+// 1/2.2 in their toe, so the HDR is scaled by the shortfall's 2.2nd power each step). Grading and the tone map
+// rise with each channel, so it settles; a channel the display clips at 1 can't be told apart above that.
+vec3 hdrOfDisplay(vec3 display, vec3 guess) {
+    vec3 hdr = max(guess, vec3(1e-4));
+    for (int i = 0; i < 6; i++) {
+        vec3 shown = toDisplay(locallyExposed(hdr));
+        hdr *= pow(clamp((display + 1e-3) / (shown + 1e-3), vec3(1.0 / 16.0), vec3(16.0)), vec3(2.2));
+    }
+    return hdr;
+}
+
 vec3 waterColor(WaterSurface s, float albedo) {
     if (UnderwaterParams.x > 0.5) {
         vec2 size = vec2(textureSize(u_GBufferDepth, 0));
@@ -822,10 +836,17 @@ vec3 waterColor(WaterSurface s, float albedo) {
 
     vec3 behind = texelFetch(u_SceneColor, ivec2(gl_FragCoord.xy), 0).rgb;
     // What lies beneath, from the lighting pass's HDR scene. Java draws entities and particles over that pass's
-    // picture (and bloom adds to it), which its HDR scene doesn't hold: their difference is added through the
-    // water after the tone map, as before.
+    // picture (and bloom adds to it), which its HDR scene doesn't hold. Where they cover it, what's beneath is
+    // their HDR colour, recovered from the picture (hdrOfDisplay). (Their difference from the terrain behind them
+    // added after the tone map, dimmed by the water, didn't cancel that terrain under the tone map's curve: the
+    // wall behind a cow showed through it, as if the cow were half transparent.) Small differences (bloom) are
+    // still added after the tone map.
     vec3 beneath = texelFetch(u_LitFlags, ivec2(gl_FragCoord.xy), 0).rgb;
     vec3 drawnOver = behind - toDisplay(locallyExposed(beneath));
+    if (max(abs(drawnOver.r), max(abs(drawnOver.g), abs(drawnOver.b))) > 6.0 / 255.0) {
+        beneath = hdrOfDisplay(behind, beneath);
+        drawnOver = behind - toDisplay(locallyExposed(beneath));
+    }
     // Bedrock's water only absorbs (WaterExtinction); light scattered in the water comes from volumetric fog.
     vec3 transmitted = beneath * s.transmittance;
     if (s.scatters) {
