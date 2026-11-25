@@ -201,16 +201,24 @@ public final class RtShadows {
 			        return;
 			    }
 			    vec3 p = position + camera.xyz;
+			    // The light disc's sample is drawn per texel where the face is texel-snapped, else per pixel.
+			    uint sampleKey = index;
 			    if (max(a.x, max(a.y, a.z)) >= 0.95) {
 			        vec3 axis = round(n);
 			        vec3 toCentre = TEXEL_GRID * 0.5 - (p - floor(p / TEXEL_GRID) * TEXEL_GRID);
 			        p += toCentre - dot(toCentre, axis) * axis;
+			        // The texel, and the face it's on (its axis and side: the two faces at an edge differ).
+			        ivec3 texel = ivec3(floor(p / TEXEL_GRID - axis * 0.25));
+			        sampleKey = hash(uint(texel.x) * 73856093u ^ uint(texel.y) * 19349663u ^ uint(texel.z) * 83492791u
+			                ^ uint(dot(axis + 1.0, vec3(1.0, 3.0, 9.0))) * 2654435761u);
 			    }
 
-			    // A random point of the light's disc.
+			    // A random point of the light's disc, the same for every pixel of a texel: drawn per pixel, a soft
+			    // edge (the far end of a tall caster's shadow) broke each texel into lit and shadowed pixels,
+			    // grain that the texels' grid should hide; now each texel turns lit or shadowed whole.
 			    vec3 direction = towards;
 			    if (camera.w > 0.0) {
-			        uint seed = hash(index * 9781u + size.z * 6271u);
+			        uint seed = hash(sampleKey * 9781u + size.z * 6271u);
 			        float r = sqrt(float(seed & 0xFFFFu) / 65536.0) * camera.w;
 			        float phi = float(seed >> 16u) / 65536.0 * 6.2831853;
 			        vec3 side = normalize(cross(abs(towards.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0), towards));
