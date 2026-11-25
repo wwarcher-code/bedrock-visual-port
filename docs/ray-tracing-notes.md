@@ -695,6 +695,14 @@ off and 17.8 with all of it.
   unchanged. (With the room full of mobs spawned in the dark, the first run read 17% and 25 ms: the test now
   clears them and turns mob spawning off in the test world.)
 
+**Status (2026-11-24):** the "Still to do" lists above are history. Done since: cutout alpha-testing, section
+compaction, Distant Horizons' terrain in the scene (DistantField), exports tracing shadows, emissive and moving
+entity lights, glowing eyes, carried light through glass, bounced and shadowed on entities, the bounce through
+glass with entity colours and sky light (option), glossy highlights and bounce, the fog and haze lit by the
+traced light, and the light grid rebuilt less. Left out on purpose: particles in the scene (tiny, short-lived
+shadows), Distant Horizons' own pixels traced (DistantField is the same 8-block height map their march walks, so
+rays would give the same shadow) and the first-person hand in the traced scene (it is drawn in screen space).
+
 **Later, outside ray tracing:** take a look at vertical (falling) water. The player asked for this on
 2026-11-19 and deferred it to stay on ray tracing; what looks wrong with it is still to be described.
 
@@ -750,7 +758,9 @@ Blocks with no Java light give no traced light. Measured: glowstone scale 1, tor
 lantern 0.50, lava 0.15 a face (a pool's top a sixth of a block), glow lichen 0.15 a face. In the dark box a
 torch now lights the room; the lava cave is darker than before. Seen on the way: swapping one light block for
 another mid-scene left a sharp-edged dome of the old light's history for a while; a light placed before the
-scene starts fades smoothly.
+scene starts fades smoothly. Fixed 2026-11-24: an edit counted for 1.5 s of wall-clock time only, and in exports a
+frame takes seconds, so the rebuild after it came too late to wipe the texels around it (ChunkChanges now also
+counts 120 drawn frames). Checked offline: glowstone swapped for a sea lantern, then removed, leaves no light.
 
 **Glowing block edges in exports (2026-11-23).** The developer's export of their deepslate cave showed a grey-white
 line along the edges and seams of every block (camera keyframe 0 of their replay, -397 -42 -70, at noon). Only in

@@ -450,6 +450,9 @@ The horizon blend stop mapping (x min, y start, z mie start, w max) fits the sho
 
 Still off: just above the horizon at low sun, Bedrock's sky is lilac, about (164,151,171), where the function
 gives peach, about (212,149,148). Bedrock's volumetric fog, which scatters into the sky too, isn't modelled.
+Since then the volumetric fog is drawn over the sky. On 2026-11-24 at /time set 11500, looking at the sun from
+y 200, the sky a third of the way up was (166,157,173) and peach only near the sun; facing away (east) the
+horizon was (161,147,157). Which way the Bedrock shot faced isn't recorded, so the match is unverified.
 
 **Distance fog.** The same pass blends the lit surface towards that radiance by
 `saturate((RenderChunkFogAlpha.x - FogAndDistanceControl.x + distance / FogAndDistanceControl.z) × FogAndDistanceControl.y)`.
