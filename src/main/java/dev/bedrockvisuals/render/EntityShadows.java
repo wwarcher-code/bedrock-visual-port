@@ -127,6 +127,7 @@ public final class EntityShadows {
 				try (RenderPass pass = encoder.createRenderPass(descriptor)) {
 					RenderSystem.bindDefaultUniforms(pass);
 					solidEntities.accept(pass);
+					FirstPersonShadow.executeSolid(pass); // the player's own body and what it holds, in first person
 				} finally {
 					cascade = -1;
 				}

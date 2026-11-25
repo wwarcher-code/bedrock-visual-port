@@ -56,6 +56,23 @@ abstract class LevelRendererMixin {
 				arg1 ? null : frame::executeTranslucent);
 	}
 
+	/** The camera's own entity, prepared into a frame of its own for its shadow (FirstPersonShadow). */
+	@Inject(method = "render", at = @At(value = "INVOKE", shift = At.Shift.AFTER,
+			target = "Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher;prepareFrame(Lnet/minecraft/client/renderer/SubmitNodeStorage;)Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher$PreparedFrame;"))
+	private void bedrockvisuals$prepareFirstPersonShadow(com.mojang.blaze3d.resource.GraphicsResourceAllocator allocator,
+			boolean arg1, net.minecraft.client.renderer.state.level.CameraRenderState camera, GpuBufferSlice fog,
+			org.joml.Vector4f fogColor, boolean arg5, boolean arg6, CallbackInfo ci) {
+		dev.bedrockvisuals.render.FirstPersonShadow.prepare(camera);
+	}
+
+	@Inject(method = "render", at = @At(value = "INVOKE", shift = At.Shift.AFTER,
+			target = "Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher$PreparedFrame;close()V"))
+	private void bedrockvisuals$endFirstPersonShadow(com.mojang.blaze3d.resource.GraphicsResourceAllocator allocator,
+			boolean arg1, net.minecraft.client.renderer.state.level.CameraRenderState camera, GpuBufferSlice fog,
+			org.joml.Vector4f fogColor, boolean arg5, boolean arg6, CallbackInfo ci) {
+		dev.bedrockvisuals.render.FirstPersonShadow.endFrame();
+	}
+
 	/** The solid entities, when the deferred renderer drew them before the water (DeferredRenderer). */
 	@Redirect(method = "executeSolid", at = @At(value = "INVOKE",
 			target = "Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher$PreparedFrame;executeSolid(Lcom/mojang/renderpearl/api/commands/RenderPass;)V"))

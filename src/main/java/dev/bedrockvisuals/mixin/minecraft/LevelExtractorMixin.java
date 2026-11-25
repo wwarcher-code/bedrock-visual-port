@@ -23,6 +23,14 @@ abstract class LevelExtractorMixin {
 		ChunkChanges.mark(chunkX, chunkZ);
 	}
 
+	/** The camera's own entity, which Minecraft leaves out in first person, for its shadow (FirstPersonShadow). */
+	@Inject(method = "extractVisibleEntities", at = @At("TAIL"))
+	private void bedrockvisuals$extractCameraEntity(net.minecraft.client.Camera camera,
+			net.minecraft.client.renderer.culling.Frustum frustum, net.minecraft.client.DeltaTracker delta,
+			net.minecraft.client.renderer.state.level.LevelRenderState levelState, CallbackInfo ci) {
+		dev.bedrockvisuals.render.FirstPersonShadow.extract(camera, delta);
+	}
+
 	@Inject(method = "blockChanged", at = @At("HEAD"))
 	private void bedrockvisuals$blockUpdated(BlockPos pos, int flags, CallbackInfo ci) {
 		WaterColumns.markDirty(pos.getX() >> 4, pos.getZ() >> 4);

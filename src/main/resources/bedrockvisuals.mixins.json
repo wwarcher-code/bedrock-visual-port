@@ -8,6 +8,7 @@
 		"minecraft.CloudRendererMixin",
 		"minecraft.CloudRendererPrepareMixin",
 		"minecraft.EntityRendererMixin",
+		"minecraft.FeatureRenderDispatcherAccessor",
 		"minecraft.GameRendererMixin",
 		"minecraft.LevelExtractorMixin",
 		"minecraft.LevelRendererMixin",
